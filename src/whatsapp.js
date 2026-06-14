@@ -111,22 +111,10 @@ async function readQuotedText(message) {
   }
 }
 
-async function loadRecentMessages(chat, limit) {
-  const messages = await chat.fetchMessages({ limit });
-  const ordered = [...messages].sort((a, b) => {
-    const ta = a.timestamp || 0;
-    const tb = b.timestamp || 0;
-    if (ta !== tb) return ta - tb;
-    return String(a.id?._serialized || '').localeCompare(String(b.id?._serialized || ''));
-  });
-  return ordered;
-}
-
 module.exports = {
   createWhatsAppClient,
   waitForReady,
   findGroupChat,
   messageToRecord,
-  readQuotedText,
-  loadRecentMessages
+  readQuotedText
 };

@@ -1,11 +1,6 @@
 const path = require('path');
 const fs = require('fs');
 
-function readInt(value, fallback) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
 function readBool(value, fallback) {
   if (value === undefined || value === null || value === '') return fallback;
   const normalized = String(value).trim().toLowerCase();
@@ -46,23 +41,22 @@ function loadDotEnvFile(envPath = path.resolve('.env')) {
   return parseDotEnv(fs.readFileSync(envPath, 'utf8'));
 }
 
-function loadConfig(env = process.env) {
+function loadConfig(env = process.env, options = {}) {
+  const { requireGroupName = true } = options;
   const fileEnv = loadDotEnvFile();
   const mergedEnv = { ...fileEnv, ...env };
   const groupName = (mergedEnv.GROUP_NAME || '').trim();
-  if (!groupName) {
+  if (requireGroupName && !groupName) {
     throw new Error('GROUP_NAME is required');
   }
 
   return {
     groupName,
     triggerText: (mergedEnv.TRIGGER_TEXT || 'תביא שיר').trim(),
-    historyMessages: readInt(mergedEnv.HISTORY_MESSAGES, 5000),
     stateFile: path.resolve(mergedEnv.STATE_FILE || 'state.json'),
     ollamaBaseUrl: (mergedEnv.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').trim().replace(/\/$/, ''),
     ollamaModel: (mergedEnv.OLLAMA_MODEL || 'qwen3:1.7b').trim(),
     executablePath: (mergedEnv.PUPPETEER_EXECUTABLE_PATH || mergedEnv.CHROME_PATH || '').trim(),
-    historyBatchSize: readInt(mergedEnv.HISTORY_BATCH_SIZE, 25),
     headless: readBool(mergedEnv.HEADLESS, true)
   };
 }

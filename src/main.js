@@ -1,26 +1,14 @@
 const { loadConfig } = require('./config');
 const { createStateStore, loadState, normalizeText } = require('./state');
 const { extractSongsViaOllama } = require('./llm');
+const { importChatFile } = require('./import');
 const {
   createWhatsAppClient,
   waitForReady,
   findGroupChat,
   messageToRecord,
   readQuotedText,
-  loadRecentMessages
 } = require('./whatsapp');
-
-function chunk(array, size) {
-  const result = [];
-  for (let index = 0; index < array.length; index += size) {
-    result.push(array.slice(index, index + size));
-  }
-  return result;
-}
-
-function getMessageId(message) {
-  return message.id?._serialized || message.id?.id || '';
-}
 
 async function extractAndStoreBatch({
   config,
@@ -35,12 +23,14 @@ async function extractAndStoreBatch({
 
   if (payload.length === 0) return [];
 
+  console.log(`[extract:${contextLabel}] analyzing ${payload.length} messages`);
   const results = await extractSongsViaOllama({
     baseUrl: config.ollamaBaseUrl,
     model: config.ollamaModel,
     messages: payload,
     triggerText: config.triggerText
   });
+  console.log(`[extract:${contextLabel}] llm returned ${results.length} candidates`);
 
   const added = [];
   for (const result of results) {
@@ -100,9 +90,28 @@ async function handleTriggerMessage({ chat, stateStore }) {
 }
 
 async function bootstrap() {
-  const config = loadConfig();
+  const args = process.argv.slice(2);
+  const importIndex = args.indexOf('--import');
+  const importFile = importIndex >= 0 ? args[importIndex + 1] : null;
+  const config = loadConfig(process.env, { requireGroupName: !importFile });
   const loadedState = await loadState(config.stateFile);
   const stateStore = createStateStore(config.stateFile, loadedState);
+
+  if (importFile) {
+    await importChatFile({
+      filePath: importFile,
+      config,
+      stateStore,
+      batchSize: 20
+    });
+    await stateStore.queueSave();
+    return;
+  }
+
+  if (!config.groupName) {
+    throw new Error('GROUP_NAME is required for live listening');
+  }
+
   const client = createWhatsAppClient({
     headless: config.headless,
     executablePath: config.executablePath
@@ -163,30 +172,11 @@ async function bootstrap() {
 
   console.log('[whatsapp] connected');
 
+  console.log('[whatsapp] locating target group');
   groupChat = await findGroupChat(client, config.groupName);
   console.log(`[whatsapp] watching group: ${groupChat.name}`);
 
-  const historyMessages = await loadRecentMessages(groupChat, config.historyMessages);
-  console.log(`[history] loaded ${historyMessages.length} messages`);
-
-  const historyRecords = [];
-  for (const message of historyMessages) {
-    const id = getMessageId(message);
-    if (!id || stateStore.hasSeenMessage(id)) continue;
-    const record = messageToRecord(message);
-    if (!record.text) continue;
-    historyRecords.push(record);
-  }
-
-  for (const batch of chunk(historyRecords, config.historyBatchSize)) {
-    await extractAndStoreBatch({
-      config,
-      stateStore,
-      batch,
-      contextLabel: 'history'
-    });
-  }
-
+  console.log('[bootstrap] saving state');
   stateStore.setBootstrapComplete();
   await stateStore.queueSave();
   readyToProcess = true;

@@ -8,6 +8,7 @@ Small WhatsApp song picker for a band group.
 - Extracts song suggestions from mixed Hebrew and English chat.
 - Saves extracted songs to `state.json`.
 - Replies to the trigger `תביא שיר` with the next unused song.
+- Supports one-time import from an exported WhatsApp chat `.txt` file.
 
 ## Config
 
@@ -19,7 +20,6 @@ Optional:
 
 - `.env` file in the project root is loaded automatically.
 - `TRIGGER_TEXT` - defaults to `תביא שיר`
-- `HISTORY_MESSAGES` - defaults to `5000`
 - `STATE_FILE` - defaults to `state.json`
 - `OLLAMA_BASE_URL` - defaults to `http://127.0.0.1:11434`
 - `OLLAMA_MODEL` - defaults to `qwen3:1.7b`
@@ -45,6 +45,16 @@ Notes:
 1. Install dependencies.
 2. Start Ollama locally.
 3. Set `GROUP_NAME`.
-4. Run `npm start`.
+4. Run `npm start` for live listening only.
+
+## Import
+
+To import a WhatsApp chat export:
+
+```bash
+node src/main.js --import /path/to/chat.txt
+```
+
+This reads the exported text file, extracts songs, writes them to `state.json`, and exits.
 
 On first login, the process will print a QR code in the terminal.
