@@ -15,7 +15,25 @@ function firstWord(value) {
 }
 
 function isTriggerMessage(text, triggerText) {
-  return firstWord(text) === normalizeText(triggerText);
+  const normalized = normalizeText(text);
+  const triggerAliases = new Set([
+    normalizeText(triggerText),
+    normalizeText('תביא שיר')
+  ]);
+
+  for (const trigger of triggerAliases) {
+    if (!trigger) continue;
+    if (normalized === trigger) return true;
+    if (normalized.startsWith(`${trigger} `)) return true;
+  }
+
+  return false;
+}
+
+function isQuoteImportCommand(text, triggerText) {
+  const normalized = normalizeText(text);
+  const trigger = normalizeText(triggerText);
+  return normalized === trigger || normalized.startsWith(`${trigger} `);
 }
 
 async function extractAndStoreBatch({
@@ -198,7 +216,7 @@ async function bootstrap() {
   async function handleLiveMessage(record) {
     const text = record.text || '';
     const triggerMatch = isTriggerMessage(text, config.triggerText);
-
+    const chat = record.chat || groupChat;
     if (triggerMatch) {
       if (groupChat && !record.chatId && record.fromMe) {
         record.chatId = groupChat.id._serialized;
@@ -207,7 +225,14 @@ async function bootstrap() {
         return;
       }
       console.log('[trigger] matched');
-      const chat = record.chat || groupChat;
+      if (isQuoteImportCommand(text, config.triggerText)) {
+        if (quotedTextShouldBeProcessed(record)) {
+          await handleTriggerMessage({ chat, stateStore, config, triggerRecord: record });
+        } else {
+          await chat.sendMessage('הוספתי 🤖');
+        }
+        return;
+      }
       await handleTriggerMessage({ chat, stateStore, config, triggerRecord: record });
       return;
     }
@@ -222,6 +247,10 @@ async function bootstrap() {
 
     liveMessages.push(record);
     scheduleLiveFlush();
+  }
+
+  function quotedTextShouldBeProcessed(record) {
+    return String(record?.quotedText || '').trim().length > 0;
   }
 
   async function flushLiveMessages() {
