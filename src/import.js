@@ -1,7 +1,7 @@
 const fs = require('fs/promises');
 const path = require('path');
 const { normalizeText } = require('./state');
-const { extractSongsViaOllama } = require('./llm');
+const { extractSongs } = require('./llm');
 
 function parseExportMessages(content) {
   const lines = String(content || '').split(/\r?\n/);
@@ -87,9 +87,12 @@ async function importChatFile({
   let addedCount = 0;
   for (const batch of batches) {
     console.log(`[import] analyzing batch of ${batch.length}`);
-    const results = await extractSongsViaOllama({
-      baseUrl: config.ollamaBaseUrl,
-      model: config.ollamaModel,
+    const results = await extractSongs({
+      provider: config.llmProvider,
+      ollamaBaseUrl: config.ollamaBaseUrl,
+      ollamaModel: config.ollamaModel,
+      geminiApiKey: config.geminiApiKey,
+      geminiModel: config.geminiModel,
       messages: batch,
       triggerText: config.triggerText
     });

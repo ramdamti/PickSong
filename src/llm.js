@@ -55,6 +55,23 @@ function buildPrompt(messages, triggerText) {
   ].join('\n');
 }
 
+function normalizeResults(parsed) {
+  const results = Array.isArray(parsed?.results) ? parsed.results : [];
+  return results
+    .filter((item) => item && typeof item === 'object')
+    .map((item) => ({
+      message_id: String(item.message_id || '').trim(),
+      is_song_suggestion: Boolean(item.is_song_suggestion),
+      song_title: item.song_title ? String(item.song_title).trim() : '',
+      artist: item.artist === null || item.artist === undefined ? null : String(item.artist).trim(),
+      language: item.language ? String(item.language).trim() : null,
+      confidence: Number.isFinite(Number(item.confidence)) ? Number(item.confidence) : 0,
+      needs_review: Boolean(item.needs_review),
+      source_text: item.source_text ? String(item.source_text).trim() : ''
+    }))
+    .filter((item) => item.is_song_suggestion && item.song_title);
+}
+
 async function extractSongsViaOllama({
   baseUrl,
   model,
@@ -97,20 +114,96 @@ async function extractSongsViaOllama({
     throw new Error(`Could not parse LLM JSON response: ${content}`);
   }
 
-  const results = Array.isArray(parsed.results) ? parsed.results : [];
-  return results
-    .filter((item) => item && typeof item === 'object')
-    .map((item) => ({
-      message_id: String(item.message_id || '').trim(),
-      is_song_suggestion: Boolean(item.is_song_suggestion),
-      song_title: item.song_title ? String(item.song_title).trim() : '',
-      artist: item.artist === null || item.artist === undefined ? null : String(item.artist).trim(),
-      language: item.language ? String(item.language).trim() : null,
-      confidence: Number.isFinite(Number(item.confidence)) ? Number(item.confidence) : 0,
-      needs_review: Boolean(item.needs_review),
-      source_text: item.source_text ? String(item.source_text).trim() : ''
-    }))
-    .filter((item) => item.is_song_suggestion && item.song_title);
+  return normalizeResults(parsed);
 }
 
-module.exports = { extractSongsViaOllama };
+async function extractSongsViaGemini({
+  apiKey,
+  model,
+  messages,
+  triggerText
+}) {
+  const endpoint = new URL(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`
+  );
+  endpoint.searchParams.set('key', apiKey);
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{ text: 'You are a strict JSON extraction engine.' }]
+      },
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: buildPrompt(messages, triggerText) }]
+        }
+      ],
+      generationConfig: {
+        temperature: 0,
+        responseMimeType: 'application/json'
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Gemini request failed: ${response.status} ${response.statusText} ${body}`);
+  }
+
+  const data = await response.json();
+  const content =
+    data?.candidates?.[0]?.content?.parts
+      ?.map((part) => part?.text || '')
+      .join('') || '';
+  const parsed = extractJsonBlock(content);
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error(`Could not parse Gemini JSON response: ${content}`);
+  }
+
+  return normalizeResults(parsed);
+}
+
+async function extractSongs({
+  provider,
+  messages,
+  triggerText,
+  ollamaBaseUrl,
+  ollamaModel,
+  geminiApiKey,
+  geminiModel
+}) {
+  const selectedProvider = (provider || '').trim().toLowerCase();
+  if (selectedProvider === 'gemini') {
+    if (!geminiApiKey) {
+      throw new Error('GEMINI_API_KEY is required when LLM_PROVIDER=gemini');
+    }
+    return extractSongsViaGemini({
+      apiKey: geminiApiKey,
+      model: geminiModel,
+      messages,
+      triggerText
+    });
+  }
+
+  if (selectedProvider === 'ollama' || !selectedProvider) {
+    return extractSongsViaOllama({
+      baseUrl: ollamaBaseUrl,
+      model: ollamaModel,
+      messages,
+      triggerText
+    });
+  }
+
+  throw new Error(`Unsupported LLM_PROVIDER value: ${provider}`);
+}
+
+module.exports = {
+  extractSongs,
+  extractSongsViaOllama,
+  extractSongsViaGemini
+};

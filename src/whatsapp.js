@@ -93,11 +93,19 @@ async function findGroupChat(client, groupName) {
 }
 
 function messageToRecord(message) {
+  const chatId =
+    (message.fromMe ? message.to : null) ||
+    message._data?.to ||
+    message.id?.remote ||
+    message.from ||
+    '';
+
   return {
     id: message.id?._serialized || message.id?.id || '',
     text: String(message.body || '').trim(),
     sender: message._data?.notifyName || message.author || message.from || '',
     from: message.from || '',
+    chatId,
     timestamp: message.timestamp || null
   };
 }

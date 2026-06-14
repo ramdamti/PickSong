@@ -50,13 +50,19 @@ function loadConfig(env = process.env, options = {}) {
     throw new Error('GROUP_NAME is required');
   }
 
+  const llmProvider = (mergedEnv.LLM_PROVIDER || '').trim().toLowerCase();
+  const geminiApiKey = (mergedEnv.GEMINI_API_KEY || '').trim();
+
   return {
     groupName,
     triggerText: (mergedEnv.TRIGGER_TEXT || 'תוסיף').trim(),
     stateFile: path.resolve(mergedEnv.STATE_FILE || 'state.json'),
     authDir: path.resolve(mergedEnv.AUTH_DIR || '.wwebjs_auth'),
+    llmProvider: llmProvider || (geminiApiKey ? 'gemini' : 'ollama'),
     ollamaBaseUrl: (mergedEnv.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').trim().replace(/\/$/, ''),
     ollamaModel: (mergedEnv.OLLAMA_MODEL || 'qwen3:1.7b').trim(),
+    geminiApiKey,
+    geminiModel: (mergedEnv.GEMINI_MODEL || 'gemini-2.0-flash-lite').trim(),
     executablePath: (mergedEnv.PUPPETEER_EXECUTABLE_PATH || mergedEnv.CHROME_PATH || '').trim(),
     headless: readBool(mergedEnv.HEADLESS, true)
   };

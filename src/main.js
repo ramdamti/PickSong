@@ -1,6 +1,6 @@
 const { loadConfig } = require('./config');
 const { createStateStore, loadState, normalizeText } = require('./state');
-const { extractSongsViaOllama } = require('./llm');
+const { extractSongs } = require('./llm');
 const { importChatFile } = require('./import');
 const {
   createWhatsAppClient,
@@ -9,6 +9,14 @@ const {
   messageToRecord,
   readQuotedText,
 } = require('./whatsapp');
+
+function firstWord(value) {
+  return normalizeText(value).split(' ')[0] || '';
+}
+
+function isTriggerMessage(text, triggerText) {
+  return firstWord(text) === normalizeText(triggerText);
+}
 
 async function extractAndStoreBatch({
   config,
@@ -24,9 +32,12 @@ async function extractAndStoreBatch({
   if (payload.length === 0) return [];
 
   console.log(`[extract:${contextLabel}] analyzing ${payload.length} messages`);
-  const results = await extractSongsViaOllama({
-    baseUrl: config.ollamaBaseUrl,
-    model: config.ollamaModel,
+  const results = await extractSongs({
+    provider: config.llmProvider,
+    ollamaBaseUrl: config.ollamaBaseUrl,
+    ollamaModel: config.ollamaModel,
+    geminiApiKey: config.geminiApiKey,
+    geminiModel: config.geminiModel,
     messages: payload,
     triggerText: config.triggerText
   });
@@ -117,6 +128,9 @@ async function bootstrap() {
   });
 
   const pendingMessages = [];
+  const liveMessages = [];
+  let liveFlushTimer = null;
+  let liveFlushInProgress = false;
   let readyToProcess = false;
   let groupChat = null;
   const startupTimeoutMs = 120000;
@@ -131,6 +145,74 @@ async function bootstrap() {
     return true;
   }
 
+  function clearLiveFlushTimer() {
+    if (liveFlushTimer) {
+      clearTimeout(liveFlushTimer);
+      liveFlushTimer = null;
+    }
+  }
+
+  async function handleLiveMessage(record) {
+    const text = record.text || '';
+    const triggerMatch = isTriggerMessage(text, config.triggerText);
+
+    if (triggerMatch) {
+      if (groupChat && !record.chatId && record.fromMe) {
+        record.chatId = groupChat.id._serialized;
+      }
+      if (!groupChat || record.chatId !== groupChat.id._serialized) {
+        return;
+      }
+      console.log('[trigger] matched');
+      const chat = record.chat || groupChat;
+      await handleTriggerMessage({ chat, stateStore });
+      return;
+    }
+
+    if (!groupChat) return;
+    if (!record.chatId && record.fromMe) {
+      record.chatId = groupChat.id._serialized;
+    }
+    if (record.chatId !== groupChat.id._serialized) {
+      return;
+    }
+
+    liveMessages.push(record);
+    scheduleLiveFlush();
+  }
+
+  async function flushLiveMessages() {
+    if (!readyToProcess || liveFlushInProgress || liveMessages.length === 0) return;
+    liveFlushInProgress = true;
+    const batch = liveMessages.splice(0, liveMessages.length);
+    try {
+      if (groupChat) {
+        const groupBatch = batch.filter((message) => message.chatId === groupChat.id._serialized);
+        if (groupBatch.length > 0) {
+          await extractAndStoreBatch({
+            config,
+            stateStore,
+            batch: groupBatch,
+            contextLabel: 'live'
+          });
+        }
+      }
+    } finally {
+      liveFlushInProgress = false;
+    }
+  }
+
+  function scheduleLiveFlush() {
+    if (liveFlushTimer) return;
+    liveFlushTimer = setTimeout(async () => {
+      liveFlushTimer = null;
+      await flushLiveMessages();
+      if (liveMessages.length > 0) {
+        scheduleLiveFlush();
+      }
+    }, 3000);
+  }
+
   const handleIncomingMessage = async (message) => {
     try {
       const messageId = message.id?._serialized || message.id?.id || '';
@@ -141,50 +223,31 @@ async function bootstrap() {
 
       const record = messageToRecord(message);
       record.quotedText = await readQuotedText(message);
+
       let chatId = record.chatId;
+      if (!chatId && typeof message.getChat === 'function') {
+        try {
+          const chat = await message.getChat();
+          if (chat?.id?._serialized) {
+            record.chatId = chat.id._serialized;
+            chatId = record.chatId;
+            record.chat = chat;
+          }
+        } catch (error) {
+          // Ignore chat lookup failures here; we'll still keep the message record.
+        }
+      }
 
       console.log(
         `[message] fromMe=${Boolean(message.fromMe)} chatId=${chatId} from=${record.from} text=${JSON.stringify(text)}`
       );
-
-      if (!chatId && typeof message.getChat === 'function') {
-        const chat = await message.getChat();
-        if (chat?.id?._serialized) {
-          record.chatId = chat.id._serialized;
-          chatId = record.chatId;
-        }
-      }
-
-      const firstWord = normalizeText(text).split(' ')[0] || '';
-      const isTrigger = firstWord === normalizeText(config.triggerText);
-      if (isTrigger) {
-        if (message.fromMe || (groupChat && chatId === groupChat.id._serialized)) {
-          if (!readyToProcess) {
-            return;
-          }
-
-          if (!groupChat) return;
-
-          console.log('[trigger] matched');
-          await handleTriggerMessage({ chat: groupChat, stateStore });
-          return;
-        }
-      }
 
       if (!readyToProcess) {
         pendingMessages.push(record);
         return;
       }
 
-      if (!groupChat) return;
-      if (chatId !== groupChat.id._serialized) return;
-
-      await extractAndStoreBatch({
-        config,
-        stateStore,
-        batch: [record],
-        contextLabel: 'live'
-      });
+      await handleLiveMessage(record);
     } catch (error) {
       console.error('[message] failed:', error);
     }
@@ -219,16 +282,11 @@ async function bootstrap() {
 
   if (pendingMessages.length > 0) {
     for (const message of pendingMessages.splice(0, pendingMessages.length)) {
-      if (message.chatId !== groupChat.id._serialized) continue;
-      if ((normalizeText(message.text).split(' ')[0] || '') === normalizeText(config.triggerText)) continue;
-      await extractAndStoreBatch({
-        config,
-        stateStore,
-        batch: [message],
-        contextLabel: 'pending-live'
-      });
+      await handleLiveMessage(message);
     }
   }
+
+  await flushLiveMessages();
 
   console.log('[whatsapp] watcher is live');
 }
