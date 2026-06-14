@@ -147,7 +147,22 @@ async function bootstrap() {
         `[message] fromMe=${Boolean(message.fromMe)} chatId=${chatId} from=${record.from} text=${JSON.stringify(text)}`
       );
 
-      if (message.fromMe && normalizeText(text) !== normalizeText(config.triggerText)) return;
+      const isTrigger = normalizeText(text) === normalizeText(config.triggerText);
+      if (isTrigger) {
+        if (message.fromMe || (groupChat && chatId === groupChat.id._serialized)) {
+          if (!readyToProcess) {
+            return;
+          }
+
+          if (!groupChat) return;
+
+          console.log('[trigger] matched');
+          await handleTriggerMessage({ chat: groupChat, stateStore });
+          return;
+        }
+      }
+
+      if (message.fromMe) return;
 
       if (!readyToProcess) {
         pendingMessages.push(record);
@@ -156,12 +171,6 @@ async function bootstrap() {
 
       if (!groupChat) return;
       if (chatId !== groupChat.id._serialized) return;
-
-      if (normalizeText(text) === normalizeText(config.triggerText)) {
-        console.log('[trigger] matched');
-        await handleTriggerMessage({ chat: groupChat, stateStore });
-        return;
-      }
 
       await extractAndStoreBatch({
         config,
