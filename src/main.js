@@ -111,6 +111,7 @@ async function bootstrap() {
   const pendingMessages = [];
   let readyToProcess = false;
   let groupChat = null;
+  const startupTimeoutMs = 120000;
 
   client.on('message', async (message) => {
     try {
@@ -149,7 +150,17 @@ async function bootstrap() {
   console.log('[whatsapp] starting client');
   const readyPromise = waitForReady(client);
   client.initialize();
-  await readyPromise;
+  console.log('[whatsapp] initialize called');
+
+  await Promise.race([
+    readyPromise,
+    new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`WhatsApp startup timed out after ${startupTimeoutMs}ms`));
+      }, startupTimeoutMs);
+    })
+  ]);
+
   console.log('[whatsapp] connected');
 
   groupChat = await findGroupChat(client, config.groupName);

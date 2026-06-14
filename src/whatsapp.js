@@ -29,6 +29,18 @@ function createWhatsAppClient({ headless, executablePath }) {
     console.error('[whatsapp] auth failure:', message);
   });
 
+  client.on('authenticated', () => {
+    console.log('[whatsapp] authenticated');
+  });
+
+  client.on('loading_screen', (percent, message) => {
+    console.log(`[whatsapp] loading screen ${percent}%: ${message}`);
+  });
+
+  client.on('change_state', (state) => {
+    console.log(`[whatsapp] state: ${state}`);
+  });
+
   client.on('disconnected', (reason) => {
     console.error('[whatsapp] disconnected:', reason);
   });
