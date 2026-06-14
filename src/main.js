@@ -14,26 +14,29 @@ function firstWord(value) {
   return normalizeText(value).split(' ')[0] || '';
 }
 
-function isTriggerMessage(text, triggerText) {
+const ADD_COMMAND = 'תוסיף';
+const RANDOM_COMMAND = 'תביא שיר';
+
+function isRandomSongCommand(text) {
   const normalized = normalizeText(text);
-  const triggerAliases = new Set([
-    normalizeText(triggerText),
-    normalizeText('תביא שיר')
-  ]);
-
-  for (const trigger of triggerAliases) {
-    if (!trigger) continue;
-    if (normalized === trigger) return true;
-    if (normalized.startsWith(`${trigger} `)) return true;
-  }
-
-  return false;
+  const trigger = normalizeText(RANDOM_COMMAND);
+  return normalized === trigger || normalized.startsWith(`${trigger} `);
 }
 
-function isQuoteImportCommand(text, triggerText) {
+function isAddSongCommand(text) {
   const normalized = normalizeText(text);
-  const trigger = normalizeText(triggerText);
+  const trigger = normalizeText(ADD_COMMAND);
   return normalized === trigger || normalized.startsWith(`${trigger} `);
+}
+
+function stripCommandPrefix(text, command) {
+  const normalized = normalizeText(text);
+  const trigger = normalizeText(command);
+  if (!normalized.startsWith(trigger)) return String(text || '').trim();
+  return String(text || '')
+    .trim()
+    .replace(new RegExp(`^${command}\\s*`, 'u'), '')
+    .trim();
 }
 
 async function extractAndStoreBatch({
@@ -57,7 +60,7 @@ async function extractAndStoreBatch({
     geminiApiKey: config.geminiApiKey,
     geminiModel: config.geminiModel,
     messages: payload,
-    triggerText: config.triggerText
+    triggerText: ADD_COMMAND
   });
   console.log(`[extract:${contextLabel}] llm returned ${results.length} candidates`);
 
@@ -102,56 +105,7 @@ async function extractAndStoreBatch({
   return added;
 }
 
-async function handleTriggerMessage({ chat, stateStore, config, triggerRecord }) {
-  const quotedText = String(triggerRecord?.quotedText || '').trim();
-  if (quotedText) {
-    const baseId = String(triggerRecord?.id || `quoted:${Date.now()}`).trim();
-    const results = await extractSongs({
-      provider: config.llmProvider,
-      ollamaBaseUrl: config.ollamaBaseUrl,
-      ollamaModel: config.ollamaModel,
-      geminiApiKey: config.geminiApiKey,
-      geminiModel: config.geminiModel,
-      messages: [
-        {
-          id: `${baseId}:quoted`,
-          text: quotedText,
-          sender: triggerRecord?.sender || '',
-          from: triggerRecord?.from || '',
-          quotedText: null,
-          timestamp: triggerRecord?.timestamp || null
-        }
-      ],
-      triggerText: config.triggerText
-    });
-
-    let addedCount = 0;
-    results.forEach((result, index) => {
-      const song = {
-        message_id: `${baseId}:quoted:${index}`,
-        source_text: result.source_text || quotedText,
-        song_title: result.song_title,
-        artist: result.artist ?? null,
-        language: result.language ?? null,
-        confidence: result.confidence ?? 0,
-        used: false,
-        created_at: new Date().toISOString(),
-        normalized_title: normalizeText(result.song_title),
-        normalized_artist: normalizeText(result.artist || '')
-      };
-
-      if (stateStore.addSong(song)) {
-        addedCount += 1;
-      }
-    });
-
-    if (addedCount > 0) {
-      await stateStore.queueSave();
-      await chat.sendMessage('הוספתי 🤖');
-      return;
-    }
-  }
-
+async function sendRandomSong({ chat, stateStore }) {
   const nextSong = stateStore.getNextUnusedSong();
   if (!nextSong) {
     await chat.sendMessage('הוספתי 🤖');
@@ -163,6 +117,65 @@ async function handleTriggerMessage({ chat, stateStore, config, triggerRecord })
   const reply = `הבאתי: 🤖 ${replyParts.join(' - ')}`;
 
   await chat.sendMessage(reply);
+}
+
+async function handleAddSongCommand({ chat, stateStore, config, triggerRecord }) {
+  const baseId = String(triggerRecord?.id || `add:${Date.now()}`).trim();
+  const quotedText = String(triggerRecord?.quotedText || '').trim();
+  const inlineText = stripCommandPrefix(triggerRecord?.text || '', ADD_COMMAND);
+  const sourceText = quotedText || inlineText;
+
+  if (!sourceText) {
+    await chat.sendMessage('השיר קיים 🤖');
+    return;
+  }
+
+  const results = await extractSongs({
+    provider: config.llmProvider,
+    ollamaBaseUrl: config.ollamaBaseUrl,
+    ollamaModel: config.ollamaModel,
+    geminiApiKey: config.geminiApiKey,
+    geminiModel: config.geminiModel,
+    messages: [
+      {
+        id: `${baseId}:add`,
+        text: sourceText,
+        sender: triggerRecord?.sender || '',
+        from: triggerRecord?.from || '',
+        quotedText: null,
+        timestamp: triggerRecord?.timestamp || null
+      }
+    ],
+    triggerText: ADD_COMMAND
+  });
+
+  let addedCount = 0;
+  for (const [index, result] of results.entries()) {
+    const song = {
+      message_id: `${baseId}:add:${index}`,
+      source_text: result.source_text || sourceText,
+      song_title: result.song_title,
+      artist: result.artist ?? null,
+      language: result.language ?? null,
+      confidence: result.confidence ?? 0,
+      used: false,
+      created_at: new Date().toISOString(),
+      normalized_title: normalizeText(result.song_title),
+      normalized_artist: normalizeText(result.artist || '')
+    };
+
+    if (stateStore.addSong(song)) {
+      addedCount += 1;
+    }
+  }
+
+  if (addedCount > 0) {
+    await stateStore.queueSave();
+    await chat.sendMessage('הוספתי 🤖');
+    return;
+  }
+
+  await chat.sendMessage('השיר קיים 🤖');
 }
 
 async function bootstrap() {
@@ -215,25 +228,28 @@ async function bootstrap() {
 
   async function handleLiveMessage(record) {
     const text = record.text || '';
-    const triggerMatch = isTriggerMessage(text, config.triggerText);
     const chat = record.chat || groupChat;
-    if (triggerMatch) {
+    if (isRandomSongCommand(text)) {
       if (groupChat && !record.chatId && record.fromMe) {
         record.chatId = groupChat.id._serialized;
       }
       if (!groupChat || record.chatId !== groupChat.id._serialized) {
         return;
       }
-      console.log('[trigger] matched');
-      if (isQuoteImportCommand(text, config.triggerText)) {
-        if (quotedTextShouldBeProcessed(record)) {
-          await handleTriggerMessage({ chat, stateStore, config, triggerRecord: record });
-        } else {
-          await chat.sendMessage('הוספתי 🤖');
-        }
+      console.log('[trigger] random song');
+      await sendRandomSong({ chat, stateStore });
+      return;
+    }
+
+    if (isAddSongCommand(text)) {
+      if (groupChat && !record.chatId && record.fromMe) {
+        record.chatId = groupChat.id._serialized;
+      }
+      if (!groupChat || record.chatId !== groupChat.id._serialized) {
         return;
       }
-      await handleTriggerMessage({ chat, stateStore, config, triggerRecord: record });
+      console.log('[trigger] add song');
+      await handleAddSongCommand({ chat, stateStore, config, triggerRecord: record });
       return;
     }
 
@@ -247,10 +263,6 @@ async function bootstrap() {
 
     liveMessages.push(record);
     scheduleLiveFlush();
-  }
-
-  function quotedTextShouldBeProcessed(record) {
-    return String(record?.quotedText || '').trim().length > 0;
   }
 
   async function flushLiveMessages() {
