@@ -71,6 +71,32 @@ function createStateStore(filePath, initialState) {
   let state = normalizeState(initialState);
   let saveChain = Promise.resolve();
 
+  function getRandomSongCandidate() {
+    if (state.songs.length === 0) return null;
+
+    const weights = state.songs.map((song) => {
+      const confidence = Number.isFinite(Number(song.confidence)) ? Number(song.confidence) : 0.5;
+      const baseWeight = Math.min(Math.max(confidence, 0.05), 1);
+      const artistBonus = song.artist ? 0.05 : 0;
+      return baseWeight + artistBonus;
+    });
+
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+    if (totalWeight <= 0) {
+      return state.songs[Math.floor(Math.random() * state.songs.length)] || null;
+    }
+
+    let cursor = Math.random() * totalWeight;
+    for (let index = 0; index < state.songs.length; index += 1) {
+      cursor -= weights[index];
+      if (cursor <= 0) {
+        return state.songs[index];
+      }
+    }
+
+    return state.songs[state.songs.length - 1] || null;
+  }
+
   function snapshot() {
     return {
       songs: state.songs.map((song) => ({ ...song })),
@@ -124,7 +150,7 @@ function createStateStore(filePath, initialState) {
   }
 
   function getNextUnusedSong() {
-    return state.songs[0] || null;
+    return getRandomSongCandidate();
   }
 
   function markSongUsed(messageId) {
