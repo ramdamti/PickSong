@@ -124,13 +124,17 @@ async function bootstrap() {
 
   client.on('message', async (message) => {
     try {
-      if (message.fromMe) return;
-
       const text = String(message.body || '').trim();
       if (!text) return;
 
       const record = messageToRecord(message);
       record.quotedText = await readQuotedText(message);
+
+      console.log(
+        `[message] fromMe=${Boolean(message.fromMe)} from=${record.from} text=${JSON.stringify(text)}`
+      );
+
+      if (message.fromMe && text !== config.triggerText) return;
 
       if (!readyToProcess) {
         pendingMessages.push(record);
