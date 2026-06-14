@@ -141,9 +141,12 @@ async function bootstrap() {
 
       const record = messageToRecord(message);
       record.quotedText = await readQuotedText(message);
+      const chat = typeof message.getChat === 'function' ? await message.getChat() : null;
+      const chatId = chat?.id?._serialized || record.chatId;
+      record.chatId = chatId;
 
       console.log(
-        `[message] fromMe=${Boolean(message.fromMe)} chatId=${record.chatId} from=${record.from} text=${JSON.stringify(text)}`
+        `[message] fromMe=${Boolean(message.fromMe)} chatId=${chatId} from=${record.from} text=${JSON.stringify(text)}`
       );
 
       if (message.fromMe && normalizeText(text) !== normalizeText(config.triggerText)) return;
@@ -154,7 +157,7 @@ async function bootstrap() {
       }
 
       if (!groupChat) return;
-      if (record.chatId !== groupChat.id._serialized) return;
+      if (chatId !== groupChat.id._serialized) return;
 
       if (normalizeText(text) === normalizeText(config.triggerText)) {
         console.log('[trigger] matched');
