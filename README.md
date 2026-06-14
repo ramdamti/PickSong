@@ -7,7 +7,7 @@ Small WhatsApp song picker for a band group.
 - Watches one WhatsApp group in headless mode.
 - Extracts song suggestions from mixed Hebrew and English chat.
 - Saves extracted songs to `state.json`.
-- Replies to the trigger `תביא שיר` with the next unused song.
+- Replies to the trigger `תוסיף` with the next unused song.
 - Supports one-time import from an exported WhatsApp chat `.txt` file.
 
 ## Config
@@ -19,7 +19,7 @@ Required:
 Optional:
 
 - `.env` file in the project root is loaded automatically.
-- `TRIGGER_TEXT` - defaults to `תביא שיר`
+- `TRIGGER_TEXT` - defaults to `תוסיף`
 - `STATE_FILE` - defaults to `state.json`
 - `AUTH_DIR` - defaults to `.wwebjs_auth`
 - `OLLAMA_BASE_URL` - defaults to `http://127.0.0.1:11434`
@@ -32,7 +32,7 @@ The deploy workflow lives in [.github/workflows/deploy.yml](C:/Projects/PickSong
 
 Required repository secrets:
 
-- `RESTART_CMD` - optional, for example `pm2 restart picksong`
+- `RESTART_CMD` - optional, for example `systemctl restart picksong`
 
 Notes:
 

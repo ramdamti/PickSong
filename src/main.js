@@ -76,13 +76,13 @@ async function extractAndStoreBatch({
 async function handleTriggerMessage({ chat, stateStore }) {
   const nextSong = stateStore.getNextUnusedSong();
   if (!nextSong) {
-    await chat.sendMessage('אין עדיין שיר מתאים');
+    await chat.sendMessage('הוספתי 🤖');
     return;
   }
 
   const replyParts = [nextSong.song_title];
   if (nextSong.artist) replyParts.push(nextSong.artist);
-  const reply = `הבאתי: ${replyParts.join(' - ')}`;
+  const reply = `הבאתי: 🤖 ${replyParts.join(' - ')}`;
 
   await chat.sendMessage(reply);
 }
@@ -141,13 +141,22 @@ async function bootstrap() {
 
       const record = messageToRecord(message);
       record.quotedText = await readQuotedText(message);
-      const chatId = record.chatId;
+      let chatId = record.chatId;
 
       console.log(
         `[message] fromMe=${Boolean(message.fromMe)} chatId=${chatId} from=${record.from} text=${JSON.stringify(text)}`
       );
 
-      const isTrigger = normalizeText(text) === normalizeText(config.triggerText);
+      if (!chatId && typeof message.getChat === 'function') {
+        const chat = await message.getChat();
+        if (chat?.id?._serialized) {
+          record.chatId = chat.id._serialized;
+          chatId = record.chatId;
+        }
+      }
+
+      const firstWord = normalizeText(text).split(' ')[0] || '';
+      const isTrigger = firstWord === normalizeText(config.triggerText);
       if (isTrigger) {
         if (message.fromMe || (groupChat && chatId === groupChat.id._serialized)) {
           if (!readyToProcess) {
@@ -161,8 +170,6 @@ async function bootstrap() {
           return;
         }
       }
-
-      if (message.fromMe) return;
 
       if (!readyToProcess) {
         pendingMessages.push(record);
@@ -213,7 +220,7 @@ async function bootstrap() {
   if (pendingMessages.length > 0) {
     for (const message of pendingMessages.splice(0, pendingMessages.length)) {
       if (message.chatId !== groupChat.id._serialized) continue;
-      if (message.text === config.triggerText) continue;
+      if ((normalizeText(message.text).split(' ')[0] || '') === normalizeText(config.triggerText)) continue;
       await extractAndStoreBatch({
         config,
         stateStore,

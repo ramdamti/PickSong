@@ -52,7 +52,7 @@ function loadConfig(env = process.env, options = {}) {
 
   return {
     groupName,
-    triggerText: (mergedEnv.TRIGGER_TEXT || 'תביא שיר').trim(),
+    triggerText: (mergedEnv.TRIGGER_TEXT || 'תוסיף').trim(),
     stateFile: path.resolve(mergedEnv.STATE_FILE || 'state.json'),
     authDir: path.resolve(mergedEnv.AUTH_DIR || '.wwebjs_auth'),
     ollamaBaseUrl: (mergedEnv.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').trim().replace(/\/$/, ''),
