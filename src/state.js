@@ -124,13 +124,12 @@ function createStateStore(filePath, initialState) {
   }
 
   function getNextUnusedSong() {
-    return state.songs.find((song) => !song.used) || null;
+    return state.songs[0] || null;
   }
 
   function markSongUsed(messageId) {
     const song = state.songs.find((item) => item.message_id === messageId);
-    if (!song || song.used) return false;
-    song.used = true;
+    if (!song) return false;
     return true;
   }
 

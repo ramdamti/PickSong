@@ -85,8 +85,6 @@ async function handleTriggerMessage({ chat, stateStore }) {
   const reply = `הבאתי: ${replyParts.join(' - ')}`;
 
   await chat.sendMessage(reply);
-  stateStore.markSongUsed(nextSong.message_id);
-  await stateStore.queueSave();
 }
 
 async function bootstrap() {
@@ -145,7 +143,7 @@ async function bootstrap() {
       record.quotedText = await readQuotedText(message);
 
       console.log(
-        `[message] fromMe=${Boolean(message.fromMe)} from=${record.from} text=${JSON.stringify(text)}`
+        `[message] fromMe=${Boolean(message.fromMe)} chatId=${record.chatId} from=${record.from} text=${JSON.stringify(text)}`
       );
 
       if (message.fromMe && normalizeText(text) !== normalizeText(config.triggerText)) return;
@@ -156,9 +154,10 @@ async function bootstrap() {
       }
 
       if (!groupChat) return;
-      if (record.from !== groupChat.id._serialized) return;
+      if (record.chatId !== groupChat.id._serialized) return;
 
       if (normalizeText(text) === normalizeText(config.triggerText)) {
+        console.log('[trigger] matched');
         await handleTriggerMessage({ chat: groupChat, stateStore });
         return;
       }
@@ -204,7 +203,7 @@ async function bootstrap() {
 
   if (pendingMessages.length > 0) {
     for (const message of pendingMessages.splice(0, pendingMessages.length)) {
-      if (message.from !== groupChat.id._serialized) continue;
+      if (message.chatId !== groupChat.id._serialized) continue;
       if (message.text === config.triggerText) continue;
       await extractAndStoreBatch({
         config,
