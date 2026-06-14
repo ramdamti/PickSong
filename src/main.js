@@ -84,7 +84,56 @@ async function extractAndStoreBatch({
   return added;
 }
 
-async function handleTriggerMessage({ chat, stateStore }) {
+async function handleTriggerMessage({ chat, stateStore, config, triggerRecord }) {
+  const quotedText = String(triggerRecord?.quotedText || '').trim();
+  if (quotedText) {
+    const baseId = String(triggerRecord?.id || `quoted:${Date.now()}`).trim();
+    const results = await extractSongs({
+      provider: config.llmProvider,
+      ollamaBaseUrl: config.ollamaBaseUrl,
+      ollamaModel: config.ollamaModel,
+      geminiApiKey: config.geminiApiKey,
+      geminiModel: config.geminiModel,
+      messages: [
+        {
+          id: `${baseId}:quoted`,
+          text: quotedText,
+          sender: triggerRecord?.sender || '',
+          from: triggerRecord?.from || '',
+          quotedText: null,
+          timestamp: triggerRecord?.timestamp || null
+        }
+      ],
+      triggerText: config.triggerText
+    });
+
+    let addedCount = 0;
+    results.forEach((result, index) => {
+      const song = {
+        message_id: `${baseId}:quoted:${index}`,
+        source_text: result.source_text || quotedText,
+        song_title: result.song_title,
+        artist: result.artist ?? null,
+        language: result.language ?? null,
+        confidence: result.confidence ?? 0,
+        used: false,
+        created_at: new Date().toISOString(),
+        normalized_title: normalizeText(result.song_title),
+        normalized_artist: normalizeText(result.artist || '')
+      };
+
+      if (stateStore.addSong(song)) {
+        addedCount += 1;
+      }
+    });
+
+    if (addedCount > 0) {
+      await stateStore.queueSave();
+      await chat.sendMessage('הוספתי 🤖');
+      return;
+    }
+  }
+
   const nextSong = stateStore.getNextUnusedSong();
   if (!nextSong) {
     await chat.sendMessage('הוספתי 🤖');
@@ -145,13 +194,6 @@ async function bootstrap() {
     return true;
   }
 
-  function clearLiveFlushTimer() {
-    if (liveFlushTimer) {
-      clearTimeout(liveFlushTimer);
-      liveFlushTimer = null;
-    }
-  }
-
   async function handleLiveMessage(record) {
     const text = record.text || '';
     const triggerMatch = isTriggerMessage(text, config.triggerText);
@@ -165,7 +207,7 @@ async function bootstrap() {
       }
       console.log('[trigger] matched');
       const chat = record.chat || groupChat;
-      await handleTriggerMessage({ chat, stateStore });
+      await handleTriggerMessage({ chat, stateStore, config, triggerRecord: record });
       return;
     }
 
