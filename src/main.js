@@ -182,7 +182,8 @@ async function bootstrap() {
   let liveFlushInProgress = false;
   let readyToProcess = false;
   let groupChat = null;
-  const startupTimeoutMs = 120000;
+  let startupFinished = false;
+  const startupTimeoutMs = 300000;
   const processedMessageIds = new Set();
 
   function markProcessed(messageId) {
@@ -255,6 +256,41 @@ async function bootstrap() {
     }, 3000);
   }
 
+  async function finalizeStartup() {
+    if (startupFinished) return;
+    if (!groupChat) return;
+
+    startupFinished = true;
+
+    console.log('[bootstrap] saving state');
+    stateStore.setBootstrapComplete();
+    await stateStore.queueSave();
+    readyToProcess = true;
+
+    if (pendingMessages.length > 0) {
+      for (const message of pendingMessages.splice(0, pendingMessages.length)) {
+        await handleLiveMessage(message);
+      }
+    }
+
+    await flushLiveMessages();
+
+    console.log('[whatsapp] watcher is live');
+  }
+
+  async function onReady() {
+    try {
+      console.log('[whatsapp] ready');
+      console.log('[whatsapp] locating target group');
+      groupChat = await findGroupChat(client, config.groupName);
+      console.log(`[whatsapp] watching group: ${groupChat.name}`);
+      await finalizeStartup();
+    } catch (error) {
+      console.error('[fatal]', error);
+      process.exit(1);
+    }
+  }
+
   const handleIncomingMessage = async (message) => {
     try {
       const messageId = message.id?._serialized || message.id?.id || '';
@@ -299,38 +335,26 @@ async function bootstrap() {
 
   console.log('[whatsapp] starting client');
   const readyPromise = waitForReady(client);
+  readyPromise.then(onReady).catch((error) => {
+    console.error('[fatal]', error);
+    process.exit(1);
+  });
   client.initialize();
   console.log('[whatsapp] initialize called');
+  console.log('[whatsapp] waiting for ready');
 
   await Promise.race([
     readyPromise,
-    new Promise((_, reject) => {
+    new Promise((resolve) => {
       setTimeout(() => {
-        reject(new Error(`WhatsApp startup timed out after ${startupTimeoutMs}ms`));
+        resolve('timeout');
       }, startupTimeoutMs);
     })
-  ]);
-
-  console.log('[whatsapp] connected');
-
-  console.log('[whatsapp] locating target group');
-  groupChat = await findGroupChat(client, config.groupName);
-  console.log(`[whatsapp] watching group: ${groupChat.name}`);
-
-  console.log('[bootstrap] saving state');
-  stateStore.setBootstrapComplete();
-  await stateStore.queueSave();
-  readyToProcess = true;
-
-  if (pendingMessages.length > 0) {
-    for (const message of pendingMessages.splice(0, pendingMessages.length)) {
-      await handleLiveMessage(message);
+  ]).then((result) => {
+    if (result === 'timeout') {
+      console.warn(`[whatsapp] ready is taking longer than ${startupTimeoutMs}ms; keeping service alive`);
     }
-  }
-
-  await flushLiveMessages();
-
-  console.log('[whatsapp] watcher is live');
+  });
 }
 
 bootstrap().catch((error) => {
