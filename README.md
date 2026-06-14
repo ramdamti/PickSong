@@ -23,6 +23,7 @@ Optional:
 - `STATE_FILE` - defaults to `state.json`
 - `OLLAMA_BASE_URL` - defaults to `http://127.0.0.1:11434`
 - `OLLAMA_MODEL` - defaults to `qwen3:1.7b`
+- `PUPPETEER_EXECUTABLE_PATH` - optional, use this to point to system Chromium
 
 ## GitHub Actions Deploy
 

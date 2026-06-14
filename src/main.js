@@ -103,7 +103,10 @@ async function bootstrap() {
   const config = loadConfig();
   const loadedState = await loadState(config.stateFile);
   const stateStore = createStateStore(config.stateFile, loadedState);
-  const client = createWhatsAppClient({ headless: config.headless });
+  const client = createWhatsAppClient({
+    headless: config.headless,
+    executablePath: config.executablePath
+  });
 
   const pendingMessages = [];
   let readyToProcess = false;

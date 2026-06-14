@@ -61,6 +61,7 @@ function loadConfig(env = process.env) {
     stateFile: path.resolve(mergedEnv.STATE_FILE || 'state.json'),
     ollamaBaseUrl: (mergedEnv.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').trim().replace(/\/$/, ''),
     ollamaModel: (mergedEnv.OLLAMA_MODEL || 'qwen3:1.7b').trim(),
+    executablePath: (mergedEnv.PUPPETEER_EXECUTABLE_PATH || mergedEnv.CHROME_PATH || '').trim(),
     historyBatchSize: readInt(mergedEnv.HISTORY_BATCH_SIZE, 25),
     headless: readBool(mergedEnv.HEADLESS, true)
   };
