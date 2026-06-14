@@ -30,17 +30,16 @@ The deploy workflow lives in [.github/workflows/deploy.yml](C:/Projects/PickSong
 
 Required repository secrets:
 
-- `SSH_HOST`
-- `SSH_USER`
-- `SSH_KEY`
 - `DEPLOY_PATH`
 - `RESTART_CMD` - optional, for example `pm2 restart picksong`
 
 Notes:
 
-- The workflow pushes the repo to the Oracle VM over SSH.
-- It installs production dependencies on the server with `npm install --omit=dev`.
+- The workflow runs on a self-hosted GitHub Actions runner on the Oracle VM.
+- It syncs the repo into `DEPLOY_PATH` on the same machine.
+- It installs production dependencies locally with `npm install --omit=dev`.
 - It runs `RESTART_CMD` only if the secret is set.
+- `RESTART_CMD` should be a simple local command such as `systemctl restart picksong` or `pm2 restart picksong`.
 
 ## Run
 
