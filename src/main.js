@@ -141,9 +141,7 @@ async function bootstrap() {
 
       const record = messageToRecord(message);
       record.quotedText = await readQuotedText(message);
-      const chat = typeof message.getChat === 'function' ? await message.getChat() : null;
-      const chatId = chat?.id?._serialized || record.chatId;
-      record.chatId = chatId;
+      const chatId = record.chatId;
 
       console.log(
         `[message] fromMe=${Boolean(message.fromMe)} chatId=${chatId} from=${record.from} text=${JSON.stringify(text)}`
@@ -176,7 +174,6 @@ async function bootstrap() {
     }
   };
 
-  client.on('message', handleIncomingMessage);
   client.on('message_create', handleIncomingMessage);
 
   console.log('[whatsapp] starting client');
