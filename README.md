@@ -21,6 +21,7 @@ Optional:
 - `.env` file in the project root is loaded automatically.
 - `TRIGGER_TEXT` - defaults to `תביא שיר`
 - `STATE_FILE` - defaults to `state.json`
+- `AUTH_DIR` - defaults to `.wwebjs_auth`
 - `OLLAMA_BASE_URL` - defaults to `http://127.0.0.1:11434`
 - `OLLAMA_MODEL` - defaults to `qwen3:1.7b`
 - `PUPPETEER_EXECUTABLE_PATH` - optional, use this to point to system Chromium
@@ -39,6 +40,11 @@ Notes:
 - It installs production dependencies locally with `npm install --omit=dev`.
 - It runs `RESTART_CMD` only if the secret is set.
 - `RESTART_CMD` should be a simple local command such as `systemctl restart picksong` or `pm2 restart picksong`.
+
+Important:
+
+- Set `STATE_FILE` and `AUTH_DIR` to paths outside the GitHub Actions workspace if you do not want deploys to wipe them.
+- A good choice is something like `/home/ubuntu/picksong-data/state.json` and `/home/ubuntu/picksong-data/wwebjs`.
 
 ## Run
 

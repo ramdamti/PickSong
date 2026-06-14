@@ -54,6 +54,7 @@ function loadConfig(env = process.env, options = {}) {
     groupName,
     triggerText: (mergedEnv.TRIGGER_TEXT || 'תביא שיר').trim(),
     stateFile: path.resolve(mergedEnv.STATE_FILE || 'state.json'),
+    authDir: path.resolve(mergedEnv.AUTH_DIR || '.wwebjs_auth'),
     ollamaBaseUrl: (mergedEnv.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').trim().replace(/\/$/, ''),
     ollamaModel: (mergedEnv.OLLAMA_MODEL || 'qwen3:1.7b').trim(),
     executablePath: (mergedEnv.PUPPETEER_EXECUTABLE_PATH || mergedEnv.CHROME_PATH || '').trim(),

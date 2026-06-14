@@ -8,10 +8,11 @@ function normalizeName(value) {
     .replace(/\s+/g, ' ');
 }
 
-function createWhatsAppClient({ headless, executablePath }) {
+function createWhatsAppClient({ headless, executablePath, authDir }) {
   const client = new Client({
     authStrategy: new LocalAuth({
-      clientId: 'picksong'
+      clientId: 'picksong',
+      dataPath: authDir || undefined
     }),
     puppeteer: {
       headless,

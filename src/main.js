@@ -114,16 +114,30 @@ async function bootstrap() {
 
   const client = createWhatsAppClient({
     headless: config.headless,
-    executablePath: config.executablePath
+    executablePath: config.executablePath,
+    authDir: config.authDir
   });
 
   const pendingMessages = [];
   let readyToProcess = false;
   let groupChat = null;
   const startupTimeoutMs = 120000;
+  const processedMessageIds = new Set();
 
-  client.on('message', async (message) => {
+  function markProcessed(messageId) {
+    if (!messageId || processedMessageIds.has(messageId)) return false;
+    processedMessageIds.add(messageId);
+    if (processedMessageIds.size > 5000) {
+      processedMessageIds.clear();
+    }
+    return true;
+  }
+
+  const handleIncomingMessage = async (message) => {
     try {
+      const messageId = message.id?._serialized || message.id?.id || '';
+      if (!markProcessed(messageId)) return;
+
       const text = String(message.body || '').trim();
       if (!text) return;
 
@@ -134,7 +148,7 @@ async function bootstrap() {
         `[message] fromMe=${Boolean(message.fromMe)} from=${record.from} text=${JSON.stringify(text)}`
       );
 
-      if (message.fromMe && text !== config.triggerText) return;
+      if (message.fromMe && normalizeText(text) !== normalizeText(config.triggerText)) return;
 
       if (!readyToProcess) {
         pendingMessages.push(record);
@@ -144,7 +158,7 @@ async function bootstrap() {
       if (!groupChat) return;
       if (record.from !== groupChat.id._serialized) return;
 
-      if (text === config.triggerText) {
+      if (normalizeText(text) === normalizeText(config.triggerText)) {
         await handleTriggerMessage({ chat: groupChat, stateStore });
         return;
       }
@@ -158,7 +172,10 @@ async function bootstrap() {
     } catch (error) {
       console.error('[message] failed:', error);
     }
-  });
+  };
+
+  client.on('message', handleIncomingMessage);
+  client.on('message_create', handleIncomingMessage);
 
   console.log('[whatsapp] starting client');
   const readyPromise = waitForReady(client);
