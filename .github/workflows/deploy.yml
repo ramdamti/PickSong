@@ -1,0 +1,61 @@
+name: Deploy PickSong
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-picksong
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate JS syntax
+        run: |
+          node --check src/config.js
+          node --check src/state.js
+          node --check src/llm.js
+          node --check src/whatsapp.js
+          node --check src/main.js
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Sync files to server
+        run: |
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'node_modules' \
+            --exclude '.wwebjs_auth' \
+            --exclude '.wwebjs_cache' \
+            --exclude 'state.json' \
+            --exclude '.env' \
+            ./ "${SSH_USER}@${SSH_HOST}:${DEPLOY_PATH}/"
+
+      - name: Install deps and restart service
+        env:
+          RESTART_CMD: ${{ secrets.RESTART_CMD }}
+        run: |
+          remote_cmd="cd '${DEPLOY_PATH}' && npm install --omit=dev"
+          if [ -n "$RESTART_CMD" ]; then
+            remote_cmd="$remote_cmd && $RESTART_CMD"
+          fi
+          ssh "${SSH_USER}@${SSH_HOST}" "$remote_cmd"
