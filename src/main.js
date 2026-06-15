@@ -139,18 +139,7 @@ function parseSongRequest(text) {
 function matchesLanguage(song, language) {
   if (!language) return true;
   const storedLanguage = String(song?.language || '').toLowerCase();
-  const title = String(song?.song_title || '');
-  const artist = String(song?.artist || '');
-  const inferredEnglish = /[A-Za-z]/.test(title) || /[A-Za-z]/.test(artist);
-  const inferredHebrew = /[\u0590-\u05FF]/.test(title) || /[\u0590-\u05FF]/.test(artist);
-  const inferredLanguage = inferredEnglish && inferredHebrew
-    ? 'mixed'
-    : inferredEnglish
-      ? 'en'
-      : inferredHebrew
-        ? 'he'
-        : '';
-  const lang = storedLanguage || inferredLanguage;
+  const lang = storedLanguage;
   if (language === 'he') {
     return lang === 'he' || lang === 'heb' || lang === 'hebrew';
   }
@@ -202,7 +191,10 @@ function pickSongsForRequest(stateStore, requestItems) {
 }
 
 function formatSongLine(song) {
-  return song.song_title;
+  const title = String(song?.song_title || '').trim();
+  const artist = String(song?.artist || '').trim();
+  if (title && artist) return `${title} - ${artist}`;
+  return title || artist || '';
 }
 
 function formatRtlLine(index, song) {
