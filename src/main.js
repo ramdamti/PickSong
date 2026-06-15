@@ -38,6 +38,8 @@ const HEBREW_NUMBER_WORDS = new Map([
   ['עשרה', 10]
 ]);
 
+const DEFAULT_REQUEST_COUNT = 5;
+
 function firstWord(value) {
   return normalizeText(value).split(' ')[0] || '';
 }
@@ -123,7 +125,7 @@ function parseSongRequest(text) {
         break;
       }
     }
-    if (!count) count = 1;
+    if (!count) count = DEFAULT_REQUEST_COUNT;
 
     const language = detectLanguageFilter(segment);
     items.push({ count, language });
