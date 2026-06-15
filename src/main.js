@@ -40,6 +40,7 @@ const HEBREW_NUMBER_WORDS = new Map([
 
 const DEFAULT_REQUEST_COUNT = 5;
 const SONG_REQUEST_COMMANDS = new Set([normalizeText('תביא'), normalizeText('תן')]);
+const MAX_REQUEST_COUNT = 15;
 
 function firstWord(value) {
   return normalizeText(value).split(' ')[0] || '';
@@ -99,6 +100,11 @@ function detectLanguageFilter(text) {
   return null;
 }
 
+function capRequestCount(count) {
+  const numeric = Number.isInteger(count) && count > 0 ? count : DEFAULT_REQUEST_COUNT;
+  return Math.min(numeric, MAX_REQUEST_COUNT);
+}
+
 function parseSongRequest(text) {
   const normalized = normalizeText(text);
   const command = firstWord(normalized);
@@ -111,7 +117,7 @@ function parseSongRequest(text) {
 
   const segments = remainder
     .replace(/^שירים?\s+/u, '')
-    .split(/\s+ו\s+/u)
+    .split(/\s+ו(?=\s*(?:\d|\p{L}))/u)
     .map((segment) => segment.trim())
     .filter(Boolean);
 
@@ -126,7 +132,7 @@ function parseSongRequest(text) {
         break;
       }
     }
-    if (!count) count = DEFAULT_REQUEST_COUNT;
+    count = capRequestCount(count);
 
     const language = detectLanguageFilter(segment);
     items.push({ count, language });
@@ -191,6 +197,16 @@ function pickSongsForRequest(stateStore, requestItems) {
   }
 
   return selected;
+}
+
+function buildMixedLanguageRequest(count) {
+  const cappedCount = capRequestCount(count);
+  const heCount = Math.ceil(cappedCount / 2);
+  const enCount = Math.floor(cappedCount / 2);
+  return [
+    { count: heCount, language: 'he' },
+    { count: enCount, language: 'en' }
+  ];
 }
 
 function formatSongLine(song) {
@@ -287,6 +303,10 @@ async function sendSongRequest({ chat, stateStore, text }) {
   if (request.items.length === 1 && request.items[0].count === 1 && !request.items[0].language) {
     await sendRandomSong({ chat, stateStore });
     return true;
+  }
+
+  if (request.items.length === 1 && request.items[0].language === 'mixed') {
+    request.items = buildMixedLanguageRequest(request.items[0].count);
   }
 
   const picked = pickSongsForRequest(stateStore, request.items);
