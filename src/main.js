@@ -81,7 +81,7 @@ function detectLanguageFilter(text) {
   if (normalized.includes('עברית') || normalized.includes('בעברית') || normalized.includes('בערית') || normalized.includes('ישראלי') || normalized.includes('ישראלית') || normalized.includes('ישראלים')) {
     return 'he';
   }
-  if (normalized.includes('אנגלית') || normalized.includes('באנגלית') || normalized.includes('אנגלי') || normalized.includes('אנגליות')) {
+  if (normalized.includes('אנגלית') || normalized.includes('באנגלית') || normalized.includes('באגלית') || normalized.includes('אנגלי') || normalized.includes('אנגליות')) {
     return 'en';
   }
   if (
