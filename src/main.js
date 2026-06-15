@@ -78,10 +78,10 @@ function detectLanguageFilter(text) {
   const normalized = normalizeText(text);
   if (!normalized) return null;
 
-  if (normalized.includes('עברית') || normalized.includes('ישראלי') || normalized.includes('ישראלית') || normalized.includes('ישראלים')) {
+  if (normalized.includes('עברית') || normalized.includes('בעברית') || normalized.includes('בערית') || normalized.includes('ישראלי') || normalized.includes('ישראלית') || normalized.includes('ישראלים')) {
     return 'he';
   }
-  if (normalized.includes('אנגלית') || normalized.includes('אנגלי') || normalized.includes('אנגליות')) {
+  if (normalized.includes('אנגלית') || normalized.includes('באנגלית') || normalized.includes('אנגלי') || normalized.includes('אנגליות')) {
     return 'en';
   }
   if (
