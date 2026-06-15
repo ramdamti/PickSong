@@ -10,17 +10,40 @@ const {
   readQuotedText,
 } = require('./whatsapp');
 
+const ADD_COMMAND = 'תוסיף';
+const RANDOM_COMMAND = 'תביא שיר';
+
+const HEBREW_NUMBER_WORDS = new Map([
+  ['אחת', 1],
+  ['אחד', 1],
+  ['שניים', 2],
+  ['שתי', 2],
+  ['שתיים', 2],
+  ['שנים', 2],
+  ['שני', 2],
+  ['שלוש', 3],
+  ['שלושה', 3],
+  ['ארבע', 4],
+  ['ארבעה', 4],
+  ['חמש', 5],
+  ['חמישה', 5],
+  ['שש', 6],
+  ['שישה', 6],
+  ['שבע', 7],
+  ['שבעה', 7],
+  ['שמונה', 8],
+  ['תשע', 9],
+  ['תשעה', 9],
+  ['עשר', 10],
+  ['עשרה', 10]
+]);
+
 function firstWord(value) {
   return normalizeText(value).split(' ')[0] || '';
 }
 
-const ADD_COMMAND = 'תוסיף';
-const RANDOM_COMMAND = 'תביא שיר';
-
 function isRandomSongCommand(text) {
-  const normalized = normalizeText(text);
-  const trigger = normalizeText(RANDOM_COMMAND);
-  return normalized === trigger || normalized.startsWith(`${trigger} `);
+  return firstWord(text) === normalizeText('תביא');
 }
 
 function isAddSongCommand(text) {
@@ -35,6 +58,143 @@ function stripCommandPrefix(text, command) {
     .trim()
     .replace(new RegExp(`^${command}\\s*`, 'u'), '')
     .trim();
+}
+
+function isMessageInTargetGroup(record, groupChat) {
+  if (!groupChat) return false;
+  const resolvedChatId = record?.chat?.id?._serialized || record?.chatId || '';
+  return resolvedChatId === groupChat.id._serialized;
+}
+
+function parseCountToken(token) {
+  const normalized = normalizeText(token);
+  if (!normalized) return null;
+  const numeric = Number.parseInt(normalized, 10);
+  if (Number.isInteger(numeric) && numeric > 0) return numeric;
+  return HEBREW_NUMBER_WORDS.get(normalized) || null;
+}
+
+function detectLanguageFilter(text) {
+  const normalized = normalizeText(text);
+  if (!normalized) return null;
+
+  if (normalized.includes('עברית') || normalized.includes('ישראלי') || normalized.includes('ישראלית') || normalized.includes('ישראלים')) {
+    return 'he';
+  }
+  if (normalized.includes('אנגלית') || normalized.includes('אנגלי') || normalized.includes('אנגליות')) {
+    return 'en';
+  }
+  if (
+    normalized.includes('מעורב') ||
+    normalized.includes('מעורבב') ||
+    normalized.includes('גם וגם') ||
+    normalized.includes('משולב') ||
+    normalized.includes('שילוב')
+  ) {
+    return 'mixed';
+  }
+  return null;
+}
+
+function parseSongRequest(text) {
+  const normalized = normalizeText(text);
+  const command = normalizeText('תביא');
+  if (!normalized.startsWith(command)) return null;
+
+  const remainder = normalized.replace(new RegExp(`^${command}\\s*`, 'u'), '').trim();
+  if (!remainder || remainder === 'שיר' || remainder === 'שירים') {
+    return { items: [{ count: 1, language: null }] };
+  }
+
+  const segments = remainder
+    .replace(/^שירים?\s+/u, '')
+    .split(/\s+ו\s+/u)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  const items = [];
+  for (const segment of segments) {
+    const tokens = segment.split(/\s+/u);
+    let count = null;
+    for (const token of tokens) {
+      const parsed = parseCountToken(token);
+      if (parsed) {
+        count = parsed;
+        break;
+      }
+    }
+    if (!count) count = 1;
+
+    const language = detectLanguageFilter(segment);
+    items.push({ count, language });
+  }
+
+  if (items.length === 0) {
+    return { items: [{ count: 1, language: null }] };
+  }
+
+  return { items };
+}
+
+function matchesLanguage(song, language) {
+  if (!language) return true;
+  const lang = String(song?.language || '').toLowerCase();
+  if (language === 'he') {
+    return lang === 'he' || lang === 'heb' || lang === 'hebrew' || lang === 'mixed' || !lang;
+  }
+  if (language === 'en') {
+    return lang === 'en' || lang === 'eng' || lang === 'english' || lang === 'mixed';
+  }
+  if (language === 'mixed') {
+    return true;
+  }
+  return true;
+}
+
+function pickRandomSong(stateStore, predicate, usedKeys) {
+  const songs = (stateStore.state.songs || []).filter(
+    (song) => !usedKeys.has(song.message_id) && (!predicate || predicate(song))
+  );
+  if (songs.length === 0) return null;
+  const choice = songs[Math.floor(Math.random() * songs.length)];
+  if (!choice) return null;
+  usedKeys.add(choice.message_id);
+  return choice;
+}
+
+function pickSongsForRequest(stateStore, requestItems) {
+  const selected = [];
+  const usedKeys = new Set();
+  const songs = stateStore.state.songs || [];
+
+  for (const item of requestItems) {
+    for (let index = 0; index < item.count; index += 1) {
+      let choice = null;
+
+      if (item.language === 'mixed') {
+        const preferredLanguage = index % 2 === 0 ? 'he' : 'en';
+        choice =
+          pickRandomSong(stateStore, (song) => matchesLanguage(song, preferredLanguage), usedKeys) ||
+          pickRandomSong(stateStore, (song) => matchesLanguage(song, preferredLanguage === 'he' ? 'en' : 'he'), usedKeys) ||
+          pickRandomSong(stateStore, null, usedKeys);
+      } else {
+        choice = pickRandomSong(stateStore, (song) => matchesLanguage(song, item.language), usedKeys);
+      }
+
+      if (!choice) break;
+      selected.push(choice);
+    }
+  }
+
+  return selected;
+}
+
+function formatSongLine(song) {
+  return song.song_title;
+}
+
+function formatRtlLine(index, song) {
+  return `\u200F${index + 1}. ${formatSongLine(song)}`;
 }
 
 async function extractAndStoreBatch({
@@ -106,15 +266,34 @@ async function extractAndStoreBatch({
 async function sendRandomSong({ chat, stateStore }) {
   const nextSong = stateStore.getNextUnusedSong();
   if (!nextSong) {
-    await chat.sendMessage('🤖 הוספתי');
+    await chat.sendMessage('אין עדיין שירים 🤖');
     return;
   }
 
-  const replyParts = [nextSong.song_title];
-  if (nextSong.artist) replyParts.push(nextSong.artist);
-  const reply = `🤖 הבאתי: ${replyParts.join(' - ')}`;
+  await chat.sendMessage(`🤖 הבאתי: ${formatSongLine(nextSong)}`);
+}
 
-  await chat.sendMessage(reply);
+async function sendSongRequest({ chat, stateStore, text }) {
+  const request = parseSongRequest(text);
+  if (!request) return false;
+
+  if (request.items.length === 1 && request.items[0].count === 1 && !request.items[0].language) {
+    await sendRandomSong({ chat, stateStore });
+    return true;
+  }
+
+  const picked = pickSongsForRequest(stateStore, request.items);
+  if (picked.length === 0) {
+    await chat.sendMessage('אין עדיין שירים 🤖');
+    return true;
+  }
+
+  const reply = ['🤖 הבאתי:'];
+  picked.forEach((song, index) => {
+    reply.push(formatRtlLine(index, song));
+  });
+  await chat.sendMessage(reply.join('\n'));
+  return true;
 }
 
 async function handleAddSongCommand({ chat, stateStore, config, triggerRecord }) {
@@ -124,7 +303,7 @@ async function handleAddSongCommand({ chat, stateStore, config, triggerRecord })
   const sourceText = quotedText || inlineText;
 
   if (!sourceText) {
-    await chat.sendMessage('🤖 השיר קיים');
+    await chat.sendMessage('🤖 השיר קיים כבר');
     return;
   }
 
@@ -169,11 +348,11 @@ async function handleAddSongCommand({ chat, stateStore, config, triggerRecord })
 
   if (addedCount > 0) {
     await stateStore.queueSave();
-    await chat.sendMessage('הוספתי 🤖');
+    await chat.sendMessage('🤖 הוספתי');
     return;
   }
 
-  await chat.sendMessage('השיר קיים 🤖');
+  await chat.sendMessage('🤖 השיר קיים כבר');
 }
 
 async function bootstrap() {
@@ -206,9 +385,6 @@ async function bootstrap() {
   });
 
   const pendingMessages = [];
-  const liveMessages = [];
-  let liveFlushTimer = null;
-  let liveFlushInProgress = false;
   let readyToProcess = false;
   let groupChat = null;
   let startupFinished = false;
@@ -227,16 +403,13 @@ async function bootstrap() {
   async function handleLiveMessage(record) {
     const text = record.text || '';
     const chat = record.chat || groupChat;
-    const resolvedChatId = chat?.id?._serialized || record.chatId || '';
-    const isGroupMessage = Boolean(chat?.isGroup) || resolvedChatId === groupChat?.id?._serialized;
-
-    if (!groupChat || !isGroupMessage || resolvedChatId !== groupChat.id._serialized) {
+    if (!isMessageInTargetGroup(record, groupChat)) {
       return;
     }
 
     if (isRandomSongCommand(text)) {
       console.log('[trigger] random song');
-      await sendRandomSong({ chat, stateStore });
+      await sendSongRequest({ chat, stateStore, text });
       return;
     }
 
@@ -247,44 +420,11 @@ async function bootstrap() {
     }
   }
 
-  async function flushLiveMessages() {
-    if (!readyToProcess || liveFlushInProgress || liveMessages.length === 0) return;
-    liveFlushInProgress = true;
-    const batch = liveMessages.splice(0, liveMessages.length);
-    try {
-      if (groupChat) {
-        const groupBatch = batch.filter((message) => message.chatId === groupChat.id._serialized);
-        if (groupBatch.length > 0) {
-          await extractAndStoreBatch({
-            config,
-            stateStore,
-            batch: groupBatch,
-            contextLabel: 'live'
-          });
-        }
-      }
-    } finally {
-      liveFlushInProgress = false;
-    }
-  }
-
-  function scheduleLiveFlush() {
-    if (liveFlushTimer) return;
-    liveFlushTimer = setTimeout(async () => {
-      liveFlushTimer = null;
-      await flushLiveMessages();
-      if (liveMessages.length > 0) {
-        scheduleLiveFlush();
-      }
-    }, 3000);
-  }
-
   async function finalizeStartup() {
     if (startupFinished) return;
     if (!groupChat) return;
 
     startupFinished = true;
-
     console.log('[bootstrap] saving state');
     stateStore.setBootstrapComplete();
     await stateStore.queueSave();
@@ -295,8 +435,6 @@ async function bootstrap() {
         await handleLiveMessage(message);
       }
     }
-
-    await flushLiveMessages();
 
     console.log('[whatsapp] watcher is live');
   }
@@ -337,6 +475,13 @@ async function bootstrap() {
         } catch (error) {
           // Ignore chat lookup failures here; we'll still keep the message record.
         }
+      }
+
+      if (record.chat && record.chat.isGroup === false) {
+        return;
+      }
+      if (!record.chat && chatId && !String(chatId).endsWith('@g.us')) {
+        return;
       }
 
       console.log(
