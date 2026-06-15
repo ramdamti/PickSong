@@ -229,11 +229,9 @@ async function bootstrap() {
   async function handleLiveMessage(record) {
     const text = record.text || '';
     const chat = record.chat || groupChat;
+    const resolvedChatId = record.chatId || chat?.id?._serialized || '';
     if (isRandomSongCommand(text)) {
-      if (groupChat && !record.chatId && record.fromMe) {
-        record.chatId = groupChat.id._serialized;
-      }
-      if (!groupChat || record.chatId !== groupChat.id._serialized) {
+      if (!groupChat || resolvedChatId !== groupChat.id._serialized) {
         return;
       }
       console.log('[trigger] random song');
@@ -242,10 +240,7 @@ async function bootstrap() {
     }
 
     if (isAddSongCommand(text)) {
-      if (groupChat && !record.chatId && record.fromMe) {
-        record.chatId = groupChat.id._serialized;
-      }
-      if (!groupChat || record.chatId !== groupChat.id._serialized) {
+      if (!groupChat || resolvedChatId !== groupChat.id._serialized) {
         return;
       }
       console.log('[trigger] add song');
@@ -254,10 +249,7 @@ async function bootstrap() {
     }
 
     if (!groupChat) return;
-    if (!record.chatId && record.fromMe) {
-      record.chatId = groupChat.id._serialized;
-    }
-    if (record.chatId !== groupChat.id._serialized) {
+    if (resolvedChatId !== groupChat.id._serialized) {
       return;
     }
 
