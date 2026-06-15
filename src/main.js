@@ -491,13 +491,13 @@ async function bootstrap() {
       record.quotedText = await readQuotedText(message);
 
       let chatId = record.chatId;
-      if (!chatId && typeof message.getChat === 'function') {
+      if (typeof message.getChat === 'function') {
         try {
           const chat = await message.getChat();
           if (chat?.id?._serialized) {
+            record.chat = chat;
             record.chatId = chat.id._serialized;
             chatId = record.chatId;
-            record.chat = chat;
           }
         } catch (error) {
           // Ignore chat lookup failures here; we'll still keep the message record.
