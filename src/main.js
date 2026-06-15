@@ -227,32 +227,24 @@ async function bootstrap() {
   async function handleLiveMessage(record) {
     const text = record.text || '';
     const chat = record.chat || groupChat;
-    const resolvedChatId = record.chatId || chat?.id?._serialized || '';
+    const resolvedChatId = chat?.id?._serialized || record.chatId || '';
+    const isGroupMessage = Boolean(chat?.isGroup) || resolvedChatId === groupChat?.id?._serialized;
+
+    if (!groupChat || !isGroupMessage || resolvedChatId !== groupChat.id._serialized) {
+      return;
+    }
+
     if (isRandomSongCommand(text)) {
-      if (!groupChat || resolvedChatId !== groupChat.id._serialized) {
-        return;
-      }
       console.log('[trigger] random song');
       await sendRandomSong({ chat, stateStore });
       return;
     }
 
     if (isAddSongCommand(text)) {
-      if (!groupChat || resolvedChatId !== groupChat.id._serialized) {
-        return;
-      }
       console.log('[trigger] add song');
       await handleAddSongCommand({ chat, stateStore, config, triggerRecord: record });
       return;
     }
-
-    if (!groupChat) return;
-    if (resolvedChatId !== groupChat.id._serialized) {
-      return;
-    }
-
-    liveMessages.push(record);
-    scheduleLiveFlush();
   }
 
   async function flushLiveMessages() {
