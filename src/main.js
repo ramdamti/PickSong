@@ -138,12 +138,24 @@ function parseSongRequest(text) {
 
 function matchesLanguage(song, language) {
   if (!language) return true;
-  const lang = String(song?.language || '').toLowerCase();
+  const storedLanguage = String(song?.language || '').toLowerCase();
+  const title = String(song?.song_title || '');
+  const artist = String(song?.artist || '');
+  const inferredEnglish = /[A-Za-z]/.test(title) || /[A-Za-z]/.test(artist);
+  const inferredHebrew = /[\u0590-\u05FF]/.test(title) || /[\u0590-\u05FF]/.test(artist);
+  const inferredLanguage = inferredEnglish && inferredHebrew
+    ? 'mixed'
+    : inferredEnglish
+      ? 'en'
+      : inferredHebrew
+        ? 'he'
+        : '';
+  const lang = storedLanguage || inferredLanguage;
   if (language === 'he') {
-    return lang === 'he' || lang === 'heb' || lang === 'hebrew' || lang === 'mixed' || !lang;
+    return lang === 'he' || lang === 'heb' || lang === 'hebrew';
   }
   if (language === 'en') {
-    return lang === 'en' || lang === 'eng' || lang === 'english' || lang === 'mixed';
+    return lang === 'en' || lang === 'eng' || lang === 'english';
   }
   if (language === 'mixed') {
     return true;
