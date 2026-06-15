@@ -24,9 +24,7 @@ function isRandomSongCommand(text) {
 }
 
 function isAddSongCommand(text) {
-  const normalized = normalizeText(text);
-  const trigger = normalizeText(ADD_COMMAND);
-  return normalized === trigger || normalized.startsWith(`${trigger} `);
+  return firstWord(text) === normalizeText(ADD_COMMAND);
 }
 
 function stripCommandPrefix(text, command) {
@@ -108,13 +106,13 @@ async function extractAndStoreBatch({
 async function sendRandomSong({ chat, stateStore }) {
   const nextSong = stateStore.getNextUnusedSong();
   if (!nextSong) {
-    await chat.sendMessage('הוספתי 🤖');
+    await chat.sendMessage('🤖 הוספתי');
     return;
   }
 
   const replyParts = [nextSong.song_title];
   if (nextSong.artist) replyParts.push(nextSong.artist);
-  const reply = `הבאתי: 🤖 ${replyParts.join(' - ')}`;
+  const reply = `🤖 הבאתי: ${replyParts.join(' - ')}`;
 
   await chat.sendMessage(reply);
 }
@@ -126,7 +124,7 @@ async function handleAddSongCommand({ chat, stateStore, config, triggerRecord })
   const sourceText = quotedText || inlineText;
 
   if (!sourceText) {
-    await chat.sendMessage('השיר קיים 🤖');
+    await chat.sendMessage('🤖 השיר קיים');
     return;
   }
 
@@ -365,6 +363,7 @@ async function bootstrap() {
   };
 
   client.on('message_create', handleIncomingMessage);
+  client.on('message', handleIncomingMessage);
 
   console.log('[whatsapp] starting client');
   const readyPromise = waitForReady(client);
