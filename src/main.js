@@ -39,13 +39,14 @@ const HEBREW_NUMBER_WORDS = new Map([
 ]);
 
 const DEFAULT_REQUEST_COUNT = 5;
+const SONG_REQUEST_COMMANDS = new Set([normalizeText('תביא'), normalizeText('תן')]);
 
 function firstWord(value) {
   return normalizeText(value).split(' ')[0] || '';
 }
 
 function isRandomSongCommand(text) {
-  return firstWord(text) === normalizeText('תביא');
+  return SONG_REQUEST_COMMANDS.has(firstWord(text));
 }
 
 function isAddSongCommand(text) {
@@ -100,8 +101,8 @@ function detectLanguageFilter(text) {
 
 function parseSongRequest(text) {
   const normalized = normalizeText(text);
-  const command = normalizeText('תביא');
-  if (!normalized.startsWith(command)) return null;
+  const command = firstWord(normalized);
+  if (!SONG_REQUEST_COMMANDS.has(command)) return null;
 
   const remainder = normalized.replace(new RegExp(`^${command}\\s*`, 'u'), '').trim();
   if (!remainder || remainder === 'שיר' || remainder === 'שירים') {
