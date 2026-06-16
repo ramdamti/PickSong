@@ -49,7 +49,9 @@ function isRandomSongCommand(text) {
 }
 
 function isAddSongCommand(text) {
-  return firstWord(text) === normalizeText(ADD_COMMAND);
+  const normalized = normalizeText(text);
+  const trigger = normalizeText(ADD_COMMAND);
+  return normalized === trigger || normalized.startsWith(`${trigger} `);
 }
 
 function stripCommandPrefix(text, command) {
