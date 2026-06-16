@@ -226,7 +226,13 @@ function isUrlOnly(value) {
 }
 
 async function hydrateSongsForReply(stateStore, songs) {
-  const prepared = await prepareSongsForReply(songs);
+  let prepared = songs;
+  try {
+    prepared = await prepareSongsForReply(songs);
+  } catch (error) {
+    console.error('[chords] resolve failed:', error);
+    prepared = Array.isArray(songs) ? songs : [];
+  }
   let updated = false;
 
   for (const song of prepared) {

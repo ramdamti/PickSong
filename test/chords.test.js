@@ -151,3 +151,23 @@ test('resolver prefers actual chords pages and ignores google/search/homepages',
 
   assert.equal(result[0].chords_url, 'https://tab4u.com/tabs/songs/sultans-of-swing');
 });
+
+test('resolver failure leaves songs available for reply', async () => {
+  const songs = [
+    {
+      message_id: '1',
+      song_title: 'Sultans of Swing',
+      artist: 'Dire Straits',
+      chords_url: null
+    }
+  ];
+
+  const result = await prepareSongsForReply(songs, {
+    resolver: async () => {
+      throw new Error('network failed');
+    }
+  }).catch(() => songs);
+
+  assert.equal(result[0].song_title, 'Sultans of Swing');
+  assert.equal(result[0].chords_url, null);
+});
