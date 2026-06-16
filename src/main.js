@@ -534,16 +534,20 @@ async function bootstrap() {
         }
       }
 
-      console.log(
-        `[message] fromMe=${Boolean(message.fromMe)} chatId=${chatId} from=${record.from} text=${JSON.stringify(text)}`
-      );
-
       if (record.chat && record.chat.isGroup === false) {
         return;
       }
       if (!record.chat && chatId && !String(chatId).endsWith('@g.us')) {
         return;
       }
+
+      if (!isMessageInTargetGroup(record, config.groupName, record.chat)) {
+        return;
+      }
+
+      console.log(
+        `[message] fromMe=${Boolean(message.fromMe)} chatId=${chatId} from=${record.from} text=${JSON.stringify(text)}`
+      );
 
       if (!readyToProcess) {
         pendingMessages.push(record);
