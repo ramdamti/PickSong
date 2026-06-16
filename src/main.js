@@ -414,7 +414,7 @@ async function bootstrap() {
   function markProcessed(messageId) {
     if (!messageId || processedMessageIds.has(messageId)) return false;
     processedMessageIds.add(messageId);
-    if (processedMessageIds.size > 5000) {
+    if (processedMessageIds.size > 50) {
       processedMessageIds.clear();
     }
     return true;

@@ -1,6 +1,6 @@
 const fs = require('fs/promises');
 
-const MAX_SEEN_MESSAGE_IDS = 5000;
+const MAX_SEEN_MESSAGE_IDS = 50;
 
 function normalizeText(value) {
   return String(value || '')
