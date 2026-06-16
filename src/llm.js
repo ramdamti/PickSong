@@ -44,6 +44,7 @@ function buildPrompt(messages, triggerText) {
     'The chat can contain Hebrew, English, or both.',
     'Return JSON only. No markdown. No explanation.',
     'Preserve the original language and spelling of the song title.',
+    'Never use a URL as the song title. If the message is only a URL, return no results.',
     'A message is a song suggestion if it proposes a song for rehearsal, even indirectly.',
     'Ignore jokes, off-topic chat, and the trigger message itself.',
     'Output shape:',

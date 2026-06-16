@@ -219,6 +219,18 @@ function formatRtlLine(index, song) {
   return `\u200F${index + 1}. ${formatSongLine(song)}`;
 }
 
+function stripUrls(value) {
+  return String(value || '')
+    .replace(/https?:\/\/\S+/giu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isUrlOnly(value) {
+  const normalized = String(value || '').trim();
+  return /^https?:\/\/\S+$/iu.test(normalized);
+}
+
 async function extractAndStoreBatch({
   config,
   stateStore,
@@ -326,10 +338,15 @@ async function handleAddSongCommand({ chat, stateStore, config, triggerRecord })
   const baseId = String(triggerRecord?.id || `add:${Date.now()}`).trim();
   const quotedText = String(triggerRecord?.quotedText || '').trim();
   const inlineText = stripCommandPrefix(triggerRecord?.text || '', ADD_COMMAND);
-  const sourceText = quotedText || inlineText;
+  const sourceText = stripUrls(quotedText || inlineText);
 
   if (!sourceText) {
-    await chat.sendMessage('🤖 השיר קיים כבר');
+    await chat.sendMessage('🤖 צריך טקסט של השיר');
+    return;
+  }
+
+  if (isUrlOnly(quotedText || inlineText)) {
+    await chat.sendMessage('🤖 צריך טקסט של השיר, קישור לבד לא מספיק');
     return;
   }
 
