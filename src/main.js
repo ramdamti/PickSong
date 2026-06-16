@@ -599,7 +599,6 @@ async function bootstrap() {
   client.on('authenticated', () => {
     authenticated = true;
     startStartupPolling();
-    void tryFinalizeStartup('authenticated');
   });
 
   console.log('[whatsapp] starting client');
