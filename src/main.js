@@ -520,10 +520,6 @@ async function bootstrap() {
       const text = String(message.body || '').trim();
       if (!text) return;
 
-      console.log(
-        `[message:raw] fromMe=${Boolean(message.fromMe)} from=${message.from || ''} to=${message.to || ''} text=${JSON.stringify(text)}`
-      );
-
       const record = messageToRecord(message);
       record.quotedText = await readQuotedText(message);
 
@@ -551,6 +547,10 @@ async function bootstrap() {
       if (!isMessageInTargetGroup(record, config.groupName, record.chat)) {
         return;
       }
+
+      console.log(
+        `[message:raw] fromMe=${Boolean(message.fromMe)} from=${message.from || ''} to=${message.to || ''} text=${JSON.stringify(text)}`
+      );
 
       console.log(
         `[message] fromMe=${Boolean(message.fromMe)} chatId=${chatId} from=${record.from} text=${JSON.stringify(text)}`
