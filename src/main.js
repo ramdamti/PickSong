@@ -456,7 +456,7 @@ async function bootstrap() {
 
   const pendingMessages = [];
   let readyToProcess = false;
-  const startupTimeoutMs = 120000;
+  const startupTimeoutMs = 15000;
   const processedMessageIds = new Set();
   const heartbeatIntervalMs = 15 * 60 * 1000;
   const heartbeatTimer = setInterval(() => {
@@ -594,7 +594,7 @@ async function bootstrap() {
     })
   ]).then((result) => {
     if (result === 'timeout') {
-      console.warn(`[whatsapp] ready is taking longer than ${startupTimeoutMs}ms; keeping service alive`);
+      throw new Error(`WhatsApp startup timed out after ${startupTimeoutMs}ms`);
     }
   });
 }
