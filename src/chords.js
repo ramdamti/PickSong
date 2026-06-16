@@ -114,22 +114,14 @@ function formatSongsReply(songs) {
   if (items.length === 0) return '';
 
   const single = items.length === 1;
-  const hasAnyChords = items.some((song) => String(song?.chords_url || '').trim());
 
-  if (single && !hasAnyChords) {
-    return formatSongLine(items[0]);
-  }
-
-  const lines = ['\u{1F916} \u05D4\u05D1\u05D0\u05EA\u05D9:'];
+  const lines = ['\u200F\u{1F916} \u05D4\u05D1\u05D0\u05EA\u05D9:'];
   items.forEach((song, index) => {
     const base = single ? formatSongLine(song) : `${index + 1}. ${formatSongLine(song)}`;
-    lines.push(base);
+    lines.push(`\u200F${base}`);
     const chordsUrl = String(song?.chords_url || '').trim();
     if (chordsUrl) {
-      lines.push(`   \u05D0\u05E7\u05D5\u05E8\u05D3\u05D9\u05DD: ${chordsUrl}`);
-    }
-    if (!single && index < items.length - 1) {
-      lines.push('');
+      lines.push(`\u200F   \u05D0\u05E7\u05D5\u05E8\u05D3\u05D9\u05DD: ${chordsUrl}`);
     }
   });
 

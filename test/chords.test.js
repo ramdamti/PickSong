@@ -105,7 +105,7 @@ test('original order is preserved', async () => {
   assert.deepEqual(result.map((song) => song.message_id), ['1', '2', '3']);
 });
 
-test('formatting is WhatsApp-safe and uses a plain URL line when chords exist', () => {
+test('formatting is WhatsApp-safe and keeps the RTL header', () => {
   assert.equal(
     formatSongsReply([
       {
@@ -114,7 +114,7 @@ test('formatting is WhatsApp-safe and uses a plain URL line when chords exist', 
         chords_url: 'https://tab4u.com/tabs/songs/123'
       }
     ]),
-    '🤖 הבאתי:\nSultans of Swing - Dire Straits\n   אקורדים: https://tab4u.com/tabs/songs/123'
+    '\u200F🤖 הבאתי:\n\u200FSultans of Swing - Dire Straits\n\u200F   אקורדים: https://tab4u.com/tabs/songs/123'
   );
 
   assert.equal(
@@ -125,7 +125,7 @@ test('formatting is WhatsApp-safe and uses a plain URL line when chords exist', 
         chords_url: null
       }
     ]),
-    'Sultans of Swing - Dire Straits'
+    '\u200F🤖 הבאתי:\n\u200FSultans of Swing - Dire Straits'
   );
 
   assert.equal(
@@ -141,7 +141,7 @@ test('formatting is WhatsApp-safe and uses a plain URL line when chords exist', 
         chords_url: null
       }
     ]),
-    '🤖 הבאתי:\n1. Sultans of Swing - Dire Straits\n   אקורדים: https://tab4u.com/tabs/songs/123\n\n2. White Room - Cream'
+    '\u200F🤖 הבאתי:\n\u200F1. Sultans of Swing - Dire Straits\n\u200F   אקורדים: https://tab4u.com/tabs/songs/123\n\u200F2. White Room - Cream'
   );
 });
 
