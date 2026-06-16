@@ -8,7 +8,6 @@ Small WhatsApp song picker for a band group.
 - Extracts song suggestions from mixed Hebrew and English chat.
 - Saves extracted songs to `state.json`.
 - Replies to the trigger `תוסיף` with the next song.
-- Supports one-time import from an exported WhatsApp chat `.txt` file.
 
 ## Config
 
@@ -55,15 +54,5 @@ Important:
 2. Set `GROUP_NAME`.
 3. Set `LLM_PROVIDER=gemini` and `GEMINI_API_KEY` if you want the lighter cloud model.
 4. Run `npm start` for live listening only.
-
-## Import
-
-To import a WhatsApp chat export:
-
-```bash
-node src/main.js --import /path/to/chat.txt
-```
-
-This reads the exported text file, extracts songs, writes them to `state.json`, and exits.
 
 On first login, the process will print a QR code in the terminal.

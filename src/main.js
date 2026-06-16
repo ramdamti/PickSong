@@ -1,7 +1,6 @@
 const { loadConfig } = require('./config');
 const { createStateStore, loadState, normalizeText } = require('./state');
 const { extractSongs } = require('./llm');
-const { importChatFile } = require('./import');
 const {
   createWhatsAppClient,
   waitForReady,
@@ -383,23 +382,9 @@ async function handleAddSongCommand({ chat, stateStore, config, triggerRecord })
 }
 
 async function bootstrap() {
-  const args = process.argv.slice(2);
-  const importIndex = args.indexOf('--import');
-  const importFile = importIndex >= 0 ? args[importIndex + 1] : null;
-  const config = loadConfig(process.env, { requireGroupName: !importFile });
+  const config = loadConfig(process.env);
   const loadedState = await loadState(config.stateFile);
   const stateStore = createStateStore(config.stateFile, loadedState);
-
-  if (importFile) {
-    await importChatFile({
-      filePath: importFile,
-      config,
-      stateStore,
-      batchSize: 20
-    });
-    await stateStore.queueSave();
-    return;
-  }
 
   if (!config.groupName) {
     throw new Error('GROUP_NAME is required for live listening');
