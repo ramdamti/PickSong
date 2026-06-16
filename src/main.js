@@ -225,7 +225,15 @@ function isUrlOnly(value) {
   return /^https?:\/\/\S+$/iu.test(normalized);
 }
 
-async function hydrateSongsForReply(stateStore, songs) {
+async function hydrateSongsForReply(stateStore, songs, options = {}) {
+  const discoverChords = options.discoverChords !== false;
+  if (!discoverChords) {
+    return {
+      songs: Array.isArray(songs) ? songs : [],
+      updated: false
+    };
+  }
+
   let prepared = songs;
   try {
     prepared = await prepareSongsForReply(songs);
@@ -323,7 +331,9 @@ async function sendRandomSong({ chat, stateStore }) {
     return;
   }
 
-  const { songs, updated } = await hydrateSongsForReply(stateStore, [nextSong]);
+  const { songs, updated } = await hydrateSongsForReply(stateStore, [nextSong], {
+    discoverChords: stateStore.config?.discoverChords
+  });
   if (updated) {
     await stateStore.queueSave();
   }
@@ -350,7 +360,9 @@ async function sendSongRequest({ chat, stateStore, text }) {
     return true;
   }
 
-  const { songs, updated } = await hydrateSongsForReply(stateStore, picked);
+  const { songs, updated } = await hydrateSongsForReply(stateStore, picked, {
+    discoverChords: stateStore.config?.discoverChords
+  });
   if (updated) {
     await stateStore.queueSave();
   }
@@ -428,6 +440,7 @@ async function bootstrap() {
   const loadedState = await loadState(config.stateFile);
   const loadedSeenState = await loadSeenState(config.seenFile);
   const stateStore = createStateStore(config.stateFile, config.seenFile, loadedState, loadedSeenState);
+  stateStore.config = config;
 
   if (!config.groupName) {
     throw new Error('GROUP_NAME is required for live listening');

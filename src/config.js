@@ -89,6 +89,7 @@ function loadConfig(env = process.env, options = {}) {
     stateFile: path.resolve(mergedEnv.STATE_FILE || 'state.json'),
     seenFile: path.resolve(mergedEnv.SEEN_FILE || 'seen.json'),
     authDir: path.resolve(mergedEnv.AUTH_DIR || '.wwebjs_auth'),
+    discoverChords: readBool(mergedEnv.DISCOVER_CHORDS ?? mergedEnv.discover_chords, true),
     llmProvider: llmProvider || (geminiApiKey ? 'gemini' : 'ollama'),
     ollamaBaseUrl: (mergedEnv.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').trim().replace(/\/$/, ''),
     ollamaModel: (mergedEnv.OLLAMA_MODEL || 'qwen3:1.7b').trim(),

@@ -23,6 +23,7 @@ Optional:
 - `STATE_FILE` - defaults to `state.json`
 - `SEEN_FILE` - defaults to `seen.json`
 - `AUTH_DIR` - defaults to `.wwebjs_auth`
+- `DISCOVER_CHORDS` - `true` or `false`, defaults to `true`
 - `LLM_PROVIDER` - `gemini` or `ollama`, defaults to `gemini` when `GEMINI_API_KEY` is set
 - `GEMINI_API_KEY` - required when `LLM_PROVIDER=gemini`
 - `GEMINI_MODEL` - defaults to `gemini-2.0-flash-lite`
