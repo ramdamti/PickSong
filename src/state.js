@@ -30,6 +30,7 @@ function normalizeState(raw) {
         song_title: String(song.song_title || '').trim(),
         artist: song.artist === null || song.artist === undefined ? null : String(song.artist).trim(),
         language: song.language ? String(song.language).trim() : null,
+        chords_url: song.chords_url ? String(song.chords_url).trim() : null,
         confidence: Number.isFinite(Number(song.confidence)) ? Number(song.confidence) : 0,
         used: Boolean(song.used),
         created_at: song.created_at || new Date().toISOString(),
@@ -177,6 +178,7 @@ function createStateStore(stateFilePath, seenFilePath, initialState, initialSeen
       song_title: song.song_title,
       artist: song.artist ?? null,
       language: song.language ?? null,
+      chords_url: song.chords_url ? String(song.chords_url).trim() : null,
       confidence: Number.isFinite(Number(song.confidence)) ? Number(song.confidence) : 0,
       used: Boolean(song.used),
       created_at: song.created_at || new Date().toISOString(),
@@ -194,6 +196,15 @@ function createStateStore(stateFilePath, seenFilePath, initialState, initialSeen
   function markSongUsed(messageId) {
     const song = state.songs.find((item) => item.message_id === messageId);
     if (!song) return false;
+    return true;
+  }
+
+  function setSongChordsUrl(messageId, chordsUrl) {
+    const song = state.songs.find((item) => item.message_id === messageId);
+    if (!song) return false;
+    const normalized = chordsUrl ? String(chordsUrl).trim() : null;
+    if (song.chords_url === normalized) return false;
+    song.chords_url = normalized;
     return true;
   }
 
@@ -217,6 +228,7 @@ function createStateStore(stateFilePath, seenFilePath, initialState, initialSeen
     addSong,
     getNextUnusedSong,
     markSongUsed,
+    setSongChordsUrl,
     setBootstrapComplete,
     isEmpty,
     queueSave

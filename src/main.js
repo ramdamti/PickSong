@@ -1,6 +1,7 @@
 const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
 const { extractSongs } = require('./llm');
+const { formatSongLine, prepareSongsForReply } = require('./chords');
 const {
   createWhatsAppClient,
   waitForReady,
@@ -208,13 +209,6 @@ function buildMixedLanguageRequest(count) {
   ];
 }
 
-function formatSongLine(song) {
-  const title = String(song?.song_title || '').trim();
-  const artist = String(song?.artist || '').trim();
-  if (title && artist) return `${title} - ${artist}`;
-  return title || artist || '';
-}
-
 function formatRtlLine(index, song) {
   return `\u200F${index + 1}. ${formatSongLine(song)}`;
 }
@@ -229,6 +223,25 @@ function stripUrls(value) {
 function isUrlOnly(value) {
   const normalized = String(value || '').trim();
   return /^https?:\/\/\S+$/iu.test(normalized);
+}
+
+async function hydrateSongsForReply(stateStore, songs) {
+  const prepared = await prepareSongsForReply(songs);
+  let updated = false;
+
+  for (const song of prepared) {
+    if (!song?.message_id) continue;
+    const existing = (songs || []).find((item) => item.message_id === song.message_id);
+    const nextUrl = String(song.chords_url || '').trim() || null;
+    const currentUrl = String(existing?.chords_url || '').trim() || null;
+    if (nextUrl !== currentUrl) {
+      if (stateStore.setSongChordsUrl(song.message_id, nextUrl)) {
+        updated = true;
+      }
+    }
+  }
+
+  return { songs: prepared, updated };
 }
 
 async function extractAndStoreBatch({
@@ -304,7 +317,12 @@ async function sendRandomSong({ chat, stateStore }) {
     return;
   }
 
-  await chat.sendMessage(`🤖 הבאתי: ${formatSongLine(nextSong)}`);
+  const { songs, updated } = await hydrateSongsForReply(stateStore, [nextSong]);
+  if (updated) {
+    await stateStore.queueSave();
+  }
+
+  await chat.sendMessage(`🤖 הבאתי: ${formatSongLine(songs[0])}`);
 }
 
 async function sendSongRequest({ chat, stateStore, text }) {
@@ -326,8 +344,13 @@ async function sendSongRequest({ chat, stateStore, text }) {
     return true;
   }
 
+  const { songs, updated } = await hydrateSongsForReply(stateStore, picked);
+  if (updated) {
+    await stateStore.queueSave();
+  }
+
   const reply = ['🤖 הבאתי:'];
-  picked.forEach((song, index) => {
+  songs.forEach((song, index) => {
     reply.push(formatRtlLine(index, song));
   });
   await chat.sendMessage(reply.join('\n'));

@@ -4,7 +4,8 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "start": "node src/main.js"
+    "start": "node src/main.js",
+    "test": "node test/chords.test.js"
   },
   "dependencies": {
     "qrcode-terminal": "^0.12.0",
