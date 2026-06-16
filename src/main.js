@@ -495,10 +495,10 @@ async function bootstrap() {
   }
 
   async function finalizeStartup() {
+    readyToProcess = true;
     console.log('[bootstrap] saving state');
     stateStore.setBootstrapComplete();
     await stateStore.queueSave();
-    readyToProcess = true;
 
     if (pendingMessages.length > 0) {
       for (const message of pendingMessages.splice(0, pendingMessages.length)) {
