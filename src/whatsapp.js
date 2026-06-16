@@ -9,6 +9,9 @@ function normalizeName(value) {
 }
 
 function createWhatsAppClient({ headless, executablePath, authDir }) {
+  console.log(
+    `[whatsapp] puppeteer executable: ${executablePath || '(default chromium)'}`
+  );
   const client = new Client({
     authStrategy: new LocalAuth({
       clientId: 'picksong',

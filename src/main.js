@@ -417,6 +417,14 @@ async function bootstrap() {
   let startupFinished = false;
   const startupTimeoutMs = 300000;
   const processedMessageIds = new Set();
+  const heartbeatIntervalMs = 15 * 60 * 1000;
+  const heartbeatTimer = setInterval(() => {
+    const groupName = groupChat?.name || config.groupName || '(unknown)';
+    console.log(
+      `[health] alive ready=${readyToProcess} group=${groupName} state=${stateStore.state.songs.length} songs`
+    );
+  }, heartbeatIntervalMs);
+  heartbeatTimer.unref();
 
   function markProcessed(messageId) {
     if (!messageId || processedMessageIds.has(messageId)) return false;
