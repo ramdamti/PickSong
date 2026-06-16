@@ -41,6 +41,36 @@ function loadDotEnvFile(envPath = path.resolve('.env')) {
   return parseDotEnv(fs.readFileSync(envPath, 'utf8'));
 }
 
+function resolveExecutablePath(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const candidates = new Set([raw]);
+  if (!raw.includes(path.sep)) {
+    candidates.add(path.posix.join('/usr/bin', raw));
+    candidates.add(path.posix.join('/snap/bin', raw));
+    candidates.add(path.posix.join('/usr/local/bin', raw));
+    if (raw === 'chromium') {
+      candidates.add('/usr/bin/chromium');
+      candidates.add('/usr/bin/chromium-browser');
+      candidates.add('/snap/bin/chromium');
+    }
+    if (raw === 'chromium-browser') {
+      candidates.add('/usr/bin/chromium-browser');
+      candidates.add('/usr/bin/chromium');
+      candidates.add('/snap/bin/chromium');
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return raw;
+}
+
 function loadConfig(env = process.env, options = {}) {
   const { requireGroupName = true } = options;
   const fileEnv = loadDotEnvFile();
@@ -63,7 +93,7 @@ function loadConfig(env = process.env, options = {}) {
     ollamaModel: (mergedEnv.OLLAMA_MODEL || 'qwen3:1.7b').trim(),
     geminiApiKey,
     geminiModel: (mergedEnv.GEMINI_MODEL || 'gemini-2.0-flash-lite').trim(),
-    executablePath: (mergedEnv.PUPPETEER_EXECUTABLE_PATH || mergedEnv.CHROME_PATH || '').trim(),
+    executablePath: resolveExecutablePath(mergedEnv.PUPPETEER_EXECUTABLE_PATH || mergedEnv.CHROME_PATH || ''),
     headless: readBool(mergedEnv.HEADLESS, true)
   };
 }
