@@ -8,7 +8,7 @@ Small WhatsApp song picker for a band group.
 - Extracts song suggestions from mixed Hebrew and English chat.
 - Saves extracted songs to `state.json`.
 - Saves seen-message cache to `seen.json`.
-- Replies to the trigger `תוסיף` with the next song.
+- Replies to the trigger `תוסיף למאגר` with the next song.
 
 ## Config
 
@@ -19,7 +19,7 @@ Required:
 Optional:
 
 - `.env` file in the project root is loaded automatically.
-- `TRIGGER_TEXT` - defaults to `תוסיף`
+- `TRIGGER_TEXT` - defaults to `תוסיף למאגר`
 - `STATE_FILE` - defaults to `state.json`
 - `SEEN_FILE` - defaults to `seen.json`
 - `AUTH_DIR` - defaults to `.wwebjs_auth`

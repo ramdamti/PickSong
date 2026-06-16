@@ -85,7 +85,7 @@ function loadConfig(env = process.env, options = {}) {
 
   return {
     groupName,
-    triggerText: (mergedEnv.TRIGGER_TEXT || 'תוסיף').trim(),
+    triggerText: (mergedEnv.TRIGGER_TEXT || 'תוסיף למאגר').trim(),
     stateFile: path.resolve(mergedEnv.STATE_FILE || 'state.json'),
     seenFile: path.resolve(mergedEnv.SEEN_FILE || 'seen.json'),
     authDir: path.resolve(mergedEnv.AUTH_DIR || '.wwebjs_auth'),

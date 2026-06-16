@@ -10,7 +10,7 @@ const {
   readQuotedText,
 } = require('./whatsapp');
 
-const ADD_COMMAND = 'תוסיף';
+const ADD_COMMAND = 'תוסיף למאגר';
 const RANDOM_COMMAND = 'תביא שיר';
 
 const HEBREW_NUMBER_WORDS = new Map([
