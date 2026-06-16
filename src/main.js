@@ -1,5 +1,5 @@
 const { loadConfig } = require('./config');
-const { createStateStore, loadState, normalizeText } = require('./state');
+const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
 const { extractSongs } = require('./llm');
 const {
   createWhatsAppClient,
@@ -384,7 +384,8 @@ async function handleAddSongCommand({ chat, stateStore, config, triggerRecord })
 async function bootstrap() {
   const config = loadConfig(process.env);
   const loadedState = await loadState(config.stateFile);
-  const stateStore = createStateStore(config.stateFile, loadedState);
+  const loadedSeenState = await loadSeenState(config.seenFile);
+  const stateStore = createStateStore(config.stateFile, config.seenFile, loadedState, loadedSeenState);
 
   if (!config.groupName) {
     throw new Error('GROUP_NAME is required for live listening');
@@ -406,7 +407,7 @@ async function bootstrap() {
   const heartbeatTimer = setInterval(() => {
     const groupName = groupChat?.name || config.groupName || '(unknown)';
     console.log(
-      `[health] alive ready=${readyToProcess} group=${groupName} state=${stateStore.state.songs.length} songs`
+      `[health] alive ready=${readyToProcess} group=${groupName} songs=${stateStore.state.songs.length} seen=${stateStore.seenState.seenMessageIds.length}`
     );
   }, heartbeatIntervalMs);
   heartbeatTimer.unref();

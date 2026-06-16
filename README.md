@@ -7,6 +7,7 @@ Small WhatsApp song picker for a band group.
 - Watches one WhatsApp group in headless mode.
 - Extracts song suggestions from mixed Hebrew and English chat.
 - Saves extracted songs to `state.json`.
+- Saves seen-message cache to `seen.json`.
 - Replies to the trigger `תוסיף` with the next song.
 
 ## Config
@@ -20,6 +21,7 @@ Optional:
 - `.env` file in the project root is loaded automatically.
 - `TRIGGER_TEXT` - defaults to `תוסיף`
 - `STATE_FILE` - defaults to `state.json`
+- `SEEN_FILE` - defaults to `seen.json`
 - `AUTH_DIR` - defaults to `.wwebjs_auth`
 - `LLM_PROVIDER` - `gemini` or `ollama`, defaults to `gemini` when `GEMINI_API_KEY` is set
 - `GEMINI_API_KEY` - required when `LLM_PROVIDER=gemini`
@@ -45,8 +47,8 @@ Notes:
 
 Important:
 
-- Set `STATE_FILE` and `AUTH_DIR` to paths outside the GitHub Actions workspace if you do not want deploys to wipe them.
-- A good choice is something like `/home/ubuntu/picksong-data/state.json` and `/home/ubuntu/picksong-data/wwebjs`.
+- Set `STATE_FILE`, `SEEN_FILE`, and `AUTH_DIR` to paths outside the GitHub Actions workspace if you do not want deploys to wipe them.
+- A good choice is something like `/home/ubuntu/picksong-data/state.json`, `/home/ubuntu/picksong-data/seen.json`, and `/home/ubuntu/picksong-data/wwebjs`.
 
 ## Run
 

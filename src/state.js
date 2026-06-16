@@ -13,9 +13,7 @@ function normalizeText(value) {
 
 function createDefaultState() {
   return {
-    songs: [],
-    seenMessageIds: [],
-    lastBootstrapAt: null
+    songs: []
   };
 }
 
@@ -41,13 +39,24 @@ function normalizeState(raw) {
       .filter((song) => song.song_title);
   }
 
+  return state;
+}
+
+function createDefaultSeenState() {
+  return {
+    seenMessageIds: [],
+    lastBootstrapAt: null
+  };
+}
+
+function normalizeSeenState(raw) {
+  const state = createDefaultSeenState();
+  if (!raw || typeof raw !== 'object') return state;
+
   const seenMessageIds = new Set();
   const maybeIds = Array.isArray(raw.seenMessageIds) ? raw.seenMessageIds : [];
   for (const id of maybeIds) {
     if (id) seenMessageIds.add(String(id));
-  }
-  for (const song of state.songs) {
-    if (song.message_id) seenMessageIds.add(song.message_id);
   }
   state.seenMessageIds = Array.from(seenMessageIds).slice(-MAX_SEEN_MESSAGE_IDS);
   state.lastBootstrapAt = raw.lastBootstrapAt || null;
@@ -69,8 +78,24 @@ async function saveState(filePath, state) {
   await fs.writeFile(filePath, payload, 'utf8');
 }
 
-function createStateStore(filePath, initialState) {
+async function loadSeenState(filePath) {
+  try {
+    const content = await fs.readFile(filePath, 'utf8');
+    return normalizeSeenState(JSON.parse(content));
+  } catch (error) {
+    if (error.code === 'ENOENT') return createDefaultSeenState();
+    throw error;
+  }
+}
+
+async function saveSeenState(filePath, state) {
+  const payload = JSON.stringify(state, null, 2);
+  await fs.writeFile(filePath, payload, 'utf8');
+}
+
+function createStateStore(stateFilePath, seenFilePath, initialState, initialSeenState) {
   let state = normalizeState(initialState);
+  let seenState = normalizeSeenState(initialSeenState);
   let saveChain = Promise.resolve();
 
   function getRandomSongCandidate() {
@@ -101,15 +126,23 @@ function createStateStore(filePath, initialState) {
 
   function snapshot() {
     return {
-      songs: state.songs.map((song) => ({ ...song })),
-      seenMessageIds: [...state.seenMessageIds],
-      lastBootstrapAt: state.lastBootstrapAt
+      songs: state.songs.map((song) => ({ ...song }))
+    };
+  }
+
+  function seenSnapshot() {
+    return {
+      seenMessageIds: [...seenState.seenMessageIds],
+      lastBootstrapAt: seenState.lastBootstrapAt
     };
   }
 
   function queueSave() {
     saveChain = saveChain
-      .then(() => saveState(filePath, snapshot()))
+      .then(async () => {
+        await saveState(stateFilePath, snapshot());
+        await saveSeenState(seenFilePath, seenSnapshot());
+      })
       .catch((error) => {
         console.error('[state] save failed:', error);
       });
@@ -117,14 +150,14 @@ function createStateStore(filePath, initialState) {
   }
 
   function hasSeenMessage(messageId) {
-    return state.seenMessageIds.includes(messageId);
+    return seenState.seenMessageIds.includes(messageId);
   }
 
   function markSeenMessage(messageId) {
     if (!messageId || hasSeenMessage(messageId)) return false;
-    state.seenMessageIds.push(messageId);
-    if (state.seenMessageIds.length > MAX_SEEN_MESSAGE_IDS) {
-      state.seenMessageIds.splice(0, state.seenMessageIds.length - MAX_SEEN_MESSAGE_IDS);
+    seenState.seenMessageIds.push(messageId);
+    if (seenState.seenMessageIds.length > MAX_SEEN_MESSAGE_IDS) {
+      seenState.seenMessageIds.splice(0, seenState.seenMessageIds.length - MAX_SEEN_MESSAGE_IDS);
     }
     return true;
   }
@@ -165,7 +198,7 @@ function createStateStore(filePath, initialState) {
   }
 
   function setBootstrapComplete() {
-    state.lastBootstrapAt = new Date().toISOString();
+    seenState.lastBootstrapAt = new Date().toISOString();
   }
 
   function isEmpty() {
@@ -175,6 +208,9 @@ function createStateStore(filePath, initialState) {
   return {
     get state() {
       return state;
+    },
+    get seenState() {
+      return seenState;
     },
     hasSeenMessage,
     markSeenMessage,
@@ -189,8 +225,11 @@ function createStateStore(filePath, initialState) {
 
 module.exports = {
   createDefaultState,
+  createDefaultSeenState,
   loadState,
+  loadSeenState,
   saveState,
+  saveSeenState,
   createStateStore,
   normalizeText
 };
