@@ -4,6 +4,7 @@ const { extractSongs } = require('./llm');
 const { formatSongsReply, prepareSongsForReply } = require('./chords');
 const {
   createWhatsAppClient,
+  waitForReady,
   messageToRecord,
   readQuotedText,
 } = require('./whatsapp');
@@ -453,6 +454,9 @@ async function bootstrap() {
     authDir: config.authDir
   });
 
+  const pendingMessages = [];
+  let readyToProcess = false;
+  const startupTimeoutMs = 120000;
   const processedMessageIds = new Set();
   const heartbeatIntervalMs = 15 * 60 * 1000;
   const heartbeatTimer = setInterval(() => {
@@ -493,9 +497,17 @@ async function bootstrap() {
   }
 
   async function finalizeStartup() {
+    if (readyToProcess) return;
+    readyToProcess = true;
     console.log('[bootstrap] saving state');
     stateStore.setBootstrapComplete();
     await stateStore.queueSave();
+
+    if (pendingMessages.length > 0) {
+      for (const message of pendingMessages.splice(0, pendingMessages.length)) {
+        await handleLiveMessage(message);
+      }
+    }
 
     console.log('[whatsapp] watcher is live');
   }
@@ -544,6 +556,11 @@ async function bootstrap() {
         `[message] fromMe=${Boolean(message.fromMe)} chatId=${chatId} from=${record.from} text=${JSON.stringify(text)}`
       );
 
+      if (!readyToProcess) {
+        pendingMessages.push(record);
+        return;
+      }
+
       await handleLiveMessage(record);
     } catch (error) {
       console.error('[message] failed:', error);
@@ -552,19 +569,34 @@ async function bootstrap() {
 
   client.on('message_create', handleIncomingMessage);
   client.on('message', handleIncomingMessage);
-  client.on('authenticated', () => {
+  console.log('[whatsapp] starting client');
+  const readyPromise = waitForReady(client);
+  readyPromise.then(() => {
+    console.log('[whatsapp] ready');
     void finalizeStartup().catch((error) => {
       console.error('[fatal]', error);
       process.exit(1);
     });
-  });
-  console.log('[whatsapp] starting client');
-  client.on('ready', () => {
-    console.log('[whatsapp] ready');
+  }).catch((error) => {
+    console.error('[fatal]', error);
+    process.exit(1);
   });
   client.initialize();
   console.log('[whatsapp] initialize called');
-  console.log('[whatsapp] startup continues without waiting for ready');
+  console.log('[whatsapp] waiting for ready');
+
+  await Promise.race([
+    readyPromise,
+    new Promise((resolve) => {
+      setTimeout(() => {
+        resolve('timeout');
+      }, startupTimeoutMs);
+    })
+  ]).then((result) => {
+    if (result === 'timeout') {
+      console.warn(`[whatsapp] ready is taking longer than ${startupTimeoutMs}ms; keeping service alive`);
+    }
+  });
 }
 
 bootstrap().catch((error) => {

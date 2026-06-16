@@ -37,6 +37,10 @@ function createWhatsAppClient({ headless, executablePath, authDir }) {
     console.log('[whatsapp] authenticated');
   });
 
+  client.on('ready', () => {
+    console.log('[whatsapp] ready event observed');
+  });
+
   client.on('loading_screen', (percent, message) => {
     console.log(`[whatsapp] loading screen ${percent}%: ${message}`);
   });
