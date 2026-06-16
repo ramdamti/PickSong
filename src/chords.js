@@ -13,6 +13,14 @@ const ALLOWED_CHORD_HOSTS = [
   }
 ];
 
+function decodeText(value) {
+  try {
+    return decodeURIComponent(String(value || ''));
+  } catch (error) {
+    return String(value || '');
+  }
+}
+
 function decodeHtmlEntities(value) {
   return String(value || '')
     .replace(/&amp;/g, '&')
@@ -20,6 +28,24 @@ function decodeHtmlEntities(value) {
     .replace(/&#39;/g, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>');
+}
+
+function normalizeComparableText(value) {
+  return decodeText(value)
+    .normalize('NFKD')
+    .replace(/[\u0591-\u05C7]/g, '')
+    .toLowerCase()
+    .replace(/[_\-]+/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getSongComparableText(song) {
+  return {
+    title: normalizeComparableText(song?.song_title || ''),
+    artist: normalizeComparableText(song?.artist || '')
+  };
 }
 
 function normalizeUrlCandidate(value) {
@@ -61,12 +87,53 @@ function isAllowedChordsUrl(value) {
 function formatSongLine(song) {
   const title = String(song?.song_title || '').trim();
   const artist = String(song?.artist || '').trim();
-  const base = title && artist ? `${title} - ${artist}` : title || artist || '';
-  const chordsUrl = String(song?.chords_url || '').trim();
-  if (base && chordsUrl) {
-    return `${base} ([לחץ כאן](${chordsUrl}))`;
+  return title && artist ? `${title} - ${artist}` : title || artist || '';
+}
+
+function getChordsPathText(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    return decodeText(url.pathname);
+  } catch (error) {
+    return '';
   }
-  return base;
+}
+
+function isStrongChordsMatch(song, chordsUrl) {
+  const pathText = normalizeComparableText(getChordsPathText(chordsUrl));
+  if (!pathText) return false;
+
+  const { title, artist } = getSongComparableText(song);
+  if (!title || !pathText.includes(title)) return false;
+  if (artist && !pathText.includes(artist)) return false;
+  return true;
+}
+
+function formatSongsReply(songs) {
+  const items = Array.isArray(songs) ? songs.filter(Boolean) : [];
+  if (items.length === 0) return '';
+
+  const single = items.length === 1;
+  const hasAnyChords = items.some((song) => String(song?.chords_url || '').trim());
+
+  if (single && !hasAnyChords) {
+    return formatSongLine(items[0]);
+  }
+
+  const lines = ['\u{1F916} \u05D4\u05D1\u05D0\u05EA\u05D9:'];
+  items.forEach((song, index) => {
+    const base = single ? formatSongLine(song) : `${index + 1}. ${formatSongLine(song)}`;
+    lines.push(base);
+    const chordsUrl = String(song?.chords_url || '').trim();
+    if (chordsUrl) {
+      lines.push(`   \u05D0\u05E7\u05D5\u05E8\u05D3\u05D9\u05DD: ${chordsUrl}`);
+    }
+    if (!single && index < items.length - 1) {
+      lines.push('');
+    }
+  });
+
+  return lines.join('\n');
 }
 
 function extractCandidateUrls(html) {
@@ -109,7 +176,7 @@ async function searchForChordsUrl(song, fetchImpl) {
     const html = await response.text();
     const candidates = extractCandidateUrls(html);
     for (const candidate of candidates) {
-      if (isAllowedChordsUrl(candidate)) {
+      if (isAllowedChordsUrl(candidate) && isStrongChordsMatch(song, candidate)) {
         return candidate;
       }
     }
@@ -172,5 +239,7 @@ module.exports = {
   prepareSongsForReply,
   resolveChordsUrlsForSongs,
   formatSongLine,
+  formatSongsReply,
+  isStrongChordsMatch,
   isAllowedChordsUrl
 };

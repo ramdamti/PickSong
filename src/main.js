@@ -1,7 +1,7 @@
 const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
 const { extractSongs } = require('./llm');
-const { formatSongLine, prepareSongsForReply } = require('./chords');
+const { formatSongsReply, prepareSongsForReply } = require('./chords');
 const {
   createWhatsAppClient,
   waitForReady,
@@ -210,7 +210,7 @@ function buildMixedLanguageRequest(count) {
 }
 
 function formatRtlLine(index, song) {
-  return `\u200F${index + 1}. ${formatSongLine(song)}`;
+  return `\u200F${index + 1}. ${String(song?.song_title || '').trim()}${song?.artist ? ` - ${String(song.artist).trim()}` : ''}`;
 }
 
 function stripUrls(value) {
@@ -328,7 +328,7 @@ async function sendRandomSong({ chat, stateStore }) {
     await stateStore.queueSave();
   }
 
-  await chat.sendMessage(`🤖 הבאתי: ${formatSongLine(songs[0])}`);
+  await chat.sendMessage(formatSongsReply(songs));
 }
 
 async function sendSongRequest({ chat, stateStore, text }) {
@@ -355,11 +355,7 @@ async function sendSongRequest({ chat, stateStore, text }) {
     await stateStore.queueSave();
   }
 
-  const reply = ['🤖 הבאתי:'];
-  songs.forEach((song, index) => {
-    reply.push(formatRtlLine(index, song));
-  });
-  await chat.sendMessage(reply.join('\n'));
+  await chat.sendMessage(formatSongsReply(songs));
   return true;
 }
 

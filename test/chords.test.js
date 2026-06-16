@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  formatSongLine,
+  formatSongsReply,
   prepareSongsForReply,
   resolveChordsUrlsForSongs
 } = require('../src/chords');
@@ -105,30 +105,92 @@ test('original order is preserved', async () => {
   assert.deepEqual(result.map((song) => song.message_id), ['1', '2', '3']);
 });
 
-test('formatting includes inline chords link only when present', () => {
+test('formatting is WhatsApp-safe and uses a plain URL line when chords exist', () => {
   assert.equal(
-    formatSongLine({
-      song_title: 'Sultans of Swing',
-      artist: 'Dire Straits',
-      chords_url: 'https://tab4u.com/tabs/songs/123'
-    }),
-    'Sultans of Swing - Dire Straits ([לחץ כאן](https://tab4u.com/tabs/songs/123))'
+    formatSongsReply([
+      {
+        song_title: 'Sultans of Swing',
+        artist: 'Dire Straits',
+        chords_url: 'https://tab4u.com/tabs/songs/123'
+      }
+    ]),
+    '🤖 הבאתי:\nSultans of Swing - Dire Straits\n   אקורדים: https://tab4u.com/tabs/songs/123'
   );
 
   assert.equal(
-    formatSongLine({
-      song_title: 'Sultans of Swing',
-      artist: 'Dire Straits',
-      chords_url: null
-    }),
+    formatSongsReply([
+      {
+        song_title: 'Sultans of Swing',
+        artist: 'Dire Straits',
+        chords_url: null
+      }
+    ]),
     'Sultans of Swing - Dire Straits'
   );
+
+  assert.equal(
+    formatSongsReply([
+      {
+        song_title: 'Sultans of Swing',
+        artist: 'Dire Straits',
+        chords_url: 'https://tab4u.com/tabs/songs/123'
+      },
+      {
+        song_title: 'White Room',
+        artist: 'Cream',
+        chords_url: null
+      }
+    ]),
+    '🤖 הבאתי:\n1. Sultans of Swing - Dire Straits\n   אקורדים: https://tab4u.com/tabs/songs/123\n\n2. White Room - Cream'
+  );
+});
+
+test('resolver rejects wrong Hebrew Tab4U pages and accepts matching ones', async () => {
+  const wrong = await resolveChordsUrlsForSongs(
+    [
+      {
+        message_id: '1',
+        song_title: 'ילד אסור ילד מותר',
+        artist: 'ריקי גל',
+        chords_url: null
+      }
+    ],
+    {
+      fetchImpl: async () => ({
+        ok: true,
+        text: async () =>
+          '<a href="https://www.tab4u.com/tabs/songs/2273_%D7%A8%D7%95%D7%A0%D7%94_%D7%A7%D7%99%D7%A0%D7%9F_-%D7%94%D7%A7%D7%95%D7%9C_%D7%A9%D7%A7%D7%95%D7%A8%D7%90_%D7%9C%D7%99.html?type=ukulele">wrong</a>'
+      })
+    }
+  );
+
+  assert.equal(wrong[0].chords_url, null);
+
+  const correct = await resolveChordsUrlsForSongs(
+    [
+      {
+        message_id: '2',
+        song_title: 'שער הרחמים',
+        artist: 'מאיר בנאי',
+        chords_url: null
+      }
+    ],
+    {
+      fetchImpl: async () => ({
+        ok: true,
+        text: async () =>
+          '<a href="https://www.tab4u.com/tabs/songs/1879_%D7%9E%D7%90%D7%99%D7%A8_%D7%91%D7%A0%D7%90%D7%99_-%D7%A9%D7%A2%D7%A8_%D7%94%D7%A8%D7%97%D7%9E%D7%99%D7%9D.html">right</a>'
+      })
+    }
+  );
+
+  assert.equal(correct[0].chords_url, 'https://www.tab4u.com/tabs/songs/1879_%D7%9E%D7%90%D7%99%D7%A8_%D7%91%D7%A0%D7%90%D7%99_-%D7%A9%D7%A2%D7%A8_%D7%94%D7%A8%D7%97%D7%9E%D7%99%D7%9D.html');
 });
 
 test('resolver prefers actual chords pages and ignores google/search/homepages', async () => {
   const html = [
     '<a href="https://www.google.com/search?q=bad">google</a>',
-    '<a href="https://tab4u.com/tabs/songs/sultans-of-swing">good</a>',
+    '<a href="https://tab4u.com/tabs/songs/dire-straits_-_sultans-of-swing">good</a>',
     '<a href="https://tab4u.com/">home</a>'
   ].join('\n');
 
@@ -149,7 +211,7 @@ test('resolver prefers actual chords pages and ignores google/search/homepages',
     }
   );
 
-  assert.equal(result[0].chords_url, 'https://tab4u.com/tabs/songs/sultans-of-swing');
+  assert.equal(result[0].chords_url, 'https://tab4u.com/tabs/songs/dire-straits_-_sultans-of-swing');
 });
 
 test('resolver failure leaves songs available for reply', async () => {
