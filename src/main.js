@@ -452,15 +452,13 @@ async function bootstrap() {
     authDir: config.authDir
   });
 
-  const pendingMessages = [];
-  let readyToProcess = false;
   const startupTimeoutMs = 120000;
   const processedMessageIds = new Set();
   const heartbeatIntervalMs = 15 * 60 * 1000;
   const heartbeatTimer = setInterval(() => {
     const groupName = config.groupName || '(unknown)';
     console.log(
-      `[health] alive ready=${readyToProcess} group=${groupName} songs=${stateStore.state.songs.length} seen=${stateStore.seenState.seenMessageIds.length}`
+      `[health] alive group=${groupName} songs=${stateStore.state.songs.length} seen=${stateStore.seenState.seenMessageIds.length}`
     );
   }, heartbeatIntervalMs);
   heartbeatTimer.unref();
@@ -495,16 +493,9 @@ async function bootstrap() {
   }
 
   async function finalizeStartup() {
-    readyToProcess = true;
     console.log('[bootstrap] saving state');
     stateStore.setBootstrapComplete();
     await stateStore.queueSave();
-
-    if (pendingMessages.length > 0) {
-      for (const message of pendingMessages.splice(0, pendingMessages.length)) {
-        await handleLiveMessage(message);
-      }
-    }
 
     console.log('[whatsapp] watcher is live');
   }
@@ -549,11 +540,6 @@ async function bootstrap() {
         `[message] fromMe=${Boolean(message.fromMe)} chatId=${chatId} from=${record.from} text=${JSON.stringify(text)}`
       );
 
-      if (!readyToProcess) {
-        pendingMessages.push(record);
-        return;
-      }
-
       await handleLiveMessage(record);
     } catch (error) {
       console.error('[message] failed:', error);
@@ -563,12 +549,10 @@ async function bootstrap() {
   client.on('message_create', handleIncomingMessage);
   client.on('message', handleIncomingMessage);
   client.on('authenticated', () => {
-    if (!readyToProcess) {
-      void finalizeStartup().catch((error) => {
-        console.error('[fatal]', error);
-        process.exit(1);
-      });
-    }
+    void finalizeStartup().catch((error) => {
+      console.error('[fatal]', error);
+      process.exit(1);
+    });
   });
   console.log('[whatsapp] starting client');
   const readyPromise = waitForReady(client);
