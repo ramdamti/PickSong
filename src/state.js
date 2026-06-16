@@ -1,5 +1,7 @@
 const fs = require('fs/promises');
 
+const MAX_SEEN_MESSAGE_IDS = 5000;
+
 function normalizeText(value) {
   return String(value || '')
     .trim()
@@ -47,7 +49,7 @@ function normalizeState(raw) {
   for (const song of state.songs) {
     if (song.message_id) seenMessageIds.add(song.message_id);
   }
-  state.seenMessageIds = Array.from(seenMessageIds);
+  state.seenMessageIds = Array.from(seenMessageIds).slice(-MAX_SEEN_MESSAGE_IDS);
   state.lastBootstrapAt = raw.lastBootstrapAt || null;
   return state;
 }
@@ -121,6 +123,9 @@ function createStateStore(filePath, initialState) {
   function markSeenMessage(messageId) {
     if (!messageId || hasSeenMessage(messageId)) return false;
     state.seenMessageIds.push(messageId);
+    if (state.seenMessageIds.length > MAX_SEEN_MESSAGE_IDS) {
+      state.seenMessageIds.splice(0, state.seenMessageIds.length - MAX_SEEN_MESSAGE_IDS);
+    }
     return true;
   }
 
