@@ -418,7 +418,7 @@ async function bootstrap() {
   let readyToProcess = false;
   let groupChat = null;
   let startupFinished = false;
-  const startupTimeoutMs = 300000;
+  const startupTimeoutMs = 120000;
   const processedMessageIds = new Set();
   const heartbeatIntervalMs = 15 * 60 * 1000;
   const heartbeatTimer = setInterval(() => {
