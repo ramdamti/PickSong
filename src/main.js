@@ -5,7 +5,6 @@ const { formatSongsReply, prepareSongsForReply } = require('./chords');
 const {
   createWhatsAppClient,
   waitForReady,
-  findGroupChat,
   messageToRecord,
   readQuotedText,
 } = require('./whatsapp');
@@ -64,10 +63,11 @@ function stripCommandPrefix(text, command) {
     .trim();
 }
 
-function isMessageInTargetGroup(record, groupChat) {
-  if (!groupChat) return false;
-  const resolvedChatId = record?.chat?.id?._serialized || record?.chatId || '';
-  return resolvedChatId === groupChat.id._serialized;
+function isMessageInTargetGroup(record, groupName, chat) {
+  if (!chat || chat.isGroup === false) return false;
+  const target = normalizeText(groupName);
+  const actual = normalizeText(chat.name || record?.chat?.name || '');
+  return Boolean(target) && actual === target;
 }
 
 function parseCountToken(token) {
@@ -454,15 +454,11 @@ async function bootstrap() {
 
   const pendingMessages = [];
   let readyToProcess = false;
-  let groupChat = null;
-  let startupFinished = false;
   const startupTimeoutMs = 120000;
   const processedMessageIds = new Set();
-  let authenticated = false;
-  let startupPollTimer = null;
   const heartbeatIntervalMs = 15 * 60 * 1000;
   const heartbeatTimer = setInterval(() => {
-    const groupName = groupChat?.name || config.groupName || '(unknown)';
+    const groupName = config.groupName || '(unknown)';
     console.log(
       `[health] alive ready=${readyToProcess} group=${groupName} songs=${stateStore.state.songs.length} seen=${stateStore.seenState.seenMessageIds.length}`
     );
@@ -478,25 +474,10 @@ async function bootstrap() {
     return true;
   }
 
-  function stopStartupPolling() {
-    if (!startupPollTimer) return;
-    clearInterval(startupPollTimer);
-    startupPollTimer = null;
-  }
-
-  function startStartupPolling() {
-    if (startupPollTimer || startupFinished) return;
-    startupPollTimer = setInterval(() => {
-      if (!authenticated || startupFinished) return;
-      void tryFinalizeStartup('poll');
-    }, 5000);
-    startupPollTimer.unref();
-  }
-
   async function handleLiveMessage(record) {
     const text = record.text || '';
-    const chat = record.chat || groupChat;
-    if (!isMessageInTargetGroup(record, groupChat)) {
+    const chat = record.chat;
+    if (!isMessageInTargetGroup(record, config.groupName, chat)) {
       return;
     }
 
@@ -514,11 +495,6 @@ async function bootstrap() {
   }
 
   async function finalizeStartup() {
-    if (startupFinished) return;
-    if (!groupChat) return;
-
-    startupFinished = true;
-    stopStartupPolling();
     console.log('[bootstrap] saving state');
     stateStore.setBootstrapComplete();
     await stateStore.queueSave();
@@ -531,20 +507,6 @@ async function bootstrap() {
     }
 
     console.log('[whatsapp] watcher is live');
-  }
-
-  async function tryFinalizeStartup(trigger) {
-    if (startupFinished) return;
-    try {
-      if (!groupChat) {
-        console.log(`[whatsapp] startup probe (${trigger}): locating target group`);
-        groupChat = await findGroupChat(client, config.groupName);
-      }
-      console.log(`[whatsapp] watching group: ${groupChat.name}`);
-      await finalizeStartup();
-    } catch (error) {
-      console.log(`[whatsapp] startup probe (${trigger}) not ready yet: ${error.message}`);
-    }
   }
 
   const handleIncomingMessage = async (message) => {
@@ -572,16 +534,16 @@ async function bootstrap() {
         }
       }
 
+      console.log(
+        `[message] fromMe=${Boolean(message.fromMe)} chatId=${chatId} from=${record.from} text=${JSON.stringify(text)}`
+      );
+
       if (record.chat && record.chat.isGroup === false) {
         return;
       }
       if (!record.chat && chatId && !String(chatId).endsWith('@g.us')) {
         return;
       }
-
-      console.log(
-        `[message] fromMe=${Boolean(message.fromMe)} chatId=${chatId} from=${record.from} text=${JSON.stringify(text)}`
-      );
 
       if (!readyToProcess) {
         pendingMessages.push(record);
@@ -596,16 +558,14 @@ async function bootstrap() {
 
   client.on('message_create', handleIncomingMessage);
   client.on('message', handleIncomingMessage);
-  client.on('authenticated', () => {
-    authenticated = true;
-    startStartupPolling();
-  });
-
   console.log('[whatsapp] starting client');
   const readyPromise = waitForReady(client);
   readyPromise.then(() => {
     console.log('[whatsapp] ready');
-    void tryFinalizeStartup('ready');
+    void finalizeStartup().catch((error) => {
+      console.error('[fatal]', error);
+      process.exit(1);
+    });
   }).catch((error) => {
     console.error('[fatal]', error);
     process.exit(1);
@@ -624,8 +584,6 @@ async function bootstrap() {
   ]).then((result) => {
     if (result === 'timeout') {
       console.warn(`[whatsapp] ready is taking longer than ${startupTimeoutMs}ms; keeping service alive`);
-      startStartupPolling();
-      void tryFinalizeStartup('timeout');
     }
   });
 }
