@@ -558,14 +558,18 @@ async function bootstrap() {
 
   client.on('message_create', handleIncomingMessage);
   client.on('message', handleIncomingMessage);
+  client.on('authenticated', () => {
+    if (!readyToProcess) {
+      void finalizeStartup().catch((error) => {
+        console.error('[fatal]', error);
+        process.exit(1);
+      });
+    }
+  });
   console.log('[whatsapp] starting client');
   const readyPromise = waitForReady(client);
   readyPromise.then(() => {
     console.log('[whatsapp] ready');
-    void finalizeStartup().catch((error) => {
-      console.error('[fatal]', error);
-      process.exit(1);
-    });
   }).catch((error) => {
     console.error('[fatal]', error);
     process.exit(1);
