@@ -13,6 +13,8 @@ concurrency:
 jobs:
   deploy:
     runs-on: self-hosted
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: "true"
 
     steps:
       - name: Checkout
@@ -34,8 +36,8 @@ jobs:
       - name: Install deps and restart service
         env:
           RESTART_CMD: ${{ secrets.RESTART_CMD }}
-          PUPPETEER_SKIP_DOWNLOAD: "true"
         run: |
+          export PUPPETEER_SKIP_DOWNLOAD=true
           npm install --omit=dev
           if [ -n "$RESTART_CMD" ]; then
             eval "$RESTART_CMD"
