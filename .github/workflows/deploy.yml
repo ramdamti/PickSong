@@ -34,6 +34,7 @@ jobs:
       - name: Install deps and restart service
         env:
           RESTART_CMD: ${{ secrets.RESTART_CMD }}
+          PUPPETEER_SKIP_DOWNLOAD: "true"
         run: |
           npm install --omit=dev
           if [ -n "$RESTART_CMD" ]; then
