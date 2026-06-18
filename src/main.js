@@ -1,7 +1,11 @@
 const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
 const { extractSongs } = require('./llm');
-const { formatSongsReply, prepareSongsForReply } = require('./chords');
+const {
+  formatSongsReply,
+  parseSongsFromReplyText,
+  resolveChordsUrlsForSongs
+} = require('./chords');
 const {
   createWhatsAppClient,
   waitForReady,
@@ -112,9 +116,14 @@ function parseSongRequest(text) {
   const command = firstWord(normalized);
   if (!SONG_REQUEST_COMMANDS.has(command)) return null;
 
-  const remainder = normalized.replace(new RegExp(`^${command}\\s*`, 'u'), '').trim();
+  let remainder = normalized.replace(new RegExp(`^${command}\\s*`, 'u'), '').trim();
+  const includeChords = remainder.includes('עם אקורדים');
+  if (includeChords) {
+    remainder = remainder.replace('עם אקורדים', '').trim();
+  }
+
   if (!remainder || remainder === 'שיר' || remainder === 'שירים') {
-    return { items: [{ count: 1, language: null }] };
+    return { items: [{ count: 1, language: null }], includeChords };
   }
 
   const segments = remainder
@@ -141,10 +150,16 @@ function parseSongRequest(text) {
   }
 
   if (items.length === 0) {
-    return { items: [{ count: 1, language: null }] };
+    return { items: [{ count: 1, language: null }], includeChords };
   }
 
-  return { items };
+  return { items, includeChords };
+}
+
+function isChordsReplyCommand(text) {
+  const normalized = normalizeText(text);
+  const trigger = normalizeText('תביא אקורדים');
+  return normalized === trigger || normalized.startsWith(`${trigger} `);
 }
 
 function matchesLanguage(song, language) {
@@ -215,6 +230,82 @@ function formatRtlLine(index, song) {
   return `\u200F${index + 1}. ${String(song?.song_title || '').trim()}${song?.artist ? ` - ${String(song.artist).trim()}` : ''}`;
 }
 
+function normalizeSongKey(song) {
+  return {
+    title: normalizeText(song?.song_title || ''),
+    artist: normalizeText(song?.artist || '')
+  };
+}
+
+function findSongMatchesFromReply(stateStore, quotedText) {
+  const parsedSongs = parseSongsFromReplyText(quotedText);
+  const songs = stateStore.state.songs || [];
+  const usedIds = new Set();
+
+  return parsedSongs.map((parsedSong, index) => {
+    const parsedKey = normalizeSongKey(parsedSong);
+    let match = null;
+
+    if (parsedKey.title) {
+      match = songs.find((song) => {
+        if (!song?.message_id || usedIds.has(song.message_id)) return false;
+        const songKey = normalizeSongKey(song);
+        if (songKey.title !== parsedKey.title) return false;
+        if (parsedKey.artist && songKey.artist !== parsedKey.artist) return false;
+        return true;
+      }) || songs.find((song) => {
+        if (!song?.message_id || usedIds.has(song.message_id)) return false;
+        return normalizeSongKey(song).title === parsedKey.title;
+      });
+    }
+
+    if (match?.message_id) {
+      usedIds.add(match.message_id);
+      return match;
+    }
+
+    return {
+      message_id: `quoted:${index}`,
+      source_text: parsedSong.song_title,
+      song_title: parsedSong.song_title,
+      artist: parsedSong.artist ?? null,
+      language: null,
+      chords_url: null,
+      confidence: 0,
+      used: false,
+      created_at: new Date().toISOString(),
+      normalized_title: normalizeText(parsedSong.song_title),
+      normalized_artist: normalizeText(parsedSong.artist || '')
+    };
+  });
+}
+
+async function resolveChordsForSongs(stateStore, songs) {
+  const prepared = Array.isArray(songs) ? songs.map((song) => ({ ...song })) : [];
+  const missingSongs = prepared.filter((song) => !String(song?.chords_url || '').trim());
+  if (missingSongs.length === 0) return prepared;
+
+  let resolvedMissing = missingSongs;
+  try {
+    resolvedMissing = await resolveChordsUrlsForSongs(missingSongs, stateStore.config || {});
+  } catch (error) {
+    console.error('[chords] resolve failed:', error);
+    return prepared;
+  }
+
+  const resolvedById = new Map(resolvedMissing.map((song) => [String(song?.message_id || ''), song]));
+
+  return prepared.map((song) => {
+    const resolved = resolvedById.get(String(song?.message_id || ''));
+    if (!resolved) return song;
+    const nextUrl = String(resolved.chords_url || '').trim() || null;
+    if (nextUrl && song.message_id && !String(song.message_id).startsWith('quoted:')) {
+      stateStore.setSongChordsUrl(song.message_id, nextUrl);
+    }
+    return { ...song, chords_url: nextUrl };
+  });
+}
+
 function stripUrls(value) {
   return String(value || '')
     .replace(/https?:\/\/\S+/giu, ' ')
@@ -225,39 +316,6 @@ function stripUrls(value) {
 function isUrlOnly(value) {
   const normalized = String(value || '').trim();
   return /^https?:\/\/\S+$/iu.test(normalized);
-}
-
-async function hydrateSongsForReply(stateStore, songs, options = {}) {
-  const discoverChords = options.discoverChords !== false;
-  if (!discoverChords) {
-    return {
-      songs: Array.isArray(songs) ? songs : [],
-      updated: false
-    };
-  }
-
-  let prepared = songs;
-  try {
-    prepared = await prepareSongsForReply(songs);
-  } catch (error) {
-    console.error('[chords] resolve failed:', error);
-    prepared = Array.isArray(songs) ? songs : [];
-  }
-  let updated = false;
-
-  for (const song of prepared) {
-    if (!song?.message_id) continue;
-    const existing = (songs || []).find((item) => item.message_id === song.message_id);
-    const nextUrl = String(song.chords_url || '').trim() || null;
-    const currentUrl = String(existing?.chords_url || '').trim() || null;
-    if (nextUrl !== currentUrl) {
-      if (stateStore.setSongChordsUrl(song.message_id, nextUrl)) {
-        updated = true;
-      }
-    }
-  }
-
-  return { songs: prepared, updated };
 }
 
 async function extractAndStoreBatch({
@@ -326,18 +384,27 @@ async function extractAndStoreBatch({
   return added;
 }
 
-async function sendRandomSong({ chat, stateStore }) {
+async function sendRandomSong({ chat, stateStore, includeChords = false }) {
   const nextSong = stateStore.getNextUnusedSong();
   if (!nextSong) {
     await chat.sendMessage('אין עדיין שירים 🤖');
     return;
   }
 
-  const { songs, updated } = await hydrateSongsForReply(stateStore, [nextSong], {
-    discoverChords: stateStore.config?.discoverChords
-  });
-  if (updated) {
-    await stateStore.queueSave();
+  const songs = [nextSong];
+  if (includeChords && stateStore.config?.discoverChords !== false) {
+    console.log(`[chords] random request enabled for ${songs.length} song(s)`);
+    const resolved = await resolveChordsForSongs(stateStore, songs);
+    console.log(
+      `[chords] random resolved: ${resolved
+        .map((song) => String(song?.chords_url || '').trim() || '(none)')
+        .join(', ')}`
+    );
+    if (resolved.some((song, index) => song.chords_url !== songs[index].chords_url)) {
+      await stateStore.queueSave();
+    }
+    await chat.sendMessage(formatSongsReply(resolved, { includeChords: true }));
+    return;
   }
 
   await chat.sendMessage(formatSongsReply(songs));
@@ -348,7 +415,7 @@ async function sendSongRequest({ chat, stateStore, text }) {
   if (!request) return false;
 
   if (request.items.length === 1 && request.items[0].count === 1 && !request.items[0].language) {
-    await sendRandomSong({ chat, stateStore });
+    await sendRandomSong({ chat, stateStore, includeChords: request.includeChords });
     return true;
   }
 
@@ -362,14 +429,47 @@ async function sendSongRequest({ chat, stateStore, text }) {
     return true;
   }
 
-  const { songs, updated } = await hydrateSongsForReply(stateStore, picked, {
-    discoverChords: stateStore.config?.discoverChords
-  });
-  if (updated) {
-    await stateStore.queueSave();
+  let songs = picked;
+  if (request.includeChords && stateStore.config?.discoverChords !== false) {
+    console.log(`[chords] request enabled for ${picked.length} song(s)`);
+    const resolved = await resolveChordsForSongs(stateStore, picked);
+    console.log(
+      `[chords] request resolved: ${resolved
+        .map((song) => String(song?.chords_url || '').trim() || '(none)')
+        .join(', ')}`
+    );
+    if (resolved.some((song, index) => song.chords_url !== picked[index].chords_url)) {
+      await stateStore.queueSave();
+    }
+    songs = resolved;
   }
 
-  await chat.sendMessage(formatSongsReply(songs));
+  await chat.sendMessage(formatSongsReply(songs, { includeChords: request.includeChords }));
+  return true;
+}
+
+async function sendChordsRequest({ chat, stateStore, quotedText }) {
+  const songs = findSongMatchesFromReply(stateStore, quotedText);
+  if (!songs.length) {
+    await chat.sendMessage('יש להשיב להודעת שירים');
+    return true;
+  }
+
+  let resolvedSongs = songs;
+  if (stateStore.config?.discoverChords !== false) {
+    console.log(`[chords] reply request enabled for ${songs.length} song(s)`);
+    resolvedSongs = await resolveChordsForSongs(stateStore, songs);
+    console.log(
+      `[chords] reply resolved: ${resolvedSongs
+        .map((song) => String(song?.chords_url || '').trim() || '(none)')
+        .join(', ')}`
+    );
+    if (resolvedSongs.some((song, index) => song.chords_url !== songs[index].chords_url)) {
+      await stateStore.queueSave();
+    }
+  }
+
+  await chat.sendMessage(formatSongsReply(resolvedSongs, { includeChords: true }));
   return true;
 }
 
@@ -480,6 +580,12 @@ async function bootstrap() {
     const text = record.text || '';
     const chat = record.chat;
     if (!isMessageInTargetGroup(record, config.groupName, chat)) {
+      return;
+    }
+
+    if (isChordsReplyCommand(text)) {
+      console.log('[trigger] chords request');
+      await sendChordsRequest({ chat, stateStore, quotedText: record.quotedText });
       return;
     }
 
