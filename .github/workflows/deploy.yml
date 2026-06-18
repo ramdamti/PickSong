@@ -30,8 +30,11 @@ jobs:
           node --check src/config.js
           node --check src/state.js
           node --check src/llm.js
+          node --check src/chords.js
           node --check src/whatsapp.js
           node --check src/main.js
+          node --check scripts/chords-dry-run.js
+          node --check test/chords.test.js
 
       - name: Install deps and restart service
         env:
