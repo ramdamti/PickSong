@@ -621,13 +621,43 @@ async function bootstrap() {
     executablePath: config.executablePath,
     authDir: config.authDir
   });
+  let shuttingDown = false;
+  let clientDestroyed = false;
+  let heartbeatTimer = null;
+
+  async function destroyClient(reason) {
+    if (clientDestroyed) return;
+    clientDestroyed = true;
+    try {
+      console.log(`[shutdown] destroying WhatsApp client (${reason})`);
+      await client.destroy();
+    } catch (error) {
+      console.error('[shutdown] client destroy failed:', error);
+    }
+  }
+
+  async function shutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[shutdown] received ${signal}`);
+    clearInterval(heartbeatTimer);
+    await destroyClient(signal);
+    process.exit(0);
+  }
+
+  process.once('SIGTERM', () => {
+    void shutdown('SIGTERM');
+  });
+  process.once('SIGINT', () => {
+    void shutdown('SIGINT');
+  });
 
   const pendingMessages = [];
   let readyToProcess = false;
   const startupTimeoutMs = 15000;
   const processedMessageIds = new Set();
   const heartbeatIntervalMs = 15 * 60 * 1000;
-  const heartbeatTimer = setInterval(() => {
+  heartbeatTimer = setInterval(() => {
     const groupName = config.groupName || '(unknown)';
     console.log(
       `[health] alive group=${groupName} songs=${stateStore.state.songs.length} seen=${stateStore.seenState.seenMessageIds.length}`
@@ -749,11 +779,11 @@ async function bootstrap() {
     console.log('[whatsapp] ready');
     void finalizeStartup().catch((error) => {
       console.error('[fatal]', error);
-      process.exit(1);
+      void destroyClient('finalizeStartup failure').finally(() => process.exit(1));
     });
   }).catch((error) => {
     console.error('[fatal]', error);
-    process.exit(1);
+    void destroyClient('ready failure').finally(() => process.exit(1));
   });
   client.initialize();
   console.log('[whatsapp] initialize called');
