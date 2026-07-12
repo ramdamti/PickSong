@@ -41,6 +41,7 @@ Notes:
 - Checkout uses `clean: false` so untracked files such as `.env` are not removed during deploy.
 - It installs production dependencies locally with `npm install --omit=dev`.
 - It restarts the service with `systemctl --user restart picksong`.
+- The runner user must have a user systemd instance available. If deploy fails with `Failed to connect to bus`, run `loginctl enable-linger <runner-user>` once on the server.
 
 Important:
 

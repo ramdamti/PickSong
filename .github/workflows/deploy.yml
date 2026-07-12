@@ -42,4 +42,11 @@ jobs:
         run: |
           export PUPPETEER_SKIP_DOWNLOAD=true
           npm install --omit=dev
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+          if [ ! -S "${XDG_RUNTIME_DIR}/bus" ]; then
+            echo "User systemd bus not available at ${XDG_RUNTIME_DIR}/bus" >&2
+            echo "Enable lingering for the runner user: loginctl enable-linger $(whoami)" >&2
+            exit 1
+          fi
           systemctl --user restart picksong
