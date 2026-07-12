@@ -46,9 +46,11 @@ function buildPrompt(messages, triggerText) {
     'Preserve the original language and spelling of the song title.',
     'Never use a URL as the song title. If the message is only a URL, return no results.',
     'A message is a song suggestion if it proposes a song for rehearsal, even indirectly.',
+    'Also classify each suggested song with 1 to 3 lowercase English genres, an overall difficulty for a 2 guitars + bass + drums + keyboard band, and an overall feel.',
     'Ignore jokes, off-topic chat, and the trigger message itself.',
     'Output shape:',
-    '{ "results": [ { "message_id": "...", "is_song_suggestion": true, "song_title": "...", "artist": null, "language": "he|en|mixed|null", "confidence": 0.0, "needs_review": false, "source_text": "..." } ] }',
+    '{ "results": [ { "message_id": "...", "is_song_suggestion": true, "song_title": "...", "artist": null, "language": "he|en|mixed|null", "confidence": 0.0, "needs_review": false, "source_text": "...", "genres": ["rock"], "difficulty": "low|medium|high|null", "feel": "upbeat|calm|ballad|null" } ] }',
+    'Genres must be lowercase English strings. Difficulty must be low, medium, or high. Feel must be upbeat, calm, or ballad.',
     'The message_id in each result must exactly match one of the input message_id values.',
     'If there are no song suggestions, return { "results": [] }.',
     'Messages to analyze:',
@@ -68,7 +70,22 @@ function normalizeResults(parsed) {
       language: item.language ? String(item.language).trim() : null,
       confidence: Number.isFinite(Number(item.confidence)) ? Number(item.confidence) : 0,
       needs_review: Boolean(item.needs_review),
-      source_text: item.source_text ? String(item.source_text).trim() : ''
+      source_text: item.source_text ? String(item.source_text).trim() : '',
+      genres: Array.isArray(item.genres)
+        ? Array.from(
+            new Set(
+              item.genres
+                .map((genre) => String(genre || '').trim().toLowerCase())
+                .filter(Boolean)
+            )
+          ).slice(0, 3)
+        : [],
+      difficulty: ['low', 'medium', 'high'].includes(String(item.difficulty || '').trim().toLowerCase())
+        ? String(item.difficulty).trim().toLowerCase()
+        : null,
+      feel: ['upbeat', 'calm', 'ballad'].includes(String(item.feel || '').trim().toLowerCase())
+        ? String(item.feel).trim().toLowerCase()
+        : null
     }))
     .filter((item) => item.is_song_suggestion && item.song_title);
 }

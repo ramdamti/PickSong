@@ -17,6 +17,35 @@ function createDefaultState() {
   };
 }
 
+function normalizeGenres(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const genres = [];
+  for (const item of value) {
+    const genre = String(item || '').trim().toLowerCase();
+    if (!genre || seen.has(genre)) continue;
+    seen.add(genre);
+    genres.push(genre);
+  }
+  return genres;
+}
+
+function normalizeDifficulty(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'low' || normalized === 'medium' || normalized === 'high') {
+    return normalized;
+  }
+  return null;
+}
+
+function normalizeFeel(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'upbeat' || normalized === 'calm' || normalized === 'ballad') {
+    return normalized;
+  }
+  return null;
+}
+
 function normalizeState(raw) {
   const state = createDefaultState();
   if (!raw || typeof raw !== 'object') return state;
@@ -32,6 +61,9 @@ function normalizeState(raw) {
         language: song.language ? String(song.language).trim() : null,
         chords_url: song.chords_url ? String(song.chords_url).trim() : null,
         confidence: Number.isFinite(Number(song.confidence)) ? Number(song.confidence) : 0,
+        genres: normalizeGenres(song.genres),
+        difficulty: normalizeDifficulty(song.difficulty),
+        feel: normalizeFeel(song.feel),
         used: Boolean(song.used),
         created_at: song.created_at || new Date().toISOString(),
         normalized_title: song.normalized_title || normalizeText(song.song_title),
@@ -180,6 +212,9 @@ function createStateStore(stateFilePath, seenFilePath, initialState, initialSeen
       language: song.language ?? null,
       chords_url: song.chords_url ? String(song.chords_url).trim() : null,
       confidence: Number.isFinite(Number(song.confidence)) ? Number(song.confidence) : 0,
+      genres: normalizeGenres(song.genres),
+      difficulty: normalizeDifficulty(song.difficulty),
+      feel: normalizeFeel(song.feel),
       used: Boolean(song.used),
       created_at: song.created_at || new Date().toISOString(),
       normalized_title: song.normalized_title || normalizeText(song.song_title),

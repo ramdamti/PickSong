@@ -38,6 +38,78 @@ const HEBREW_NUMBER_WORDS = new Map([
 const DEFAULT_REQUEST_COUNT = 5;
 const SONG_REQUEST_COMMANDS = new Set([normalizeText('תביא'), normalizeText('תן')]);
 const MAX_REQUEST_COUNT = 15;
+const DIFFICULTY_TOKEN_MAP = new Map([
+  [normalizeText('קל'), 'low'],
+  [normalizeText('קלה'), 'low'],
+  [normalizeText('קלים'), 'low'],
+  [normalizeText('קלות'), 'low'],
+  [normalizeText('בינוני'), 'medium'],
+  [normalizeText('בינונית'), 'medium'],
+  [normalizeText('בינוניים'), 'medium'],
+  [normalizeText('בינוניות'), 'medium'],
+  [normalizeText('קשה'), 'high'],
+  [normalizeText('קשים'), 'high'],
+  [normalizeText('קשות'), 'high']
+]);
+const FEEL_TOKEN_MAP = new Map([
+  [normalizeText('קצבי'), 'upbeat'],
+  [normalizeText('קצבי'), 'upbeat'],
+  [normalizeText('קצביים'), 'upbeat'],
+  [normalizeText('אנרגטי'), 'upbeat'],
+  [normalizeText('אנרגטית'), 'upbeat'],
+  [normalizeText('מקפיץ'), 'upbeat'],
+  [normalizeText('מקפיצה'), 'upbeat'],
+  [normalizeText('שקט'), 'calm'],
+  [normalizeText('שקטה'), 'calm'],
+  [normalizeText('רגוע'), 'calm'],
+  [normalizeText('רגועה'), 'calm'],
+  [normalizeText('רגועים'), 'calm'],
+  [normalizeText('רגועים'), 'calm'],
+  [normalizeText('בלדה'), 'ballad'],
+  [normalizeText('בלדות'), 'ballad']
+]);
+const GENRE_FAMILY_TOKEN_MAP = new Map([
+  [normalizeText('רוק'), 'rock'],
+  [normalizeText('רוקיסטי'), 'rock'],
+  [normalizeText('רוקנרול'), 'rock and roll'],
+  [normalizeText('בלוז'), 'blues'],
+  [normalizeText('בלוזי'), 'blues'],
+  [normalizeText('מטאל'), 'metal'],
+  [normalizeText('מטאלי'), 'metal'],
+  [normalizeText('פופ'), 'pop'],
+  [normalizeText('פופי'), 'pop'],
+  [normalizeText('פאנק'), 'funk'],
+  [normalizeText('פאנקי'), 'funk'],
+  [normalizeText('גאז'), 'jazz'],
+  [normalizeText('ג׳אז'), 'jazz'],
+  [normalizeText("ג'אז"), 'jazz'],
+  [normalizeText('גאזי'), 'jazz'],
+  [normalizeText('ג׳אזי'), 'jazz'],
+  [normalizeText("ג'אזי"), 'jazz'],
+  [normalizeText('רגאיי'), 'reggae'],
+  [normalizeText("רגאיי"), 'reggae'],
+  [normalizeText('קאנטרי'), 'country'],
+  [normalizeText('סול'), 'soul'],
+  [normalizeText('ישראלי'), 'israeli'],
+  [normalizeText('ישראלי'), 'israeli'],
+  [normalizeText('מזרחי'), 'mizrahi'],
+  [normalizeText('היפ הופ'), 'hip hop']
+]);
+const GENRE_FAMILY_MATCHERS = new Map([
+  ['rock', ['rock']],
+  ['blues', ['blues']],
+  ['metal', ['metal']],
+  ['pop', ['pop']],
+  ['funk', ['funk']],
+  ['jazz', ['jazz']],
+  ['reggae', ['reggae']],
+  ['country', ['country']],
+  ['soul', ['soul']],
+  ['israeli', ['israeli']],
+  ['mizrahi', ['mizrahi']],
+  ['hip hop', ['hip hop']],
+  ['rock and roll', ['rock and roll']]
+]);
 
 function firstWord(value) {
   return normalizeText(value).split(' ')[0] || '';
@@ -136,6 +208,41 @@ function detectArtistFilter(text) {
   return artist || null;
 }
 
+function detectDifficultyFilter(text) {
+  const tokens = normalizeText(text).split(/\s+/u).filter(Boolean);
+  for (const token of tokens) {
+    const difficulty = DIFFICULTY_TOKEN_MAP.get(token);
+    if (difficulty) return difficulty;
+  }
+  return null;
+}
+
+function detectFeelFilter(text) {
+  const tokens = normalizeText(text).split(/\s+/u).filter(Boolean);
+  for (const token of tokens) {
+    const feel = FEEL_TOKEN_MAP.get(token);
+    if (feel) return feel;
+  }
+  return null;
+}
+
+function detectGenreFilters(text) {
+  const normalized = normalizeText(text);
+  if (!normalized) return [];
+
+  const genres = [];
+  const seen = new Set();
+
+  for (const [token, genre] of GENRE_FAMILY_TOKEN_MAP.entries()) {
+    if (normalized.includes(token) && !seen.has(genre)) {
+      seen.add(genre);
+      genres.push(genre);
+    }
+  }
+
+  return genres;
+}
+
 function parseSongRequest(text) {
   const normalized = normalizeText(text);
   const command = firstWord(normalized);
@@ -148,7 +255,10 @@ function parseSongRequest(text) {
   }
 
   if (!remainder || remainder === 'שיר' || remainder === 'שירים') {
-    return { items: [{ count: 1, language: null, artist: null }], includeChords };
+    return {
+      items: [{ count: 1, language: null, artist: null, genres: [], difficulty: null, feel: null }],
+      includeChords
+    };
   }
 
   const segments = remainder
@@ -172,11 +282,14 @@ function parseSongRequest(text) {
 
     const language = detectLanguageFilter(segment);
     const artist = detectArtistFilter(segment);
-    items.push({ count, language, artist });
+    const genres = detectGenreFilters(segment);
+    const difficulty = detectDifficultyFilter(segment);
+    const feel = detectFeelFilter(segment);
+    items.push({ count, language, artist, genres, difficulty, feel });
   }
 
   if (items.length === 0) {
-    return { items: [{ count: 1, language: null, artist: null }], includeChords };
+    return { items: [{ count: 1, language: null, artist: null, genres: [], difficulty: null, feel: null }], includeChords };
   }
 
   return { items, includeChords };
@@ -221,6 +334,35 @@ function matchesArtist(song, artistQuery) {
   });
 }
 
+function matchesDifficulty(song, difficulty) {
+  if (!difficulty) return true;
+  return String(song?.difficulty || '').trim().toLowerCase() === difficulty;
+}
+
+function matchesFeel(song, feel) {
+  if (!feel) return true;
+  return String(song?.feel || '').trim().toLowerCase() === feel;
+}
+
+function matchesGenre(song, genreQuery) {
+  const queries = Array.isArray(genreQuery)
+    ? genreQuery.map((genre) => String(genre || '').trim().toLowerCase()).filter(Boolean)
+    : [String(genreQuery || '').trim().toLowerCase()].filter(Boolean);
+  if (queries.length === 0) return true;
+  const genres = Array.isArray(song?.genres)
+    ? song.genres.map((genre) => String(genre || '').trim().toLowerCase()).filter(Boolean)
+    : [];
+  if (genres.length === 0) return false;
+
+  return queries.every((query) => {
+    const matchers = GENRE_FAMILY_MATCHERS.get(query) || [query];
+    return genres.some((genre) => {
+      if (genre === query) return true;
+      return matchers.some((matcher) => genre === matcher || genre.includes(matcher));
+    });
+  });
+}
+
 function pickRandomSong(stateStore, predicate, usedKeys) {
   const songs = (stateStore.state.songs || []).filter(
     (song) => !usedKeys.has(song.message_id) && (!predicate || predicate(song))
@@ -246,21 +388,42 @@ function pickSongsForRequest(stateStore, requestItems) {
         choice =
           pickRandomSong(
             stateStore,
-            (song) => matchesLanguage(song, preferredLanguage) && matchesArtist(song, item.artist),
+            (song) =>
+              matchesLanguage(song, preferredLanguage) &&
+              matchesArtist(song, item.artist) &&
+              matchesGenre(song, item.genres) &&
+              matchesDifficulty(song, item.difficulty) &&
+              matchesFeel(song, item.feel),
             usedKeys
           ) ||
           pickRandomSong(
             stateStore,
             (song) =>
               matchesLanguage(song, preferredLanguage === 'he' ? 'en' : 'he') &&
-              matchesArtist(song, item.artist),
+              matchesArtist(song, item.artist) &&
+              matchesGenre(song, item.genres) &&
+              matchesDifficulty(song, item.difficulty) &&
+              matchesFeel(song, item.feel),
             usedKeys
           ) ||
-          pickRandomSong(stateStore, (song) => matchesArtist(song, item.artist), usedKeys);
+          pickRandomSong(
+            stateStore,
+            (song) =>
+              matchesArtist(song, item.artist) &&
+              matchesGenre(song, item.genres) &&
+              matchesDifficulty(song, item.difficulty) &&
+              matchesFeel(song, item.feel),
+            usedKeys
+          );
       } else {
         choice = pickRandomSong(
           stateStore,
-          (song) => matchesLanguage(song, item.language) && matchesArtist(song, item.artist),
+          (song) =>
+            matchesLanguage(song, item.language) &&
+            matchesArtist(song, item.artist) &&
+            matchesGenre(song, item.genres) &&
+            matchesDifficulty(song, item.difficulty) &&
+            matchesFeel(song, item.feel),
           usedKeys
         );
       }
@@ -273,13 +436,13 @@ function pickSongsForRequest(stateStore, requestItems) {
   return selected;
 }
 
-function buildMixedLanguageRequest(count) {
+function buildMixedLanguageRequest(count, item = {}) {
   const cappedCount = capRequestCount(count);
   const heCount = Math.ceil(cappedCount / 2);
   const enCount = Math.floor(cappedCount / 2);
   return [
-    { count: heCount, language: 'he' },
-    { count: enCount, language: 'en' }
+    { count: heCount, language: 'he', artist: item.artist ?? null, genres: Array.isArray(item.genres) ? item.genres : [], difficulty: item.difficulty ?? null, feel: item.feel ?? null },
+    { count: enCount, language: 'en', artist: item.artist ?? null, genres: Array.isArray(item.genres) ? item.genres : [], difficulty: item.difficulty ?? null, feel: item.feel ?? null }
   ];
 }
 
@@ -417,6 +580,9 @@ async function extractAndStoreBatch({
       artist: result.artist ?? null,
       language: result.language ?? null,
       confidence: result.confidence ?? 0,
+      genres: Array.isArray(result.genres) ? result.genres : [],
+      difficulty: result.difficulty ?? null,
+      feel: result.feel ?? null,
       used: false,
       created_at: new Date((original.timestamp || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
       normalized_title: normalizeText(result.song_title),
@@ -475,14 +641,17 @@ async function sendSongRequest({ chat, stateStore, text }) {
     request.items.length === 1 &&
     request.items[0].count === 1 &&
     !request.items[0].language &&
-    !request.items[0].artist
+    !request.items[0].artist &&
+    (!Array.isArray(request.items[0].genres) || request.items[0].genres.length === 0) &&
+    !request.items[0].difficulty &&
+    !request.items[0].feel
   ) {
     await sendRandomSong({ chat, stateStore, includeChords: request.includeChords });
     return true;
   }
 
   if (request.items.length === 1 && request.items[0].language === 'mixed') {
-    request.items = buildMixedLanguageRequest(request.items[0].count);
+    request.items = buildMixedLanguageRequest(request.items[0].count, request.items[0]);
   }
 
   const picked = pickSongsForRequest(stateStore, request.items);
@@ -535,7 +704,7 @@ async function sendChordsRequest({ chat, stateStore, quotedText }) {
   return true;
 }
 
-async function handleAddSongCommand({ chat, stateStore, config, triggerRecord }) {
+async function handleAddSongCommand({ chat, stateStore, config, triggerRecord, extractSongsFn = extractSongs }) {
   const baseId = String(triggerRecord?.id || `add:${Date.now()}`).trim();
   const quotedText = String(triggerRecord?.quotedText || '').trim();
   const inlineText = stripCommandPrefix(triggerRecord?.text || '', ADD_COMMAND);
@@ -551,7 +720,7 @@ async function handleAddSongCommand({ chat, stateStore, config, triggerRecord })
     return;
   }
 
-  const results = await extractSongs({
+  const results = await extractSongsFn({
     provider: config.llmProvider,
     ollamaBaseUrl: config.ollamaBaseUrl,
     ollamaModel: config.ollamaModel,
@@ -579,6 +748,9 @@ async function handleAddSongCommand({ chat, stateStore, config, triggerRecord })
       artist: result.artist ?? null,
       language: result.language ?? null,
       confidence: result.confidence ?? 0,
+      genres: Array.isArray(result.genres) ? result.genres : [],
+      difficulty: result.difficulty ?? null,
+      feel: result.feel ?? null,
       used: false,
       created_at: new Date().toISOString(),
       normalized_title: normalizeText(result.song_title),
@@ -808,8 +980,12 @@ module.exports = {
   detectArtistFilter,
   normalizeArtistComparable,
   matchesArtist,
+  matchesGenre,
+  matchesDifficulty,
+  matchesFeel,
   pickSongsForRequest,
-  buildMixedLanguageRequest
+  buildMixedLanguageRequest,
+  handleAddSongCommand
 };
 
 if (require.main === module) {
