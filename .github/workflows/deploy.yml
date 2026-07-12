@@ -40,6 +40,7 @@ jobs:
 
       - name: Install deps and restart service
         run: |
+          set -eu
           export PUPPETEER_SKIP_DOWNLOAD=true
           npm install --omit=dev
           export XDG_RUNTIME_DIR="/run/user/$(id -u)"
@@ -94,4 +95,17 @@ jobs:
             exit 1
           fi
 
-          systemctl --user start picksong
+          systemctl --user daemon-reload
+
+          if ! systemctl --user start picksong; then
+            systemctl --user status --no-pager --full picksong || true
+            journalctl --user -u picksong -n 200 --no-pager || true
+            exit 1
+          fi
+
+          if ! systemctl --user is-active --quiet picksong; then
+            systemctl --user status --no-pager --full picksong || true
+            journalctl --user -u picksong -n 200 --no-pager || true
+            echo "picksong failed to become active" >&2
+            exit 1
+          fi
