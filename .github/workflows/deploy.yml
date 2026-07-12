@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          clean: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -37,11 +39,7 @@ jobs:
           node --check test/chords.test.js
 
       - name: Install deps and restart service
-        env:
-          RESTART_CMD: ${{ secrets.RESTART_CMD }}
         run: |
           export PUPPETEER_SKIP_DOWNLOAD=true
           npm install --omit=dev
-          if [ -n "$RESTART_CMD" ]; then
-            eval "$RESTART_CMD"
-          fi
+          systemctl --user restart picksong

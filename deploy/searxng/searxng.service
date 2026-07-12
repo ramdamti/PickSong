@@ -1,0 +1,16 @@
+[Unit]
+Description=SearXNG metasearch engine
+After=network.target
+
+[Service]
+Type=simple
+User=searxng
+Group=searxng
+WorkingDirectory=/usr/local/searxng/searxng-src
+Environment=SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml
+ExecStart=/usr/bin/uwsgi --ini /etc/searxng/uwsgi.ini
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

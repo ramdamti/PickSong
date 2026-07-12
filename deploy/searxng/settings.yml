@@ -1,0 +1,15 @@
+use_default_settings: true
+
+server:
+  secret_key: "change-me"
+  base_url: "http://127.0.0.1:8080/"
+
+search:
+  formats:
+    - html
+    - json
+
+general:
+  debug: false
+
+default_doi_resolver: 'oadoi.org'

@@ -5,7 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/main.js",
-    "test": "node test/chords.test.js"
+    "test": "node test/chords.test.js && node test/config.test.js && node test/main.test.js"
   },
   "dependencies": {
     "qrcode-terminal": "^0.12.0",

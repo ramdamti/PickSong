@@ -6,12 +6,6 @@ const {
   parseSongsFromReplyText,
   resolveChordsUrlsForSongs
 } = require('./chords');
-const {
-  createWhatsAppClient,
-  waitForReady,
-  messageToRecord,
-  readQuotedText,
-} = require('./whatsapp');
 
 const ADD_COMMAND = 'תוסיף למאגר';
 const RANDOM_COMMAND = 'תביא שיר';
@@ -111,6 +105,37 @@ function capRequestCount(count) {
   return Math.min(numeric, MAX_REQUEST_COUNT);
 }
 
+function inferDefaultCountForSegment(text) {
+  const normalized = normalizeText(text);
+  if (!normalized) return DEFAULT_REQUEST_COUNT;
+  if (/(?:^|\s)שיר(?:\s|$)/u.test(normalized) && !/(?:^|\s)שירים(?:\s|$)/u.test(normalized)) {
+    return 1;
+  }
+  return DEFAULT_REQUEST_COUNT;
+}
+
+function normalizeArtistComparable(value) {
+  const normalized = normalizeText(value);
+  if (!normalized) return '';
+
+  return normalized
+    .replace(/^(?:הלהקה|להקה|להקת|הזמרת|זמרת|הזמר|זמר|של|מאת)\s+/u, '')
+    .replace(/^the\s+/u, '')
+    .replace(/^ה(?=\p{L}{2,})/u, '')
+    .trim();
+}
+
+function detectArtistFilter(text) {
+  const normalized = normalizeText(text);
+  if (!normalized) return null;
+
+  const match = normalized.match(/(?:^|\s)(?:של|מאת)\s+(.+)$/u);
+  if (!match) return null;
+
+  const artist = normalizeArtistComparable(match[1]);
+  return artist || null;
+}
+
 function parseSongRequest(text) {
   const normalized = normalizeText(text);
   const command = firstWord(normalized);
@@ -123,7 +148,7 @@ function parseSongRequest(text) {
   }
 
   if (!remainder || remainder === 'שיר' || remainder === 'שירים') {
-    return { items: [{ count: 1, language: null }], includeChords };
+    return { items: [{ count: 1, language: null, artist: null }], includeChords };
   }
 
   const segments = remainder
@@ -143,14 +168,15 @@ function parseSongRequest(text) {
         break;
       }
     }
-    count = capRequestCount(count);
+    count = count ? capRequestCount(count) : inferDefaultCountForSegment(segment);
 
     const language = detectLanguageFilter(segment);
-    items.push({ count, language });
+    const artist = detectArtistFilter(segment);
+    items.push({ count, language, artist });
   }
 
   if (items.length === 0) {
-    return { items: [{ count: 1, language: null }], includeChords };
+    return { items: [{ count: 1, language: null, artist: null }], includeChords };
   }
 
   return { items, includeChords };
@@ -178,6 +204,23 @@ function matchesLanguage(song, language) {
   return true;
 }
 
+function matchesArtist(song, artistQuery) {
+  const query = normalizeArtistComparable(artistQuery);
+  if (!query) return true;
+
+  const candidates = [
+    song?.artist,
+    song?.normalized_artist,
+    song?.source_text
+  ]
+    .map((value) => normalizeArtistComparable(value))
+    .filter(Boolean);
+
+  return candidates.some((candidate) => {
+    return candidate === query || candidate.includes(query) || query.includes(candidate);
+  });
+}
+
 function pickRandomSong(stateStore, predicate, usedKeys) {
   const songs = (stateStore.state.songs || []).filter(
     (song) => !usedKeys.has(song.message_id) && (!predicate || predicate(song))
@@ -201,11 +244,25 @@ function pickSongsForRequest(stateStore, requestItems) {
       if (item.language === 'mixed') {
         const preferredLanguage = index % 2 === 0 ? 'he' : 'en';
         choice =
-          pickRandomSong(stateStore, (song) => matchesLanguage(song, preferredLanguage), usedKeys) ||
-          pickRandomSong(stateStore, (song) => matchesLanguage(song, preferredLanguage === 'he' ? 'en' : 'he'), usedKeys) ||
-          pickRandomSong(stateStore, null, usedKeys);
+          pickRandomSong(
+            stateStore,
+            (song) => matchesLanguage(song, preferredLanguage) && matchesArtist(song, item.artist),
+            usedKeys
+          ) ||
+          pickRandomSong(
+            stateStore,
+            (song) =>
+              matchesLanguage(song, preferredLanguage === 'he' ? 'en' : 'he') &&
+              matchesArtist(song, item.artist),
+            usedKeys
+          ) ||
+          pickRandomSong(stateStore, (song) => matchesArtist(song, item.artist), usedKeys);
       } else {
-        choice = pickRandomSong(stateStore, (song) => matchesLanguage(song, item.language), usedKeys);
+        choice = pickRandomSong(
+          stateStore,
+          (song) => matchesLanguage(song, item.language) && matchesArtist(song, item.artist),
+          usedKeys
+        );
       }
 
       if (!choice) break;
@@ -414,7 +471,12 @@ async function sendSongRequest({ chat, stateStore, text }) {
   const request = parseSongRequest(text);
   if (!request) return false;
 
-  if (request.items.length === 1 && request.items[0].count === 1 && !request.items[0].language) {
+  if (
+    request.items.length === 1 &&
+    request.items[0].count === 1 &&
+    !request.items[0].language &&
+    !request.items[0].artist
+  ) {
     await sendRandomSong({ chat, stateStore, includeChords: request.includeChords });
     return true;
   }
@@ -538,6 +600,12 @@ async function handleAddSongCommand({ chat, stateStore, config, triggerRecord })
 }
 
 async function bootstrap() {
+  const {
+    createWhatsAppClient,
+    waitForReady,
+    messageToRecord,
+    readQuotedText
+  } = require('./whatsapp');
   const config = loadConfig(process.env);
   const loadedState = await loadState(config.stateFile);
   const loadedSeenState = await loadSeenState(config.seenFile);
@@ -705,7 +773,18 @@ async function bootstrap() {
   });
 }
 
-bootstrap().catch((error) => {
-  console.error('[fatal]', error);
-  process.exit(1);
-});
+module.exports = {
+  parseSongRequest,
+  detectArtistFilter,
+  normalizeArtistComparable,
+  matchesArtist,
+  pickSongsForRequest,
+  buildMixedLanguageRequest
+};
+
+if (require.main === module) {
+  bootstrap().catch((error) => {
+    console.error('[fatal]', error);
+    process.exit(1);
+  });
+}

@@ -35,16 +35,12 @@ Optional:
 
 The deploy workflow lives in [.github/workflows/deploy.yml](C:/Projects/PickSong/.github/workflows/deploy.yml).
 
-Required repository secrets:
-
-- `RESTART_CMD` - optional, for example `systemctl restart picksong`
-
 Notes:
 
 - The workflow runs on a self-hosted GitHub Actions runner on the Oracle VM.
+- Checkout uses `clean: false` so untracked files such as `.env` are not removed during deploy.
 - It installs production dependencies locally with `npm install --omit=dev`.
-- It runs `RESTART_CMD` only if the secret is set.
-- `RESTART_CMD` should be a simple local command such as `systemctl restart picksong` or `pm2 restart picksong`.
+- It restarts the service with `systemctl --user restart picksong`.
 
 Important:
 
