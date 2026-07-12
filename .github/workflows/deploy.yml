@@ -45,6 +45,7 @@ jobs:
           export XDG_RUNTIME_DIR="/run/user/$(id -u)"
           export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
           export PICKSONG_SESSION_DIR="/home/ubuntu/picksong-data/wwebjs/session-picksong"
+          export PICKSONG_LOCK_FILE="${PICKSONG_SESSION_DIR}/SingletonLock"
           if [ ! -S "${XDG_RUNTIME_DIR}/bus" ]; then
             echo "User systemd bus not available at ${XDG_RUNTIME_DIR}/bus" >&2
             echo "Enable lingering for the runner user: loginctl enable-linger $(whoami)" >&2
@@ -52,21 +53,44 @@ jobs:
           fi
           systemctl --user stop picksong || true
 
-          for i in $(seq 1 15); do
-            if ! pgrep -f "${PICKSONG_SESSION_DIR}" >/dev/null; then
+          for i in $(seq 1 20); do
+            if [ ! -e "${PICKSONG_LOCK_FILE}" ]; then
+              break
+            fi
+            if command -v fuser >/dev/null 2>&1; then
+              if ! fuser "${PICKSONG_LOCK_FILE}" >/dev/null 2>&1; then
+                break
+              fi
+            elif ! pgrep -f "${PICKSONG_SESSION_DIR}" >/dev/null; then
               break
             fi
             sleep 1
           done
 
-          if pgrep -f "${PICKSONG_SESSION_DIR}" >/dev/null; then
-            echo "Killing leftover Chromium processes for ${PICKSONG_SESSION_DIR}" >&2
-            pkill -f "${PICKSONG_SESSION_DIR}" || true
+          if [ -e "${PICKSONG_LOCK_FILE}" ]; then
+            if command -v fuser >/dev/null 2>&1 && fuser "${PICKSONG_LOCK_FILE}" >/dev/null 2>&1; then
+              echo "Killing lock holder for ${PICKSONG_LOCK_FILE}" >&2
+              fuser -k "${PICKSONG_LOCK_FILE}" || true
+            elif pgrep -f "${PICKSONG_SESSION_DIR}" >/dev/null; then
+              echo "Killing leftover Chromium processes for ${PICKSONG_SESSION_DIR}" >&2
+              pkill -f "${PICKSONG_SESSION_DIR}" || true
+            fi
             sleep 2
           fi
 
-          if pgrep -f "${PICKSONG_SESSION_DIR}" >/dev/null; then
-            echo "Chromium is still holding ${PICKSONG_SESSION_DIR}" >&2
+          if [ -e "${PICKSONG_LOCK_FILE}" ]; then
+            if command -v fuser >/dev/null 2>&1 && fuser "${PICKSONG_LOCK_FILE}" >/dev/null 2>&1; then
+              echo "Chromium is still holding ${PICKSONG_LOCK_FILE}" >&2
+              exit 1
+            fi
+            if pgrep -f "${PICKSONG_SESSION_DIR}" >/dev/null; then
+              echo "Chromium is still holding ${PICKSONG_SESSION_DIR}" >&2
+              exit 1
+            fi
+          fi
+
+          if systemctl --user is-active --quiet picksong; then
+            echo "picksong is still active after stop request" >&2
             exit 1
           fi
 
