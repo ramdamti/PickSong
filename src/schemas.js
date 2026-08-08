@@ -202,7 +202,11 @@ function validateAgentAction(value) {
   }
 
   if (name === 'search_songs' || name === 'find_similar_songs') {
-    validated.query = validateSongQuery(action.query || {});
+    const rawQuery =
+      action.query && typeof action.query === 'object' && !Array.isArray(action.query)
+        ? action.query
+        : {};
+    validated.query = validateSongQuery(rawQuery);
     return validated;
   }
 

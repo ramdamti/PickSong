@@ -103,6 +103,20 @@ function extractBotMessageId(sentMessage) {
   );
 }
 
+function buildChatResponder(message, chatId) {
+  return {
+    id: { _serialized: chatId || '' },
+    isGroup: true,
+    name: '',
+    async sendMessage(text) {
+      if (typeof message.reply === 'function') {
+        return message.reply(text);
+      }
+      throw new Error('Chat responder is unavailable for this message');
+    }
+  };
+}
+
 function resolveSongFromAction(stateStore, action, activeContext) {
   if (action.song_id) {
     return { song: stateStore.getSongById(action.song_id), reason: null };
@@ -465,7 +479,6 @@ async function bootstrap() {
   const {
     createWhatsAppClient,
     waitForReady,
-    findGroupChat,
     messageToRecord,
     readQuotedMessage
   } = require('./whatsapp');
@@ -490,7 +503,6 @@ async function bootstrap() {
   let shuttingDown = false;
   let clientDestroyed = false;
   let heartbeatTimer = null;
-  let pollerTimer = null;
 
   async function destroyClient(reason) {
     if (clientDestroyed) return;
@@ -508,7 +520,6 @@ async function bootstrap() {
     shuttingDown = true;
     console.log(`[shutdown] received ${signal}`);
     clearInterval(heartbeatTimer);
-    clearInterval(pollerTimer);
     await destroyClient(signal);
     process.exit(0);
   }
@@ -522,12 +533,9 @@ async function bootstrap() {
 
   const pendingMessages = [];
   let readyToProcess = false;
-  let targetGroupChat = null;
   const startupTimeoutMs = 60000;
   const processedMessageIds = new Set();
   const heartbeatIntervalMs = 15 * 60 * 1000;
-  const pollIntervalMs = 5000;
-  const pollFetchLimit = 10;
   heartbeatTimer = setInterval(() => {
     const groupName = config.groupName || '(unknown)';
     console.log(
@@ -581,6 +589,10 @@ async function bootstrap() {
       }
     }
 
+    if (!record.chat && chatId && String(chatId).endsWith('@g.us')) {
+      record.chat = buildChatResponder(message, chatId);
+    }
+
     if (record.chat && record.chat.isGroup === false) {
       console.log(`[message] ignored non-group source=${source} chatId=${chatId} text=${JSON.stringify(text)}`);
       return;
@@ -612,50 +624,17 @@ async function bootstrap() {
     await handleLiveMessage(record);
   }
 
-  async function pollTargetGroupMessages() {
-    if (!readyToProcess || shuttingDown || !targetGroupChat || typeof targetGroupChat.fetchMessages !== 'function') {
-      return;
-    }
-
-    try {
-      const messages = await targetGroupChat.fetchMessages({ limit: pollFetchLimit });
-      const orderedMessages = Array.isArray(messages) ? [...messages].reverse() : [];
-      for (const message of orderedMessages) {
-        await processMessageObject(message, 'poll');
-      }
-    } catch (error) {
-      console.error('[poll] failed:', error);
-    }
-  }
-
   async function finalizeStartup() {
     if (readyToProcess) return;
     readyToProcess = true;
     console.log('[bootstrap] saving state');
     stateStore.setBootstrapComplete();
     await stateStore.queueSave();
-    try {
-      targetGroupChat = await findGroupChat(client, config.groupName);
-      console.log(
-        `[whatsapp] target group resolved id=${targetGroupChat.id?._serialized || '(unknown)'} name=${JSON.stringify(targetGroupChat.name || '')}`
-      );
-    } catch (error) {
-      targetGroupChat = null;
-      console.error('[whatsapp] target group resolution failed; continuing without poll fallback:', error);
-    }
 
     if (pendingMessages.length > 0) {
       for (const message of pendingMessages.splice(0, pendingMessages.length)) {
         await handleLiveMessage(message);
       }
-    }
-
-    if (targetGroupChat) {
-      pollerTimer = setInterval(() => {
-        void pollTargetGroupMessages();
-      }, pollIntervalMs);
-      pollerTimer.unref();
-      void pollTargetGroupMessages();
     }
 
     console.log('[whatsapp] watcher is live');

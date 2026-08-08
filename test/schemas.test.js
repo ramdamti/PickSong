@@ -99,3 +99,13 @@ test('validateAgentAction rejects unsupported update_song fields', () => {
     /unsupported fields/
   );
 });
+
+test('validateAgentAction tolerates missing or malformed search query payloads', () => {
+  const validated = validateAgentAction({
+    action: 'search_songs',
+    query: 'not-an-object'
+  });
+
+  assert.equal(validated.action, 'search_songs');
+  assert.deepEqual(validated.query, {});
+});
