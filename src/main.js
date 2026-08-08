@@ -34,9 +34,16 @@ function stripWakeWord(text, triggerText = '\u05d1\u05d5\u05d8') {
   return source.replace(pattern, '').trim();
 }
 
-function isMessageInTargetGroup(record, groupName, chat) {
-  if (!chat || chat.isGroup === false) return false;
-  const target = normalizeText(groupName);
+function isMessageInTargetGroup(record, config, chat) {
+  if (chat && chat.isGroup === false) return false;
+  const configuredGroupId = String(config?.groupId || '').trim();
+  const actualChatId = String(chat?.id?._serialized || record?.chatId || '').trim();
+  if (configuredGroupId && actualChatId) {
+    return configuredGroupId === actualChatId;
+  }
+
+  if (!chat) return false;
+  const target = normalizeText(config?.groupName || '');
   const actual = normalizeText(chat.name || record?.chat?.name || '');
   return Boolean(target) && actual === target;
 }
@@ -44,7 +51,7 @@ function isMessageInTargetGroup(record, groupName, chat) {
 function summarizeMessageRouting(record, config) {
   const handling = shouldHandleMessage(record, config.triggerText);
   const chatName = record?.chat?.name || record?.chat?.formattedTitle || '';
-  const inTargetGroup = isMessageInTargetGroup(record, config.groupName, record?.chat);
+  const inTargetGroup = isMessageInTargetGroup(record, config, record?.chat);
 
   return {
     handling,
@@ -540,7 +547,7 @@ async function bootstrap() {
 
   async function handleLiveMessage(record) {
     const chat = record.chat;
-    if (!isMessageInTargetGroup(record, config.groupName, chat)) {
+    if (!isMessageInTargetGroup(record, config, chat)) {
       return;
     }
 

@@ -71,6 +71,7 @@ Required:
 
 Optional:
 
+- `GROUP_ID` - exact WhatsApp chat id to watch; when set, it takes priority over `GROUP_NAME` and avoids group-name lookup issues
 - `TRIGGER_TEXT` - defaults to `בוט`
 - `STATE_FILE` - defaults to `state.json`
 - `SEEN_FILE` - defaults to `seen.json`

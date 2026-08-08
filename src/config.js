@@ -104,6 +104,7 @@ function loadConfig(env = process.env, options = {}) {
 
   return {
     groupName,
+    groupId: (mergedEnv.GROUP_ID || '').trim(),
     triggerText: (mergedEnv.TRIGGER_TEXT || '\u05d1\u05d5\u05d8').trim(),
     stateFile: path.resolve(mergedEnv.STATE_FILE || 'state.json'),
     seenFile: path.resolve(mergedEnv.SEEN_FILE || 'seen.json'),

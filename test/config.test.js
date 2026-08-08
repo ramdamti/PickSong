@@ -32,3 +32,17 @@ test('DISCOVER_CHORDS overrides the lowercase env key', () => {
 
   assert.equal(config.discoverChords, true);
 });
+
+test('GROUP_ID is loaded when provided', () => {
+  const config = loadConfig(
+    {
+      GROUP_NAME: 'Band',
+      GROUP_ID: '120363420724758799@g.us'
+    },
+    {
+      requireGroupName: true
+    }
+  );
+
+  assert.equal(config.groupId, '120363420724758799@g.us');
+});
