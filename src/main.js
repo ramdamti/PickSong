@@ -627,10 +627,15 @@ async function bootstrap() {
     console.log('[bootstrap] saving state');
     stateStore.setBootstrapComplete();
     await stateStore.queueSave();
-    targetGroupChat = await findGroupChat(client, config.groupName);
-    console.log(
-      `[whatsapp] target group resolved id=${targetGroupChat.id?._serialized || '(unknown)'} name=${JSON.stringify(targetGroupChat.name || '')}`
-    );
+    try {
+      targetGroupChat = await findGroupChat(client, config.groupName);
+      console.log(
+        `[whatsapp] target group resolved id=${targetGroupChat.id?._serialized || '(unknown)'} name=${JSON.stringify(targetGroupChat.name || '')}`
+      );
+    } catch (error) {
+      targetGroupChat = null;
+      console.error('[whatsapp] target group resolution failed; continuing without poll fallback:', error);
+    }
 
     if (pendingMessages.length > 0) {
       for (const message of pendingMessages.splice(0, pendingMessages.length)) {
@@ -638,11 +643,13 @@ async function bootstrap() {
       }
     }
 
-    pollerTimer = setInterval(() => {
+    if (targetGroupChat) {
+      pollerTimer = setInterval(() => {
+        void pollTargetGroupMessages();
+      }, pollIntervalMs);
+      pollerTimer.unref();
       void pollTargetGroupMessages();
-    }, pollIntervalMs);
-    pollerTimer.unref();
-    void pollTargetGroupMessages();
+    }
 
     console.log('[whatsapp] watcher is live');
   }
