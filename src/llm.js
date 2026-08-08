@@ -10,6 +10,7 @@ const SYSTEM_PROMPT = [
   'Treat performer-fit phrases as direct search intent, not ambiguity.',
   'Examples of performer-fit language: מתאים לזמר, מתאים לזמרת, מתאים לזמר שלנו, מתאים לקול שלנו, שהסולן יוכל לשיר, שהסולנית תוכל לשיר, מתאים לגיטריסט, מתאים לבסיסט, מתאים למתופף, מתאים לקלידים.',
   'Map those phrases into compact search query preferences or requirements when possible.',
+  'When users ask for songs by an artist or band and write the name in Hebrew or another non-English script, prefer the standard English canonical artist/band name in query.requirements.artist whenever you know it.',
   'Extract requested result counts carefully. Examples: "3 שירים", "שלושה שירים", "three songs" should set query.limit to 3.',
   'When reply_context exists and the user is asking for another recommendation list, fresh options, more songs, or different songs, set query.avoid_previous_results=true.',
   'For short feedback like "שיר 1 הוא קשה", "1 לא מתאים", or "2 ו-4 לא עבדו", prefer update_song_feedback with a non-empty updates array.',
@@ -330,6 +331,24 @@ function inferRequestedGenres(messageText) {
     .map((entry) => entry.genre);
 }
 
+const ARTIST_ALIAS_MAP = new Map([
+  ['פינק פלויד', 'Pink Floyd'],
+  ['פינקפלויד', 'Pink Floyd'],
+  ['הביטלס', 'The Beatles'],
+  ['ביטלס', 'The Beatles'],
+  ['לד זפלין', 'Led Zeppelin'],
+  ['דיפ פרפל', 'Deep Purple'],
+  ['קווין', 'Queen'],
+  ['פורינר', 'Foreigner'],
+  ['אבבא', 'ABBA']
+]);
+
+function canonicalizeRequestedArtistName(value) {
+  const artist = String(value || '').trim();
+  if (!artist) return null;
+  return ARTIST_ALIAS_MAP.get(artist) || artist;
+}
+
 function cleanInferredArtistName(value) {
   return String(value || '')
     .replace(/^(?:של|by)\s+/iu, '')
@@ -352,7 +371,7 @@ function inferRequestedArtist(messageText) {
   for (const pattern of patterns) {
     const match = source.match(pattern);
     if (!match) continue;
-    const artist = cleanInferredArtistName(match[1]);
+    const artist = canonicalizeRequestedArtistName(cleanInferredArtistName(match[1]));
     if (artist) return artist;
   }
 

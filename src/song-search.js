@@ -13,19 +13,69 @@ function normalizeScalar(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+const ARTIST_ALIAS_MAP = new Map([
+  ['פינק פלויד', 'pink floyd'],
+  ['פינקפלויד', 'pink floyd'],
+  ['הביטלס', 'the beatles'],
+  ['ביטלס', 'the beatles'],
+  ['ביטלס ', 'the beatles'],
+  ['לד זפלין', 'led zeppelin'],
+  ['דיפ פרפל', 'deep purple'],
+  ['קווין', 'queen'],
+  ['פורינר', 'foreigner'],
+  ['אבבא', 'abba']
+]);
+
+function canonicalizeArtistName(value) {
+  const normalized = normalizeScalar(value);
+  return ARTIST_ALIAS_MAP.get(normalized) || normalized;
+}
+
+function detectScriptLanguage(value) {
+  const source = String(value || '').trim();
+  if (!source) return null;
+  const hasHebrew = /[\u0590-\u05FF]/u.test(source);
+  const hasLatin = /[A-Za-z]/.test(source);
+  if (hasHebrew && !hasLatin) return 'he';
+  if (hasLatin && !hasHebrew) return 'en';
+  return null;
+}
+
+function getEffectiveSongLanguage(song) {
+  const titleLanguage = detectScriptLanguage(song?.song_title);
+  if (titleLanguage) return titleLanguage;
+
+  const artistLanguage = detectScriptLanguage(song?.artist);
+  if (artistLanguage === 'he') return artistLanguage;
+
+  return normalizeScalar(song?.language);
+}
+
 function songGenres(song) {
   return normalizeList(song?.genres);
 }
 
-function artistMatches(songArtist, requestedArtist) {
-  const songValue = normalizeScalar(songArtist);
-  const requestedValue = normalizeScalar(requestedArtist);
+function artistMatches(songArtist, requestedArtist, song = null) {
+  const songValue = canonicalizeArtistName(songArtist);
+  const requestedValue = canonicalizeArtistName(requestedArtist);
   if (!songValue || !requestedValue) return false;
-  return (
+  if (
     songValue === requestedValue ||
     songValue.includes(requestedValue) ||
     requestedValue.includes(songValue)
-  );
+  ) {
+    return true;
+  }
+
+  const requestedScript = detectScriptLanguage(requestedArtist);
+  if (requestedScript === 'he') {
+    const sourceText = normalizeScalar(song?.source_text || song?.sourceText || '');
+    if (sourceText && sourceText.includes(normalizeScalar(requestedArtist))) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function scalarList(value) {
@@ -58,12 +108,12 @@ function songMatchesHardRequirement(song, requirements = {}) {
   }
 
   if (requirements.language) {
-    const language = normalizeScalar(song.language);
+    const language = getEffectiveSongLanguage(song);
     if (language !== normalizeScalar(requirements.language)) return false;
   }
 
   if (requirements.artist) {
-    if (!artistMatches(song.artist, requirements.artist)) return false;
+    if (!artistMatches(song.artist, requirements.artist, song)) return false;
   }
 
   if (requirements.feel) {

@@ -198,3 +198,80 @@ test('searchSongs returns no matches when an explicit genre requirement is absen
 
   assert.deepEqual(results, []);
 });
+
+test('searchSongs does not treat latin-title songs as Hebrew just because the stored language tag says he', () => {
+  const mislabeledEnglishSong = createSong({
+    song_title: 'Dancing queen',
+    artist: 'ABBA',
+    language: 'he'
+  });
+  const hebrewSong = createSong({
+    song_title: 'גשם',
+    artist: 'מאיר בנאי',
+    language: 'he'
+  });
+
+  const results = searchSongs([mislabeledEnglishSong, hebrewSong], {
+    requirements: { language: 'he' },
+    preferences: {},
+    exclusions: {},
+    limit: 5
+  });
+
+  assert.deepEqual(
+    results.map((song) => song.song_title),
+    ['גשם']
+  );
+});
+
+test('searchSongs matches common Hebrew artist transliterations against English catalog artists', () => {
+  const pinkFloyd = createSong({
+    song_title: 'Time',
+    artist: 'Pink Floyd',
+    language: 'en'
+  });
+  const theWho = createSong({
+    song_title: 'Baba O Riley',
+    artist: 'The Who',
+    language: 'en'
+  });
+
+  const results = searchSongs([pinkFloyd, theWho], {
+    requirements: { artist: 'פינק פלויד' },
+    preferences: {},
+    exclusions: {},
+    limit: 5
+  });
+
+  assert.deepEqual(
+    results.map((song) => song.song_title),
+    ['Time']
+  );
+});
+
+test('searchSongs can match a Hebrew artist request from catalog source_text even without an alias entry', () => {
+  const catalogSong = createSong({
+    song_title: 'Some Song',
+    artist: 'Some English Band',
+    language: 'en',
+    source_text: 'אפשר לעשות שיר של להקה דמיונית'
+  });
+  const otherSong = createSong({
+    song_title: 'Other Song',
+    artist: 'Another Band',
+    language: 'en',
+    source_text: 'Other Song'
+  });
+
+  const results = searchSongs([catalogSong, otherSong], {
+    requirements: { artist: 'להקה דמיונית' },
+    preferences: {},
+    exclusions: {},
+    limit: 5
+  });
+
+  assert.deepEqual(
+    results.map((song) => song.song_title),
+    ['Some Song']
+  );
+});

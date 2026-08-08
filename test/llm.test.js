@@ -204,6 +204,38 @@ test('interpretMessage infers artist constraints from "songs by" phrasing', asyn
   assert.equal(action.query.requirements.artist, 'Pink Floyd');
 });
 
+test('interpretMessage canonicalizes common Hebrew artist names into English artist constraints', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8\u05d9\u05dd \u05e9\u05dc \u05e4\u05d9\u05e0\u05e7 \u05e4\u05dc\u05d5\u05d9\u05d3',
+    replyContext: null,
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {}
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.requirements.artist, 'Pink Floyd');
+});
+
 test('interpretMessage infers Hebrew language constraints from the message text', async () => {
   const action = await interpretMessage({
     provider: 'groq',
