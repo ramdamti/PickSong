@@ -1,4 +1,4 @@
-const { loadConfig } = require('./config');
+﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
 const { interpretMessage } = require('./llm');
 const {
@@ -39,6 +39,18 @@ function isMessageInTargetGroup(record, groupName, chat) {
   const target = normalizeText(groupName);
   const actual = normalizeText(chat.name || record?.chat?.name || '');
   return Boolean(target) && actual === target;
+}
+
+function summarizeMessageRouting(record, config) {
+  const handling = shouldHandleMessage(record, config.triggerText);
+  const chatName = record?.chat?.name || record?.chat?.formattedTitle || '';
+  const inTargetGroup = isMessageInTargetGroup(record, config.groupName, record?.chat);
+
+  return {
+    handling,
+    chatName,
+    inTargetGroup
+  };
 }
 
 function shouldHandleMessage(record, triggerText = '\u05d1\u05d5\u05d8') {
@@ -464,6 +476,9 @@ async function bootstrap() {
     executablePath: config.executablePath,
     authDir: config.authDir
   });
+  console.log(
+    `[config] group=${JSON.stringify(config.groupName)} trigger=${JSON.stringify(config.triggerText)} provider=${config.llmProvider}`
+  );
   let shuttingDown = false;
   let clientDestroyed = false;
   let heartbeatTimer = null;
@@ -497,7 +512,7 @@ async function bootstrap() {
 
   const pendingMessages = [];
   let readyToProcess = false;
-  const startupTimeoutMs = 15000;
+  const startupTimeoutMs = 60000;
   const processedMessageIds = new Set();
   const heartbeatIntervalMs = 15 * 60 * 1000;
   heartbeatTimer = setInterval(() => {
@@ -572,18 +587,24 @@ async function bootstrap() {
       }
 
       if (record.chat && record.chat.isGroup === false) {
+        console.log(`[message] ignored non-group chatId=${chatId} text=${JSON.stringify(text)}`);
         return;
       }
       if (!record.chat && chatId && !String(chatId).endsWith('@g.us')) {
+        console.log(`[message] ignored non-group chatId=${chatId} text=${JSON.stringify(text)}`);
         return;
       }
 
-      if (!isMessageInTargetGroup(record, config.groupName, record.chat)) {
+      const routing = summarizeMessageRouting(record, config);
+      if (!routing.inTargetGroup) {
+        console.log(
+          `[message] ignored group_mismatch chatId=${chatId} actualGroup=${JSON.stringify(routing.chatName)} targetGroup=${JSON.stringify(config.groupName)} text=${JSON.stringify(text)}`
+        );
         return;
       }
 
       console.log(
-        `[message] chatId=${chatId} from=${record.from} text=${JSON.stringify(text)} reason=${shouldHandleMessage(record, config.triggerText).reason}`
+        `[message] chatId=${chatId} group=${JSON.stringify(routing.chatName)} from=${record.from} text=${JSON.stringify(text)} reason=${routing.handling.reason}`
       );
 
       if (!readyToProcess) {
