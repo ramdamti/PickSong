@@ -15,6 +15,7 @@ test('discover_chords env flag is parsed from .env style input', () => {
   );
 
   assert.equal(config.groupName, 'Band');
+  assert.deepEqual(config.groupNames, ['Band']);
   assert.equal(config.discoverChords, false);
 });
 
@@ -45,4 +46,22 @@ test('GROUP_ID is loaded when provided', () => {
   );
 
   assert.equal(config.groupId, '120363420724758799@g.us');
+  assert.deepEqual(config.groupIds, ['120363420724758799@g.us']);
+});
+
+test('GROUP_NAMES and GROUP_IDS are parsed as comma-separated target lists', () => {
+  const config = loadConfig(
+    {
+      GROUP_NAME: '',
+      GROUP_ID: '',
+      GROUP_NAMES: 'Band A, Band B',
+      GROUP_IDS: '1201@g.us, 1202@g.us'
+    },
+    {
+      requireGroupName: true
+    }
+  );
+
+  assert.deepEqual(config.groupNames, ['Band A', 'Band B']);
+  assert.deepEqual(config.groupIds, ['1201@g.us', '1202@g.us']);
 });

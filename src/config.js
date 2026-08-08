@@ -41,6 +41,13 @@ function loadDotEnvFile(envPath = path.resolve('.env')) {
   return parseDotEnv(fs.readFileSync(envPath, 'utf8'));
 }
 
+function parseCsvEnvList(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function resolveExecutablePath(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -76,8 +83,18 @@ function loadConfig(env = process.env, options = {}) {
   const fileEnv = loadDotEnvFile();
   const mergedEnv = { ...fileEnv, ...env };
   const groupName = (mergedEnv.GROUP_NAME || '').trim();
-  if (requireGroupName && !groupName) {
-    throw new Error('GROUP_NAME is required');
+  const groupId = (mergedEnv.GROUP_ID || '').trim();
+  const groupNames = Array.from(new Set([
+    ...parseCsvEnvList(mergedEnv.GROUP_NAMES),
+    ...parseCsvEnvList(groupName)
+  ]));
+  const groupIds = Array.from(new Set([
+    ...parseCsvEnvList(mergedEnv.GROUP_IDS),
+    ...parseCsvEnvList(groupId)
+  ]));
+
+  if (requireGroupName && groupNames.length === 0 && groupIds.length === 0) {
+    throw new Error('At least one target group is required via GROUP_NAME, GROUP_NAMES, GROUP_ID, or GROUP_IDS');
   }
 
   const llmProvider = (mergedEnv.LLM_PROVIDER || 'groq').trim().toLowerCase();
@@ -104,7 +121,9 @@ function loadConfig(env = process.env, options = {}) {
 
   return {
     groupName,
-    groupId: (mergedEnv.GROUP_ID || '').trim(),
+    groupId,
+    groupNames,
+    groupIds,
     triggerText: (mergedEnv.TRIGGER_TEXT || '\u05d1\u05d5\u05d8').trim(),
     stateFile: path.resolve(mergedEnv.STATE_FILE || 'state.json'),
     seenFile: path.resolve(mergedEnv.SEEN_FILE || 'seen.json'),

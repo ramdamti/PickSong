@@ -37,16 +37,20 @@ function stripWakeWord(text, triggerText = '\u05d1\u05d5\u05d8') {
 
 function isMessageInTargetGroup(record, config, chat) {
   if (chat && chat.isGroup === false) return false;
-  const configuredGroupId = String(config?.groupId || '').trim();
+  const configuredGroupIds = Array.isArray(config?.groupIds) && config.groupIds.length > 0
+    ? config.groupIds.map((value) => String(value || '').trim()).filter(Boolean)
+    : [String(config?.groupId || '').trim()].filter(Boolean);
   const actualChatId = String(chat?.id?._serialized || record?.chatId || '').trim();
-  if (configuredGroupId && actualChatId) {
-    return configuredGroupId === actualChatId;
+  if (configuredGroupIds.length > 0 && actualChatId) {
+    return configuredGroupIds.includes(actualChatId);
   }
 
   if (!chat) return false;
-  const target = normalizeText(config?.groupName || '');
+  const configuredGroupNames = Array.isArray(config?.groupNames) && config.groupNames.length > 0
+    ? config.groupNames.map((value) => normalizeText(value)).filter(Boolean)
+    : [normalizeText(config?.groupName || '')].filter(Boolean);
   const actual = normalizeText(chat.name || record?.chat?.name || '');
-  return Boolean(target) && actual === target;
+  return configuredGroupNames.length > 0 && configuredGroupNames.includes(actual);
 }
 
 function summarizeMessageRouting(record, config) {
@@ -647,8 +651,10 @@ async function bootstrap() {
   const stateStore = createStateStore(config.stateFile, config.seenFile, loadedState, loadedSeenState);
   stateStore.config = config;
 
-  if (!config.groupName) {
-    throw new Error('GROUP_NAME is required for live listening');
+  const hasTargetNames = Array.isArray(config.groupNames) && config.groupNames.length > 0;
+  const hasTargetIds = Array.isArray(config.groupIds) && config.groupIds.length > 0;
+  if (!hasTargetNames && !hasTargetIds) {
+    throw new Error('At least one target group is required for live listening');
   }
 
   const client = createWhatsAppClient({
@@ -657,7 +663,7 @@ async function bootstrap() {
     authDir: config.authDir
   });
   console.log(
-    `[config] group=${JSON.stringify(config.groupName)} trigger=${JSON.stringify(config.triggerText)} provider=${config.llmProvider}`
+    `[config] groups=${JSON.stringify(config.groupNames)} groupIds=${JSON.stringify(config.groupIds)} trigger=${JSON.stringify(config.triggerText)} provider=${config.llmProvider}`
   );
   let shuttingDown = false;
   let clientDestroyed = false;
@@ -696,9 +702,9 @@ async function bootstrap() {
   const processedMessageIds = new Set();
   const heartbeatIntervalMs = 15 * 60 * 1000;
   heartbeatTimer = setInterval(() => {
-    const groupName = config.groupName || '(unknown)';
+    const groupLabel = (config.groupNames || []).join(', ') || (config.groupIds || []).join(', ') || '(unknown)';
     console.log(
-      `[health] alive group=${groupName} songs=${stateStore.state.songs.length} seen=${stateStore.seenState.seenMessageIds.length}`
+      `[health] alive groups=${groupLabel} songs=${stateStore.state.songs.length} seen=${stateStore.seenState.seenMessageIds.length}`
     );
   }, heartbeatIntervalMs);
   heartbeatTimer.unref();
@@ -764,7 +770,7 @@ async function bootstrap() {
     const routing = summarizeMessageRouting(record, config);
     if (!routing.inTargetGroup) {
       console.log(
-        `[message] ignored group_mismatch source=${source} chatId=${chatId} actualGroup=${JSON.stringify(routing.chatName)} targetGroup=${JSON.stringify(config.groupName)} text=${JSON.stringify(text)}`
+        `[message] ignored group_mismatch source=${source} chatId=${chatId} actualGroup=${JSON.stringify(routing.chatName)} targetGroups=${JSON.stringify(config.groupNames)} targetGroupIds=${JSON.stringify(config.groupIds)} text=${JSON.stringify(text)}`
       );
       return;
     }
@@ -842,6 +848,7 @@ async function bootstrap() {
 module.exports = {
   stripWakeWord,
   shouldHandleMessage,
+  isMessageInTargetGroup,
   buildAgentReplyContext,
   buildAgentFailureReply,
   buildClarifyReply,

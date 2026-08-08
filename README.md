@@ -67,11 +67,15 @@ If the dataset is malformed, startup fails instead of silently repairing it.
 
 Required:
 
+- at least one target group via:
 - `GROUP_NAME` - exact WhatsApp group name to watch
+- `GROUP_NAMES` - comma-separated WhatsApp group names to watch
+- `GROUP_ID` - exact WhatsApp chat id to watch
+- `GROUP_IDS` - comma-separated WhatsApp chat ids to watch
 
 Optional:
 
-- `GROUP_ID` - exact WhatsApp chat id to watch; when set, it takes priority over `GROUP_NAME` and avoids group-name lookup issues
+- `GROUP_ID` / `GROUP_IDS` take priority over group-name matching and avoid group-name lookup issues
 - `TRIGGER_TEXT` - defaults to `בוט`
 - `STATE_FILE` - defaults to `state.json`
 - `SEEN_FILE` - defaults to `seen.json`
@@ -119,7 +123,7 @@ Observability:
 ## Run
 
 1. Install dependencies.
-2. Set `GROUP_NAME`.
+2. Set one or more target groups with `GROUP_NAME`, `GROUP_NAMES`, `GROUP_ID`, or `GROUP_IDS`.
 3. Set `GROQ_API_KEY`.
 4. Adjust `STATE_FILE`, `SEEN_FILE`, and `AUTH_DIR` if you want them outside the workspace.
 5. Run `npm start`.
@@ -196,6 +200,13 @@ Recommended for persistence outside the workspace:
 - `STATE_FILE=/home/ubuntu/picksong-data/state.json`
 - `SEEN_FILE=/home/ubuntu/picksong-data/seen.json`
 - `AUTH_DIR=/home/ubuntu/picksong-data/wwebjs`
+
+Example multi-group config:
+
+```dotenv
+GROUP_NAMES=Band Rehearsal,TestMyBot
+GROUP_IDS=120363420724758799@g.us,120363245259281935@g.us
+```
 
 ## Deferred
 

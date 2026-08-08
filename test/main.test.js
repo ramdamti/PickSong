@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   stripWakeWord,
   shouldHandleMessage,
+  isMessageInTargetGroup,
   buildAgentReplyContext,
   buildAgentFailureReply,
   buildClarifyReply,
@@ -63,6 +64,35 @@ test('buildAgentReplyContext returns stored numbered results only', () => {
     source: 'reply',
     results: [{ index: 1, song_id: 'song_a', title: 'Zombie', artist: 'The Cranberries' }]
   });
+});
+
+test('isMessageInTargetGroup accepts any configured group id or name', () => {
+  assert.equal(
+    isMessageInTargetGroup(
+      { chatId: '1201@g.us' },
+      { groupIds: ['1201@g.us', '1202@g.us'], groupNames: ['Band A', 'Band B'] },
+      { id: { _serialized: '1201@g.us' }, isGroup: true, name: 'Ignored' }
+    ),
+    true
+  );
+
+  assert.equal(
+    isMessageInTargetGroup(
+      { chatId: 'other@g.us' },
+      { groupIds: [], groupNames: ['Band A', 'Band B'] },
+      { id: { _serialized: 'other@g.us' }, isGroup: true, name: 'Band B' }
+    ),
+    true
+  );
+
+  assert.equal(
+    isMessageInTargetGroup(
+      { chatId: 'other@g.us' },
+      { groupIds: ['1201@g.us'], groupNames: ['Band A'] },
+      { id: { _serialized: 'other@g.us' }, isGroup: true, name: 'Band C' }
+    ),
+    false
+  );
 });
 
 test('handleAgentMessage performs one agent call for a normal search request', async () => {
