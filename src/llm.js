@@ -6,11 +6,19 @@ const SYSTEM_PROMPT = [
   'Return exactly one JSON object. No prose. No markdown. No explanations.',
   'The application executes actions locally and deterministically.',
   'Never invent a song_id.',
+  'Translate the user request into the closest supported query parameters instead of asking unnecessary questions.',
+  'Prefer agent reasoning over generic fallback behavior: infer intent from the text and map it into the schema.',
   'When reply_context is provided and the user refers to previous results, use result_index values from that context.',
   'Treat performer-fit phrases as direct search intent, not ambiguity.',
   'Examples of performer-fit language: מתאים לזמר, מתאים לזמרת, מתאים לזמר שלנו, מתאים לקול שלנו, שהסולן יוכל לשיר, שהסולנית תוכל לשיר, מתאים לגיטריסט, מתאים לבסיסט, מתאים למתופף, מתאים לקלידים.',
   'Map those phrases into compact search query preferences or requirements when possible.',
+  'Use the provided supported_search_fields guide as the source of truth for which query fields exist.',
+  'If the user asks for something that has no exact field, map it to the nearest supported field instead of ignoring it.',
+  'Examples: cool bass or interesting bass -> preferences.bass_interest=high; groove or groovy -> preferences.groove_level=high; hard guitar solo -> preferences.guitar_difficulty=high; important keys -> preferences.keys_role=important; energetic -> preferences.band_energy=high; crowd friendly -> preferences.crowd_friendly=true; new to us -> preferences.untried=true.',
   'When users ask for songs by an artist or band and write the name in Hebrew or another non-English script, prefer the standard English canonical artist/band name in query.requirements.artist whenever you know it.',
+  'For artist or band requests, preserve the artist constraint strongly and do not answer with unrelated songs.',
+  'For language requests, preserve query.requirements.language strongly and do not answer with songs from another language.',
+  'For genre or instrument-feature requests, prefer a narrower relevant search over a broad generic list.',
   'Extract requested result counts carefully. Examples: "3 שירים", "שלושה שירים", "three songs" should set query.limit to 3.',
   'When reply_context exists and the user is asking for another recommendation list, fresh options, more songs, or different songs, set query.avoid_previous_results=true.',
   'For short feedback like "שיר 1 הוא קשה", "1 לא מתאים", or "2 ו-4 לא עבדו", prefer update_song_feedback with a non-empty updates array.',
@@ -25,6 +33,37 @@ const SYSTEM_PROMPT = [
   'Band-history questions use get_band_failure_reasons or explain_song_rejection.',
   'Do not return formatted WhatsApp replies.'
 ].join('\n');
+
+const SUPPORTED_SEARCH_FIELDS = {
+  requirements: {
+    artist: 'Exact artist or band constraint. Prefer canonical English names when known.',
+    language: 'Song language code such as he or en.',
+    genres: 'Required genres such as rock, blues, funk, jazz, metal, pop, ballad.',
+    feel: 'Required overall feel such as upbeat, calm, ballad.',
+    difficulty: 'Required overall song difficulty: low, medium, high.',
+    excludeRejected: 'Exclude songs with known bad band fit.',
+    excludePlayed: 'Exclude songs already marked as played.'
+  },
+  preferences: {
+    genres: 'Preferred genres when not a hard requirement.',
+    feel: 'Preferred feel when not a hard requirement.',
+    difficulty: 'Preferred overall difficulty: low, medium, high.',
+    original_vocal: 'Preferred original vocal profile such as male or female.',
+    singer_fit: 'How well the song should suit the singer, for example great.',
+    vocal_range: 'Preferred vocal range.',
+    vocal_energy: 'Preferred vocal energy.',
+    band_energy: 'Preferred band energy, useful for energetic or calm requests.',
+    groove_level: 'Preferred groove level, useful for groove or groovy requests.',
+    guitar_difficulty: 'Preferred guitar difficulty, useful for guitar-heavy or hard guitar requests.',
+    bass_difficulty: 'Preferred bass difficulty.',
+    drums_difficulty: 'Preferred drums difficulty.',
+    keys_difficulty: 'Preferred keys difficulty.',
+    keys_role: 'How important keys are in the arrangement, such as important or optional.',
+    bass_interest: 'How interesting or prominent the bass part should be.',
+    crowd_friendly: 'Whether the song should be crowd friendly.',
+    untried: 'Prefer songs the band has not tried yet.'
+  }
+};
 
 const MAX_CONCURRENT_AGENT_CALLS = 2;
 const DEFAULT_MAX_COMPLETION_TOKENS = 800;
@@ -148,7 +187,8 @@ function buildAgentPrompt({ messageText, replyContext, currentDate }) {
     {
       current_date: currentDate,
       user_message: messageText,
-      reply_context: replyContext || null
+      reply_context: replyContext || null,
+      supported_search_fields: SUPPORTED_SEARCH_FIELDS
     },
     null,
     2

@@ -41,16 +41,6 @@ function detectScriptLanguage(value) {
   return null;
 }
 
-function getEffectiveSongLanguage(song) {
-  const titleLanguage = detectScriptLanguage(song?.song_title);
-  if (titleLanguage) return titleLanguage;
-
-  const artistLanguage = detectScriptLanguage(song?.artist);
-  if (artistLanguage === 'he') return artistLanguage;
-
-  return normalizeScalar(song?.language);
-}
-
 function songGenres(song) {
   return normalizeList(song?.genres);
 }
@@ -108,7 +98,7 @@ function songMatchesHardRequirement(song, requirements = {}) {
   }
 
   if (requirements.language) {
-    const language = getEffectiveSongLanguage(song);
+    const language = normalizeScalar(song?.language);
     if (language !== normalizeScalar(requirements.language)) return false;
   }
 

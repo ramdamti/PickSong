@@ -167,14 +167,8 @@ test('searchSongs enforces artist and language as hard requirements', () => {
     limit: 5
   });
 
-  assert.deepEqual(
-    artistResults.map((song) => song.song_title),
-    ['Time']
-  );
-  assert.deepEqual(
-    languageResults.map((song) => song.song_title),
-    ['גשם']
-  );
+  assert.deepEqual(artistResults.map((song) => song.song_title), ['Time']);
+  assert.deepEqual(languageResults.map((song) => song.song_title), ['גשם']);
 });
 
 test('searchSongs returns no matches when an explicit genre requirement is absent from the catalog', () => {
@@ -199,8 +193,8 @@ test('searchSongs returns no matches when an explicit genre requirement is absen
   assert.deepEqual(results, []);
 });
 
-test('searchSongs does not treat latin-title songs as Hebrew just because the stored language tag says he', () => {
-  const mislabeledEnglishSong = createSong({
+test('searchSongs trusts the stored language field even when title and artist are written in latin characters', () => {
+  const latinScriptHebrewSong = createSong({
     song_title: 'Dancing queen',
     artist: 'ABBA',
     language: 'he'
@@ -211,17 +205,14 @@ test('searchSongs does not treat latin-title songs as Hebrew just because the st
     language: 'he'
   });
 
-  const results = searchSongs([mislabeledEnglishSong, hebrewSong], {
+  const results = searchSongs([latinScriptHebrewSong, hebrewSong], {
     requirements: { language: 'he' },
     preferences: {},
     exclusions: {},
     limit: 5
   });
 
-  assert.deepEqual(
-    results.map((song) => song.song_title),
-    ['גשם']
-  );
+  assert.deepEqual(results.map((song) => song.song_title), ['Dancing queen', 'גשם']);
 });
 
 test('searchSongs matches common Hebrew artist transliterations against English catalog artists', () => {
@@ -243,10 +234,7 @@ test('searchSongs matches common Hebrew artist transliterations against English 
     limit: 5
   });
 
-  assert.deepEqual(
-    results.map((song) => song.song_title),
-    ['Time']
-  );
+  assert.deepEqual(results.map((song) => song.song_title), ['Time']);
 });
 
 test('searchSongs can match a Hebrew artist request from catalog source_text even without an alias entry', () => {
@@ -270,8 +258,5 @@ test('searchSongs can match a Hebrew artist request from catalog source_text eve
     limit: 5
   });
 
-  assert.deepEqual(
-    results.map((song) => song.song_title),
-    ['Some Song']
-  );
+  assert.deepEqual(results.map((song) => song.song_title), ['Some Song']);
 });

@@ -4,12 +4,14 @@ const assert = require('node:assert/strict');
 const { SYSTEM_PROMPT, buildAgentPrompt, interpretMessage, getAgentUsageStats } = require('../src/llm');
 
 test('SYSTEM_PROMPT stays compact and stable', () => {
-  assert.ok(SYSTEM_PROMPT.length < 2600);
+  assert.ok(SYSTEM_PROMPT.length < 4200);
   assert.doesNotMatch(SYSTEM_PROMPT, /state\.json|songs\[|migration/i);
   assert.match(SYSTEM_PROMPT, /מתאים לזמר/);
   assert.match(SYSTEM_PROMPT, /מתאים לגיטריסט/);
   assert.match(SYSTEM_PROMPT, /Prefer taking a reasonable search interpretation/);
   assert.match(SYSTEM_PROMPT, /Use clarify only when execution would be unsafe or impossible/);
+  assert.match(SYSTEM_PROMPT, /supported_search_fields/);
+  assert.match(SYSTEM_PROMPT, /closest supported query parameters/);
 });
 
 test('buildAgentPrompt includes reply context without full database payloads', () => {
@@ -22,6 +24,9 @@ test('buildAgentPrompt includes reply context without full database payloads', (
   });
 
   assert.match(prompt, /reply_context/);
+  assert.match(prompt, /supported_search_fields/);
+  assert.match(prompt, /bass_interest/);
+  assert.match(prompt, /groove_level/);
   assert.match(prompt, /"index": 3/);
   assert.match(prompt, /"song_id": "song_a"/);
   assert.match(SYSTEM_PROMPT, /get_band_failure_reasons/);
