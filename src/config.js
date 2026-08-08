@@ -80,21 +80,45 @@ function loadConfig(env = process.env, options = {}) {
     throw new Error('GROUP_NAME is required');
   }
 
-  const llmProvider = (mergedEnv.LLM_PROVIDER || '').trim().toLowerCase();
-  const geminiApiKey = (mergedEnv.GEMINI_API_KEY || '').trim();
+  const llmProvider = (mergedEnv.LLM_PROVIDER || 'groq').trim().toLowerCase();
+  const groqApiKey = (mergedEnv.GROQ_API_KEY || '').trim();
+  const groqModel = (mergedEnv.GROQ_MODEL || 'openai/gpt-oss-20b').trim();
+  const groqBaseUrl = (mergedEnv.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').trim().replace(/\/$/, '');
+  const openAiCompatibleApiKey = (mergedEnv.OPENAI_COMPATIBLE_API_KEY || '').trim();
+  const openAiCompatibleModel = (mergedEnv.OPENAI_COMPATIBLE_MODEL || '').trim();
+  const openAiCompatibleBaseUrl = (mergedEnv.OPENAI_COMPATIBLE_BASE_URL || '').trim().replace(/\/$/, '');
+
+  let llmApiKey = '';
+  let llmModel = '';
+  let llmBaseUrl = '';
+
+  if (llmProvider === 'groq') {
+    llmApiKey = groqApiKey;
+    llmModel = groqModel;
+    llmBaseUrl = groqBaseUrl;
+  } else if (llmProvider === 'openai_compatible') {
+    llmApiKey = openAiCompatibleApiKey;
+    llmModel = openAiCompatibleModel;
+    llmBaseUrl = openAiCompatibleBaseUrl;
+  }
 
   return {
     groupName,
-    triggerText: (mergedEnv.TRIGGER_TEXT || 'תוסיף למאגר').trim(),
+    triggerText: (mergedEnv.TRIGGER_TEXT || '\u05d1\u05d5\u05d8').trim(),
     stateFile: path.resolve(mergedEnv.STATE_FILE || 'state.json'),
     seenFile: path.resolve(mergedEnv.SEEN_FILE || 'seen.json'),
     authDir: path.resolve(mergedEnv.AUTH_DIR || '.wwebjs_auth'),
     discoverChords: readBool(mergedEnv.DISCOVER_CHORDS ?? mergedEnv.discover_chords, true),
-    llmProvider: llmProvider || (geminiApiKey ? 'gemini' : 'ollama'),
-    ollamaBaseUrl: (mergedEnv.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').trim().replace(/\/$/, ''),
-    ollamaModel: (mergedEnv.OLLAMA_MODEL || 'qwen3:1.7b').trim(),
-    geminiApiKey,
-    geminiModel: (mergedEnv.GEMINI_MODEL || 'gemini-2.0-flash-lite').trim(),
+    llmProvider,
+    llmApiKey,
+    llmModel,
+    llmBaseUrl,
+    groqApiKey,
+    groqModel,
+    groqBaseUrl,
+    openAiCompatibleApiKey,
+    openAiCompatibleModel,
+    openAiCompatibleBaseUrl,
     executablePath: resolveExecutablePath(mergedEnv.PUPPETEER_EXECUTABLE_PATH || mergedEnv.CHROME_PATH || ''),
     headless: readBool(mergedEnv.HEADLESS, true)
   };

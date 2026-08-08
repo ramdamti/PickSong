@@ -1,138 +1,37 @@
 const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
-const { extractSongs } = require('./llm');
+const { interpretMessage } = require('./llm');
 const {
-  formatSongsReply,
-  parseSongsFromReplyText,
-  resolveChordsUrlsForSongs
-} = require('./chords');
+  persistResultContext,
+  resolveActiveResultContext,
+  findSongIdsByIndexes
+} = require('./result-context');
+const { searchSongs } = require('./song-search');
+const { formatSongsReply } = require('./chords');
+const { ALLOWED_UPDATE_FIELDS } = require('./schemas');
 
-const ADD_COMMAND = 'תוסיף למאגר';
-const RANDOM_COMMAND = 'תביא שיר';
+const CURRENT_DATE = '2026-08-08';
+const MUTABLE_SONG_FIELDS = new Set(ALLOWED_UPDATE_FIELDS);
+const FIT_LABELS = {
+  unknown: '\u05dc\u05d0 \u05d9\u05d3\u05d5\u05e2',
+  good: '\u05e2\u05d5\u05d1\u05d3 \u05d8\u05d5\u05d1',
+  maybe: '\u05d0\u05d5\u05dc\u05d9',
+  bad: '\u05dc\u05d0 \u05e2\u05d1\u05d3'
+};
 
-const HEBREW_NUMBER_WORDS = new Map([
-  ['אחת', 1],
-  ['אחד', 1],
-  ['שניים', 2],
-  ['שתי', 2],
-  ['שתיים', 2],
-  ['שנים', 2],
-  ['שני', 2],
-  ['שלוש', 3],
-  ['שלושה', 3],
-  ['ארבע', 4],
-  ['ארבעה', 4],
-  ['חמש', 5],
-  ['חמישה', 5],
-  ['שש', 6],
-  ['שישה', 6],
-  ['שבע', 7],
-  ['שבעה', 7],
-  ['שמונה', 8],
-  ['תשע', 9],
-  ['תשעה', 9],
-  ['עשר', 10],
-  ['עשרה', 10]
-]);
-
-const DEFAULT_REQUEST_COUNT = 5;
-const SONG_REQUEST_COMMANDS = new Set([normalizeText('תביא'), normalizeText('תן')]);
-const MAX_REQUEST_COUNT = 15;
-const DIFFICULTY_TOKEN_MAP = new Map([
-  [normalizeText('קל'), 'low'],
-  [normalizeText('קלה'), 'low'],
-  [normalizeText('קלים'), 'low'],
-  [normalizeText('קלות'), 'low'],
-  [normalizeText('בינוני'), 'medium'],
-  [normalizeText('בינונית'), 'medium'],
-  [normalizeText('בינוניים'), 'medium'],
-  [normalizeText('בינוניות'), 'medium'],
-  [normalizeText('קשה'), 'high'],
-  [normalizeText('קשים'), 'high'],
-  [normalizeText('קשות'), 'high']
-]);
-const FEEL_TOKEN_MAP = new Map([
-  [normalizeText('קצבי'), 'upbeat'],
-  [normalizeText('קצבי'), 'upbeat'],
-  [normalizeText('קצביים'), 'upbeat'],
-  [normalizeText('אנרגטי'), 'upbeat'],
-  [normalizeText('אנרגטית'), 'upbeat'],
-  [normalizeText('מקפיץ'), 'upbeat'],
-  [normalizeText('מקפיצה'), 'upbeat'],
-  [normalizeText('שקט'), 'calm'],
-  [normalizeText('שקטה'), 'calm'],
-  [normalizeText('רגוע'), 'calm'],
-  [normalizeText('רגועה'), 'calm'],
-  [normalizeText('רגועים'), 'calm'],
-  [normalizeText('רגועים'), 'calm'],
-  [normalizeText('בלדה'), 'ballad'],
-  [normalizeText('בלדות'), 'ballad']
-]);
-const GENRE_FAMILY_TOKEN_MAP = new Map([
-  [normalizeText('רוק'), 'rock'],
-  [normalizeText('רוקיסטי'), 'rock'],
-  [normalizeText('רוקנרול'), 'rock and roll'],
-  [normalizeText('בלוז'), 'blues'],
-  [normalizeText('בלוזי'), 'blues'],
-  [normalizeText('מטאל'), 'metal'],
-  [normalizeText('מטאלי'), 'metal'],
-  [normalizeText('פופ'), 'pop'],
-  [normalizeText('פופי'), 'pop'],
-  [normalizeText('פאנק'), 'funk'],
-  [normalizeText('פאנקי'), 'funk'],
-  [normalizeText('גאז'), 'jazz'],
-  [normalizeText('ג׳אז'), 'jazz'],
-  [normalizeText("ג'אז"), 'jazz'],
-  [normalizeText('גאזי'), 'jazz'],
-  [normalizeText('ג׳אזי'), 'jazz'],
-  [normalizeText("ג'אזי"), 'jazz'],
-  [normalizeText('רגאיי'), 'reggae'],
-  [normalizeText("רגאיי"), 'reggae'],
-  [normalizeText('קאנטרי'), 'country'],
-  [normalizeText('סול'), 'soul'],
-  [normalizeText('ישראלי'), 'israeli'],
-  [normalizeText('ישראלי'), 'israeli'],
-  [normalizeText('מזרחי'), 'mizrahi'],
-  [normalizeText('היפ הופ'), 'hip hop']
-]);
-const GENRE_FAMILY_MATCHERS = new Map([
-  ['rock', ['rock']],
-  ['blues', ['blues']],
-  ['metal', ['metal']],
-  ['pop', ['pop']],
-  ['funk', ['funk']],
-  ['jazz', ['jazz']],
-  ['reggae', ['reggae']],
-  ['country', ['country']],
-  ['soul', ['soul']],
-  ['israeli', ['israeli']],
-  ['mizrahi', ['mizrahi']],
-  ['hip hop', ['hip hop']],
-  ['rock and roll', ['rock and roll']]
-]);
-
-function firstWord(value) {
-  return normalizeText(value).split(' ')[0] || '';
+function escapeRegex(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function isRandomSongCommand(text) {
-  return SONG_REQUEST_COMMANDS.has(firstWord(text));
-}
+function stripWakeWord(text, triggerText = '\u05d1\u05d5\u05d8') {
+  const source = String(text || '').trim();
+  const trigger = String(triggerText || '').trim();
+  if (!source || !trigger) return null;
 
-function isAddSongCommand(text) {
-  const normalized = normalizeText(text);
-  const trigger = normalizeText(ADD_COMMAND);
-  return normalized === trigger || normalized.startsWith(`${trigger} `);
-}
+  const pattern = new RegExp(`^${escapeRegex(trigger)}(?:\\s*[:,\\-]\\s*|\\s+|$)`, 'iu');
+  if (!pattern.test(source)) return null;
 
-function stripCommandPrefix(text, command) {
-  const normalized = normalizeText(text);
-  const trigger = normalizeText(command);
-  if (!normalized.startsWith(trigger)) return String(text || '').trim();
-  return String(text || '')
-    .trim()
-    .replace(new RegExp(`^${command}\\s*`, 'u'), '')
-    .trim();
+  return source.replace(pattern, '').trim();
 }
 
 function isMessageInTargetGroup(record, groupName, chat) {
@@ -142,633 +41,405 @@ function isMessageInTargetGroup(record, groupName, chat) {
   return Boolean(target) && actual === target;
 }
 
-function parseCountToken(token) {
-  const normalized = normalizeText(token);
-  if (!normalized) return null;
-  const numeric = Number.parseInt(normalized, 10);
-  if (Number.isInteger(numeric) && numeric > 0) return numeric;
-  return HEBREW_NUMBER_WORDS.get(normalized) || null;
-}
-
-function detectLanguageFilter(text) {
-  const normalized = normalizeText(text);
-  if (!normalized) return null;
-
-  if (normalized.includes('עברית') || normalized.includes('בעברית') || normalized.includes('בערית') || normalized.includes('ישראלי') || normalized.includes('ישראלית') || normalized.includes('ישראלים')) {
-    return 'he';
-  }
-  if (normalized.includes('אנגלית') || normalized.includes('באנגלית') || normalized.includes('באגלית') || normalized.includes('אנגלי') || normalized.includes('אנגליות')) {
-    return 'en';
-  }
-  if (
-    normalized.includes('מעורב') ||
-    normalized.includes('מעורבב') ||
-    normalized.includes('גם וגם') ||
-    normalized.includes('משולב') ||
-    normalized.includes('שילוב')
-  ) {
-    return 'mixed';
-  }
-  return null;
-}
-
-function capRequestCount(count) {
-  const numeric = Number.isInteger(count) && count > 0 ? count : DEFAULT_REQUEST_COUNT;
-  return Math.min(numeric, MAX_REQUEST_COUNT);
-}
-
-function inferDefaultCountForSegment(text) {
-  const normalized = normalizeText(text);
-  if (!normalized) return DEFAULT_REQUEST_COUNT;
-  if (/(?:^|\s)שיר(?:\s|$)/u.test(normalized) && !/(?:^|\s)שירים(?:\s|$)/u.test(normalized)) {
-    return 1;
-  }
-  return DEFAULT_REQUEST_COUNT;
-}
-
-function normalizeArtistComparable(value) {
-  const normalized = normalizeText(value);
-  if (!normalized) return '';
-
-  return normalized
-    .replace(/^(?:הלהקה|להקה|להקת|הזמרת|זמרת|הזמר|זמר|של|מאת)\s+/u, '')
-    .replace(/^the\s+/u, '')
-    .replace(/^ה(?=\p{L}{2,})/u, '')
-    .trim();
-}
-
-function detectArtistFilter(text) {
-  const normalized = normalizeText(text);
-  if (!normalized) return null;
-
-  const match = normalized.match(/(?:^|\s)(?:של|מאת)\s+(.+)$/u);
-  if (!match) return null;
-
-  const artist = normalizeArtistComparable(match[1]);
-  return artist || null;
-}
-
-function detectDifficultyFilter(text) {
-  const tokens = normalizeText(text).split(/\s+/u).filter(Boolean);
-  for (const token of tokens) {
-    const difficulty = DIFFICULTY_TOKEN_MAP.get(token);
-    if (difficulty) return difficulty;
-  }
-  return null;
-}
-
-function detectFeelFilter(text) {
-  const tokens = normalizeText(text).split(/\s+/u).filter(Boolean);
-  for (const token of tokens) {
-    const feel = FEEL_TOKEN_MAP.get(token);
-    if (feel) return feel;
-  }
-  return null;
-}
-
-function detectGenreFilters(text) {
-  const normalized = normalizeText(text);
-  if (!normalized) return [];
-
-  const genres = [];
-  const seen = new Set();
-
-  for (const [token, genre] of GENRE_FAMILY_TOKEN_MAP.entries()) {
-    if (normalized.includes(token) && !seen.has(genre)) {
-      seen.add(genre);
-      genres.push(genre);
-    }
-  }
-
-  return genres;
-}
-
-function parseSongRequest(text) {
-  const normalized = normalizeText(text);
-  const command = firstWord(normalized);
-  if (!SONG_REQUEST_COMMANDS.has(command)) return null;
-
-  let remainder = normalized.replace(new RegExp(`^${command}\\s*`, 'u'), '').trim();
-  const includeChords = remainder.includes('עם אקורדים');
-  if (includeChords) {
-    remainder = remainder.replace('עם אקורדים', '').trim();
-  }
-
-  if (!remainder || remainder === 'שיר' || remainder === 'שירים') {
+function shouldHandleMessage(record, triggerText = '\u05d1\u05d5\u05d8') {
+  const strippedText = stripWakeWord(record?.text || '', triggerText);
+  if (strippedText !== null) {
     return {
-      items: [{ count: 1, language: null, artist: null, genres: [], difficulty: null, feel: null }],
-      includeChords
+      shouldHandle: true,
+      reason: 'wake_word',
+      messageText: strippedText
     };
   }
 
-  const segments = remainder
-    .replace(/^שירים?\s+/u, '')
-    .split(/\s+ו(?=\s*(?:\d|\p{L}))/u)
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-
-  const items = [];
-  for (const segment of segments) {
-    const tokens = segment.split(/\s+/u);
-    let count = null;
-    for (const token of tokens) {
-      const parsed = parseCountToken(token);
-      if (parsed) {
-        count = parsed;
-        break;
-      }
-    }
-    count = count ? capRequestCount(count) : inferDefaultCountForSegment(segment);
-
-    const language = detectLanguageFilter(segment);
-    const artist = detectArtistFilter(segment);
-    const genres = detectGenreFilters(segment);
-    const difficulty = detectDifficultyFilter(segment);
-    const feel = detectFeelFilter(segment);
-    items.push({ count, language, artist, genres, difficulty, feel });
+  if (record?.quoted?.fromMe) {
+    return {
+      shouldHandle: true,
+      reason: 'reply_to_bot',
+      messageText: String(record?.text || '').trim()
+    };
   }
 
-  if (items.length === 0) {
-    return { items: [{ count: 1, language: null, artist: null, genres: [], difficulty: null, feel: null }], includeChords };
-  }
-
-  return { items, includeChords };
-}
-
-function isChordsReplyCommand(text) {
-  const normalized = normalizeText(text);
-  const trigger = normalizeText('תביא אקורדים');
-  return normalized === trigger || normalized.startsWith(`${trigger} `);
-}
-
-function matchesLanguage(song, language) {
-  if (!language) return true;
-  const storedLanguage = String(song?.language || '').toLowerCase();
-  const lang = storedLanguage;
-  if (language === 'he') {
-    return lang === 'he' || lang === 'heb' || lang === 'hebrew';
-  }
-  if (language === 'en') {
-    return lang === 'en' || lang === 'eng' || lang === 'english';
-  }
-  if (language === 'mixed') {
-    return true;
-  }
-  return true;
-}
-
-function matchesArtist(song, artistQuery) {
-  const query = normalizeArtistComparable(artistQuery);
-  if (!query) return true;
-
-  const candidates = [
-    song?.artist,
-    song?.normalized_artist,
-    song?.source_text
-  ]
-    .map((value) => normalizeArtistComparable(value))
-    .filter(Boolean);
-
-  return candidates.some((candidate) => {
-    return candidate === query || candidate.includes(query) || query.includes(candidate);
-  });
-}
-
-function matchesDifficulty(song, difficulty) {
-  if (!difficulty) return true;
-  return String(song?.difficulty || '').trim().toLowerCase() === difficulty;
-}
-
-function matchesFeel(song, feel) {
-  if (!feel) return true;
-  return String(song?.feel || '').trim().toLowerCase() === feel;
-}
-
-function matchesGenre(song, genreQuery) {
-  const queries = Array.isArray(genreQuery)
-    ? genreQuery.map((genre) => String(genre || '').trim().toLowerCase()).filter(Boolean)
-    : [String(genreQuery || '').trim().toLowerCase()].filter(Boolean);
-  if (queries.length === 0) return true;
-  const genres = Array.isArray(song?.genres)
-    ? song.genres.map((genre) => String(genre || '').trim().toLowerCase()).filter(Boolean)
-    : [];
-  if (genres.length === 0) return false;
-
-  return queries.every((query) => {
-    const matchers = GENRE_FAMILY_MATCHERS.get(query) || [query];
-    return genres.some((genre) => {
-      if (genre === query) return true;
-      return matchers.some((matcher) => genre === matcher || genre.includes(matcher));
-    });
-  });
-}
-
-function pickRandomSong(stateStore, predicate, usedKeys) {
-  const songs = (stateStore.state.songs || []).filter(
-    (song) => !usedKeys.has(song.message_id) && (!predicate || predicate(song))
-  );
-  if (songs.length === 0) return null;
-  const choice = songs[Math.floor(Math.random() * songs.length)];
-  if (!choice) return null;
-  usedKeys.add(choice.message_id);
-  return choice;
-}
-
-function pickSongsForRequest(stateStore, requestItems) {
-  const selected = [];
-  const usedKeys = new Set();
-  const songs = stateStore.state.songs || [];
-
-  for (const item of requestItems) {
-    for (let index = 0; index < item.count; index += 1) {
-      let choice = null;
-
-      if (item.language === 'mixed') {
-        const preferredLanguage = index % 2 === 0 ? 'he' : 'en';
-        choice =
-          pickRandomSong(
-            stateStore,
-            (song) =>
-              matchesLanguage(song, preferredLanguage) &&
-              matchesArtist(song, item.artist) &&
-              matchesGenre(song, item.genres) &&
-              matchesDifficulty(song, item.difficulty) &&
-              matchesFeel(song, item.feel),
-            usedKeys
-          ) ||
-          pickRandomSong(
-            stateStore,
-            (song) =>
-              matchesLanguage(song, preferredLanguage === 'he' ? 'en' : 'he') &&
-              matchesArtist(song, item.artist) &&
-              matchesGenre(song, item.genres) &&
-              matchesDifficulty(song, item.difficulty) &&
-              matchesFeel(song, item.feel),
-            usedKeys
-          ) ||
-          pickRandomSong(
-            stateStore,
-            (song) =>
-              matchesArtist(song, item.artist) &&
-              matchesGenre(song, item.genres) &&
-              matchesDifficulty(song, item.difficulty) &&
-              matchesFeel(song, item.feel),
-            usedKeys
-          );
-      } else {
-        choice = pickRandomSong(
-          stateStore,
-          (song) =>
-            matchesLanguage(song, item.language) &&
-            matchesArtist(song, item.artist) &&
-            matchesGenre(song, item.genres) &&
-            matchesDifficulty(song, item.difficulty) &&
-            matchesFeel(song, item.feel),
-          usedKeys
-        );
-      }
-
-      if (!choice) break;
-      selected.push(choice);
-    }
-  }
-
-  return selected;
-}
-
-function buildMixedLanguageRequest(count, item = {}) {
-  const cappedCount = capRequestCount(count);
-  const heCount = Math.ceil(cappedCount / 2);
-  const enCount = Math.floor(cappedCount / 2);
-  return [
-    { count: heCount, language: 'he', artist: item.artist ?? null, genres: Array.isArray(item.genres) ? item.genres : [], difficulty: item.difficulty ?? null, feel: item.feel ?? null },
-    { count: enCount, language: 'en', artist: item.artist ?? null, genres: Array.isArray(item.genres) ? item.genres : [], difficulty: item.difficulty ?? null, feel: item.feel ?? null }
-  ];
-}
-
-function formatRtlLine(index, song) {
-  return `\u200F${index + 1}. ${String(song?.song_title || '').trim()}${song?.artist ? ` - ${String(song.artist).trim()}` : ''}`;
-}
-
-function normalizeSongKey(song) {
   return {
-    title: normalizeText(song?.song_title || ''),
-    artist: normalizeText(song?.artist || '')
+    shouldHandle: false,
+    reason: 'ignored',
+    messageText: null
   };
 }
 
-function findSongMatchesFromReply(stateStore, quotedText) {
-  const parsedSongs = parseSongsFromReplyText(quotedText);
-  const songs = stateStore.state.songs || [];
-  const usedIds = new Set();
-
-  return parsedSongs.map((parsedSong, index) => {
-    const parsedKey = normalizeSongKey(parsedSong);
-    let match = null;
-
-    if (parsedKey.title) {
-      match = songs.find((song) => {
-        if (!song?.message_id || usedIds.has(song.message_id)) return false;
-        const songKey = normalizeSongKey(song);
-        if (songKey.title !== parsedKey.title) return false;
-        if (parsedKey.artist && songKey.artist !== parsedKey.artist) return false;
-        return true;
-      }) || songs.find((song) => {
-        if (!song?.message_id || usedIds.has(song.message_id)) return false;
-        return normalizeSongKey(song).title === parsedKey.title;
-      });
-    }
-
-    if (match?.message_id) {
-      usedIds.add(match.message_id);
-      return match;
-    }
-
-    return {
-      message_id: `quoted:${index}`,
-      source_text: parsedSong.song_title,
-      song_title: parsedSong.song_title,
-      artist: parsedSong.artist ?? null,
-      language: null,
-      chords_url: null,
-      confidence: 0,
-      used: false,
-      created_at: new Date().toISOString(),
-      normalized_title: normalizeText(parsedSong.song_title),
-      normalized_artist: normalizeText(parsedSong.artist || '')
-    };
-  });
+function buildAgentReplyContext(stateStore, record) {
+  const resolved = resolveActiveResultContext(stateStore, record);
+  if (!resolved.context) return null;
+  return {
+    source: resolved.source,
+    results: resolved.context.results
+  };
 }
 
-async function resolveChordsForSongs(stateStore, songs) {
-  const prepared = Array.isArray(songs) ? songs.map((song) => ({ ...song })) : [];
-  const missingSongs = prepared.filter((song) => !String(song?.chords_url || '').trim());
-  if (missingSongs.length === 0) return prepared;
+function extractBotMessageId(sentMessage) {
+  return (
+    sentMessage?.id?._serialized ||
+    sentMessage?.id?.id ||
+    sentMessage?._data?.id?.id ||
+    ''
+  );
+}
 
-  let resolvedMissing = missingSongs;
-  try {
-    resolvedMissing = await resolveChordsUrlsForSongs(missingSongs, stateStore.config || {});
-  } catch (error) {
-    console.error('[chords] resolve failed:', error);
-    return prepared;
+function resolveSongFromAction(stateStore, action, activeContext) {
+  if (action.song_id) {
+    return { song: stateStore.getSongById(action.song_id), reason: null };
   }
 
-  const resolvedById = new Map(resolvedMissing.map((song) => [String(song?.message_id || ''), song]));
-
-  return prepared.map((song) => {
-    const resolved = resolvedById.get(String(song?.message_id || ''));
-    if (!resolved) return song;
-    const nextUrl = String(resolved.chords_url || '').trim() || null;
-    if (nextUrl && song.message_id && !String(song.message_id).startsWith('quoted:')) {
-      stateStore.setSongChordsUrl(song.message_id, nextUrl);
-    }
-    return { ...song, chords_url: nextUrl };
-  });
-}
-
-function stripUrls(value) {
-  return String(value || '')
-    .replace(/https?:\/\/\S+/giu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function isUrlOnly(value) {
-  const normalized = String(value || '').trim();
-  return /^https?:\/\/\S+$/iu.test(normalized);
-}
-
-async function extractAndStoreBatch({
-  config,
-  stateStore,
-  batch,
-  contextLabel
-}) {
-  const payload = batch.filter((message) => {
-    const id = message.id;
-    return id && !stateStore.hasSeenMessage(id);
-  });
-
-  if (payload.length === 0) return [];
-
-  console.log(`[extract:${contextLabel}] analyzing ${payload.length} messages`);
-  const results = await extractSongs({
-    provider: config.llmProvider,
-    ollamaBaseUrl: config.ollamaBaseUrl,
-    ollamaModel: config.ollamaModel,
-    geminiApiKey: config.geminiApiKey,
-    geminiModel: config.geminiModel,
-    messages: payload,
-    triggerText: ADD_COMMAND
-  });
-  console.log(`[extract:${contextLabel}] llm returned ${results.length} candidates`);
-
-  const added = [];
-  for (const result of results) {
-    const original =
-      payload.find((message) => message.id === result.message_id) ||
-      (result.source_text
-        ? payload.find((message) => normalizeText(message.text) === normalizeText(result.source_text))
-        : null);
-    if (!original) continue;
-    if (!result.song_title) continue;
-
-    const song = {
-      message_id: original.id,
-      source_text: result.source_text || original.text,
-      song_title: result.song_title,
-      artist: result.artist ?? null,
-      language: result.language ?? null,
-      confidence: result.confidence ?? 0,
-      genres: Array.isArray(result.genres) ? result.genres : [],
-      difficulty: result.difficulty ?? null,
-      feel: result.feel ?? null,
-      used: false,
-      created_at: new Date((original.timestamp || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
-      normalized_title: normalizeText(result.song_title),
-      normalized_artist: normalizeText(result.artist || '')
-    };
-
-    const inserted = stateStore.addSong(song);
-    if (inserted) {
-      added.push(song);
-      console.log(`[extract:${contextLabel}] added song: ${song.song_title}`);
+  if (Number.isInteger(action.result_index) && activeContext?.context) {
+    const [entry] = findSongIdsByIndexes(activeContext.context, [action.result_index]);
+    if (entry?.song_id) {
+      return { song: stateStore.getSongById(entry.song_id), reason: null };
     }
   }
 
-  for (const message of payload) {
-    stateStore.markSeenMessage(message.id);
-  }
-
-  if (payload.length > 0 || added.length > 0) {
-    await stateStore.queueSave();
-  }
-
-  return added;
-}
-
-async function sendRandomSong({ chat, stateStore, includeChords = false }) {
-  const nextSong = stateStore.getNextUnusedSong();
-  if (!nextSong) {
-    await chat.sendMessage('אין עדיין שירים 🤖');
-    return;
-  }
-
-  const songs = [nextSong];
-  if (includeChords && stateStore.config?.discoverChords !== false) {
-    console.log(`[chords] random request enabled for ${songs.length} song(s)`);
-    const resolved = await resolveChordsForSongs(stateStore, songs);
-    console.log(
-      `[chords] random resolved: ${resolved
-        .map((song) => String(song?.chords_url || '').trim() || '(none)')
-        .join(', ')}`
-    );
-    if (resolved.some((song, index) => song.chords_url !== songs[index].chords_url)) {
-      await stateStore.queueSave();
+  if (action.song_title) {
+    const matches = typeof stateStore.findSongsByNormalizedName === 'function'
+      ? stateStore.findSongsByNormalizedName(action.song_title, action.artist || '')
+      : (() => {
+          const match = typeof stateStore.findSongByNormalizedName === 'function'
+            ? stateStore.findSongByNormalizedName(action.song_title, action.artist || '')
+            : null;
+          return match ? [match] : [];
+        })();
+    if (matches.length === 1) {
+      return { song: matches[0], reason: null };
     }
-    await chat.sendMessage(formatSongsReply(resolved, { includeChords: true }));
-    return;
-  }
-
-  await chat.sendMessage(formatSongsReply(songs));
-}
-
-async function sendSongRequest({ chat, stateStore, text }) {
-  const request = parseSongRequest(text);
-  if (!request) return false;
-
-  if (
-    request.items.length === 1 &&
-    request.items[0].count === 1 &&
-    !request.items[0].language &&
-    !request.items[0].artist &&
-    (!Array.isArray(request.items[0].genres) || request.items[0].genres.length === 0) &&
-    !request.items[0].difficulty &&
-    !request.items[0].feel
-  ) {
-    await sendRandomSong({ chat, stateStore, includeChords: request.includeChords });
-    return true;
-  }
-
-  if (request.items.length === 1 && request.items[0].language === 'mixed') {
-    request.items = buildMixedLanguageRequest(request.items[0].count, request.items[0]);
-  }
-
-  const picked = pickSongsForRequest(stateStore, request.items);
-  if (picked.length === 0) {
-    await chat.sendMessage('אין עדיין שירים 🤖');
-    return true;
-  }
-
-  let songs = picked;
-  if (request.includeChords && stateStore.config?.discoverChords !== false) {
-    console.log(`[chords] request enabled for ${picked.length} song(s)`);
-    const resolved = await resolveChordsForSongs(stateStore, picked);
-    console.log(
-      `[chords] request resolved: ${resolved
-        .map((song) => String(song?.chords_url || '').trim() || '(none)')
-        .join(', ')}`
-    );
-    if (resolved.some((song, index) => song.chords_url !== picked[index].chords_url)) {
-      await stateStore.queueSave();
+    if (matches.length > 1) {
+      return { song: null, reason: 'ambiguous' };
     }
-    songs = resolved;
   }
 
-  await chat.sendMessage(formatSongsReply(songs, { includeChords: request.includeChords }));
-  return true;
+  return { song: null, reason: 'missing' };
 }
 
-async function sendChordsRequest({ chat, stateStore, quotedText }) {
-  const songs = findSongMatchesFromReply(stateStore, quotedText);
+function formatSongInfo(song) {
+  const issues = Array.isArray(song?.band_status?.issues) && song.band_status.issues.length > 0
+    ? song.band_status.issues.join(', ')
+    : '\u05d0\u05d9\u05df';
+  const notes = String(song?.band_status?.notes || '').trim();
+  const attempts = Number.isInteger(song?.band_status?.attempts) ? song.band_status.attempts : 0;
+  const reviewed = song?.band_status?.last_reviewed || '\u05d0\u05d9\u05df';
+  const rehearsed = song?.band_status?.last_rehearsed || '\u05d0\u05d9\u05df';
+  const played = song?.band_status?.last_played || '\u05d0\u05d9\u05df';
+  return [
+    `${song.song_title}${song.artist ? ` - ${song.artist}` : ''}`,
+    `\u05de\u05e6\u05d1: ${FIT_LABELS[song.band_status.fit] || song.band_status.fit}`,
+    `\u05d1\u05e2\u05d9\u05d5\u05ea: ${issues}`,
+    `\u05e0\u05d9\u05e1\u05d9\u05d5\u05e0\u05d5\u05ea: ${attempts}`,
+    `\u05e0\u05e1\u05e7\u05e8 \u05dc\u05d0\u05d7\u05e8\u05d5\u05e0\u05d4: ${reviewed}`,
+    `\u05d7\u05d6\u05e8\u05d4 \u05dc\u05d0\u05d7\u05e8\u05d5\u05e0\u05d4: ${rehearsed}`,
+    `\u05e0\u05d5\u05d2\u05df \u05dc\u05d0\u05d7\u05e8\u05d5\u05e0\u05d4: ${played}`,
+    notes ? `\u05d4\u05e2\u05e8\u05d5\u05ea: ${notes}` : null
+  ].filter(Boolean).join('\n');
+}
+
+function explainSongStatus(song) {
+  const fit = String(song?.band_status?.fit || 'unknown').trim();
+  const issues = Array.isArray(song?.band_status?.issues) ? song.band_status.issues : [];
+  const notes = String(song?.band_status?.notes || '').trim();
+
+  if (fit === 'bad') {
+    if (issues.length > 0 || notes) {
+      return [
+        `${song.song_title}${song.artist ? ` - ${song.artist}` : ''}`,
+        `\u05dc\u05d0 \u05e2\u05d1\u05d3 \u05dc\u05e0\u05d5.`,
+        issues.length > 0 ? `\u05d1\u05e2\u05d9\u05d5\u05ea: ${issues.join(', ')}` : null,
+        notes ? `\u05d4\u05e2\u05e8\u05d5\u05ea: ${notes}` : null
+      ].filter(Boolean).join('\n');
+    }
+    return `${song.song_title}${song.artist ? ` - ${song.artist}` : ''}\n\u05de\u05e1\u05d5\u05de\u05df \u05db\u05dc\u05d0 \u05e2\u05d5\u05d1\u05d3 \u05dc\u05d4\u05e8\u05db\u05d1.`;
+  }
+
+  return formatSongInfo(song);
+}
+
+function sanitizeSongUpdates(song, updates) {
+  const sanitized = {};
+  for (const field of Object.keys(updates || {})) {
+    if (!MUTABLE_SONG_FIELDS.has(field)) continue;
+    sanitized[field] = updates[field];
+  }
+
+  return {
+    ...sanitized,
+    normalized_title: sanitized.song_title ? normalizeText(sanitized.song_title) : song.normalized_title,
+    normalized_artist: sanitized.artist ? normalizeText(sanitized.artist) : song.normalized_artist
+  };
+}
+
+function buildFeedbackConfirmation(updatedSongs) {
+  if (updatedSongs.length === 0) {
+    return '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05de\u05d4 \u05dc\u05e2\u05d3\u05db\u05df.';
+  }
+
+  if (updatedSongs.length === 1) {
+    const song = updatedSongs[0];
+    return `\u05e2\u05d3\u05db\u05e0\u05ea\u05d9: ${song.song_title} - ${FIT_LABELS[song.band_status.fit] || song.band_status.fit}`;
+  }
+
+  return [
+    '\u05e2\u05d3\u05db\u05e0\u05ea\u05d9:',
+    ...updatedSongs.map((song) => `- ${song.song_title} - ${FIT_LABELS[song.band_status.fit] || song.band_status.fit}`)
+  ].join('\n');
+}
+
+function formatBadSongsSummary(songs) {
   if (!songs.length) {
-    await chat.sendMessage('יש להשיב להודעת שירים');
+    return '\u05d0\u05d9\u05df \u05dc\u05e0\u05d5 \u05db\u05e8\u05d2\u05e2 \u05e9\u05d9\u05e8\u05d9\u05dd \u05e9\u05e1\u05d5\u05de\u05e0\u05d5 \u05db\u05dc\u05d0 \u05e2\u05d1\u05d3\u05d5.';
+  }
+
+  return [
+    '\u05d4\u05d4\u05e6\u05e2\u05d5\u05ea \u05e9\u05dc\u05d0 \u05e2\u05d1\u05d3\u05d5 \u05dc\u05e0\u05d5:',
+    ...songs.map((song) => {
+      const issues = Array.isArray(song?.band_status?.issues) && song.band_status.issues.length > 0
+        ? song.band_status.issues.join(', ')
+        : '\u05d0\u05d9\u05df \u05e4\u05d9\u05e8\u05d5\u05d8';
+      return `- ${song.song_title}${song.artist ? ` - ${song.artist}` : ''}: ${issues}`;
+    })
+  ].join('\n');
+}
+
+function buildBandStatusQuery(fit) {
+  return {
+    requirements: {},
+    preferences: {},
+    exclusions: {
+      band_fit: Array.from(new Set(['unknown', 'good', 'maybe', 'bad'].filter((value) => value !== fit)))
+    },
+    limit: 10
+  };
+}
+
+async function sendSongsReply({ chat, stateStore, chatId, songs }) {
+  if (!songs.length) {
+    await chat.sendMessage('\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd.');
+    return;
+  }
+
+  const sentMessage = await chat.sendMessage(formatSongsReply(songs));
+  const botMessageId = extractBotMessageId(sentMessage);
+  persistResultContext(stateStore, {
+    chatId,
+    botMessageId,
+    songs,
+    createdAt: new Date().toISOString()
+  });
+  await stateStore.queueSave();
+}
+
+async function executeAgentAction({ action, stateStore, chat, record }) {
+  const activeContext = resolveActiveResultContext(stateStore, record);
+  const songs = stateStore.getSongs();
+
+  if (action.action === 'clarify') {
+    await chat.sendMessage(action.question);
+    return;
+  }
+
+  if (action.action === 'search_songs') {
+    const matches = searchSongs(songs, action.query || {});
+    await sendSongsReply({ chat, stateStore, chatId: record.chatId, songs: matches });
+    return;
+  }
+
+  if (action.action === 'find_similar_songs') {
+    const referenceIndex = Number.parseInt(action.query?.reference_result_index, 10);
+    if (!Number.isInteger(referenceIndex) || !activeContext.context) {
+      await chat.sendMessage('\u05dc\u05d0\u05d9\u05d6\u05d5 \u05e8\u05e9\u05d9\u05de\u05d4 \u05d0\u05ea\u05d4 \u05de\u05ea\u05db\u05d5\u05d5\u05df?');
+      return;
+    }
+
+    const [entry] = findSongIdsByIndexes(activeContext.context, [referenceIndex]);
+    const similarSong = entry?.song_id ? stateStore.getSongById(entry.song_id) : null;
+    if (!similarSong) {
+      await chat.sendMessage('\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05d0\u05ea \u05d4\u05e9\u05d9\u05e8 \u05e9\u05d4\u05ea\u05db\u05d5\u05d5\u05e0\u05ea \u05d0\u05dc\u05d9\u05d5.');
+      return;
+    }
+
+    const matches = searchSongs(
+      songs.filter((song) => song.song_id !== similarSong.song_id),
+      { ...action.query, limit: action.query?.limit || 5 },
+      { similarSong }
+    );
+    await sendSongsReply({ chat, stateStore, chatId: record.chatId, songs: matches });
+    return;
+  }
+
+  if (action.action === 'get_band_good_songs' || action.action === 'get_band_bad_songs' || action.action === 'get_band_maybe_songs') {
+    const fit =
+      action.action === 'get_band_good_songs'
+        ? 'good'
+        : action.action === 'get_band_bad_songs'
+          ? 'bad'
+          : 'maybe';
+    const matches = searchSongs(songs, buildBandStatusQuery(fit));
+    if (action.action === 'get_band_bad_songs') {
+      await chat.sendMessage(formatBadSongsSummary(matches));
+      return;
+    }
+    await sendSongsReply({ chat, stateStore, chatId: record.chatId, songs: matches });
+    return;
+  }
+
+  if (action.action === 'get_band_failure_reasons') {
+    const matches = searchSongs(songs, buildBandStatusQuery('bad'));
+    await chat.sendMessage(formatBadSongsSummary(matches));
+    return;
+  }
+
+  if (action.action === 'add_song') {
+    const inserted = stateStore.addSong({
+      ...action.song,
+      message_id: `agent:add:${Date.now()}`,
+      source_text: record.text,
+      normalized_title: normalizeText(action.song.song_title),
+      normalized_artist: normalizeText(action.song.artist),
+      created_at: new Date().toISOString()
+    });
+
+    if (!inserted) {
+      await chat.sendMessage('\u05d4\u05e9\u05d9\u05e8 \u05db\u05d1\u05e8 \u05e7\u05d9\u05d9\u05dd.');
+      return;
+    }
+
+    await stateStore.queueSave();
+    await chat.sendMessage(`\u05d4\u05d5\u05e1\u05e4\u05ea\u05d9: ${action.song.song_title}${action.song.artist ? ` - ${action.song.artist}` : ''}`);
+    return;
+  }
+
+  if (action.action === 'update_song_feedback') {
+    if (!activeContext.context) {
+      await chat.sendMessage('\u05dc\u05d0\u05d9\u05d6\u05d5 \u05e8\u05e9\u05d9\u05de\u05d4 \u05d0\u05ea\u05d4 \u05de\u05ea\u05db\u05d5\u05d5\u05df?');
+      return;
+    }
+
+    const updatedSongs = [];
+    for (const update of action.updates) {
+      const [entry] = findSongIdsByIndexes(activeContext.context, [update.result_index]);
+      if (!entry?.song_id) continue;
+      const updated = stateStore.updateSongById(entry.song_id, (song) => ({
+        ...song,
+        band_status: {
+          ...song.band_status,
+          fit: update.fit || song.band_status.fit,
+          issues: update.issues || song.band_status.issues,
+          notes: update.notes || song.band_status.notes,
+          attempts: (song.band_status.attempts || 0) + 1,
+          last_reviewed: new Date().toISOString()
+        }
+      }));
+      if (updated) updatedSongs.push(updated);
+    }
+
+    await stateStore.queueSave();
+    await chat.sendMessage(buildFeedbackConfirmation(updatedSongs));
+    return;
+  }
+
+  if (action.action === 'get_song_info') {
+    const { song, reason } = resolveSongFromAction(stateStore, action, activeContext);
+    if (!song) {
+      await chat.sendMessage(
+        reason === 'ambiguous'
+          ? '\u05d9\u05e9 \u05db\u05de\u05d4 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd. \u05ea\u05db\u05d5\u05d5\u05df \u05d1\u05e9\u05dd \u05d4\u05d0\u05d5\u05de\u05df \u05d0\u05d5 \u05d1\u05de\u05e1\u05e4\u05e8 \u05de\u05d4\u05e8\u05e9\u05d9\u05de\u05d4.'
+          : '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05d0\u05d9\u05d6\u05d4 \u05e9\u05d9\u05e8 \u05d4\u05ea\u05db\u05d5\u05d5\u05e0\u05ea.'
+      );
+      return;
+    }
+
+    await chat.sendMessage(formatSongInfo(song));
+    return;
+  }
+
+  if (action.action === 'explain_song_rejection') {
+    const { song, reason } = resolveSongFromAction(stateStore, action, activeContext);
+    if (!song) {
+      await chat.sendMessage(
+        reason === 'ambiguous'
+          ? '\u05d9\u05e9 \u05db\u05de\u05d4 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd. \u05ea\u05db\u05d5\u05d5\u05df \u05d1\u05e9\u05dd \u05d4\u05d0\u05d5\u05de\u05df \u05d0\u05d5 \u05d1\u05de\u05e1\u05e4\u05e8 \u05de\u05d4\u05e8\u05e9\u05d9\u05de\u05d4.'
+          : '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05d0\u05d9\u05d6\u05d4 \u05e9\u05d9\u05e8 \u05d4\u05ea\u05db\u05d5\u05d5\u05e0\u05ea.'
+      );
+      return;
+    }
+
+    await chat.sendMessage(explainSongStatus(song));
+    return;
+  }
+
+  if (action.action === 'remove_song') {
+    const { song, reason } = resolveSongFromAction(stateStore, action, activeContext);
+    if (!song) {
+      await chat.sendMessage(
+        reason === 'ambiguous'
+          ? '\u05d9\u05e9 \u05db\u05de\u05d4 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd. \u05ea\u05db\u05d5\u05d5\u05df \u05d1\u05e9\u05dd \u05d4\u05d0\u05d5\u05de\u05df \u05d0\u05d5 \u05d1\u05de\u05e1\u05e4\u05e8 \u05de\u05d4\u05e8\u05e9\u05d9\u05de\u05d4.'
+          : '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05d0\u05d9\u05d6\u05d4 \u05e9\u05d9\u05e8 \u05dc\u05d4\u05e1\u05d9\u05e8.'
+      );
+      return;
+    }
+
+    stateStore.removeSongById(song.song_id);
+    await stateStore.queueSave();
+    await chat.sendMessage(`\u05d4\u05e1\u05e8\u05ea\u05d9: ${song.song_title}${song.artist ? ` - ${song.artist}` : ''}`);
+    return;
+  }
+
+  if (action.action === 'update_song') {
+    const { song, reason } = resolveSongFromAction(stateStore, action, activeContext);
+    if (!song) {
+      await chat.sendMessage(
+        reason === 'ambiguous'
+          ? '\u05d9\u05e9 \u05db\u05de\u05d4 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd. \u05ea\u05db\u05d5\u05d5\u05df \u05d1\u05e9\u05dd \u05d4\u05d0\u05d5\u05de\u05df \u05d0\u05d5 \u05d1\u05de\u05e1\u05e4\u05e8 \u05de\u05d4\u05e8\u05e9\u05d9\u05de\u05d4.'
+          : '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05d0\u05d9\u05d6\u05d4 \u05e9\u05d9\u05e8 \u05dc\u05e2\u05d3\u05db\u05df.'
+      );
+      return;
+    }
+
+    const updates = action.updates && typeof action.updates === 'object' ? action.updates : {};
+    const sanitizedUpdates = sanitizeSongUpdates(song, updates);
+    const updated = stateStore.updateSongById(song.song_id, {
+      ...song,
+      ...sanitizedUpdates
+    });
+    await stateStore.queueSave();
+    await chat.sendMessage(`\u05e2\u05d3\u05db\u05e0\u05ea\u05d9: ${updated.song_title}${updated.artist ? ` - ${updated.artist}` : ''}`);
+    return;
+  }
+
+  throw new Error(`Unhandled agent action: ${action.action}`);
+}
+
+async function handleAgentMessage({ chat, stateStore, config, record, interpretMessageFn = interpretMessage }) {
+  const handling = shouldHandleMessage(record, config.triggerText);
+  if (!handling.shouldHandle) return false;
+
+  const replyContext = buildAgentReplyContext(stateStore, record);
+  const messageText = handling.messageText;
+  if (!messageText) {
+    await chat.sendMessage('\u05de\u05d4 \u05dc\u05d7\u05e4\u05e9?');
     return true;
   }
 
-  let resolvedSongs = songs;
-  if (stateStore.config?.discoverChords !== false) {
-    console.log(`[chords] reply request enabled for ${songs.length} song(s)`);
-    resolvedSongs = await resolveChordsForSongs(stateStore, songs);
-    console.log(
-      `[chords] reply resolved: ${resolvedSongs
-        .map((song) => String(song?.chords_url || '').trim() || '(none)')
-        .join(', ')}`
-    );
-    if (resolvedSongs.some((song, index) => song.chords_url !== songs[index].chords_url)) {
-      await stateStore.queueSave();
-    }
-  }
+  try {
+    const action = await interpretMessageFn({
+      provider: config.llmProvider,
+      baseUrl: config.llmBaseUrl,
+      apiKey: config.llmApiKey,
+      model: config.llmModel,
+      messageText,
+      replyContext,
+      currentDate: CURRENT_DATE
+    });
 
-  await chat.sendMessage(formatSongsReply(resolvedSongs, { includeChords: true }));
+    await executeAgentAction({ action, stateStore, chat, record });
+  } catch (error) {
+    console.error('[agent] failed:', error);
+    await chat.sendMessage('\u05d9\u05e9 \u05dc\u05d9 \u05e2\u05db\u05e9\u05d9\u05d5 \u05e2\u05d5\u05de\u05e1 \u05e7\u05d8\u05df. \u05e0\u05e1\u05d5 \u05e9\u05d5\u05d1 \u05e2\u05d5\u05d3 \u05e8\u05d2\u05e2.');
+  }
   return true;
-}
-
-async function handleAddSongCommand({ chat, stateStore, config, triggerRecord, extractSongsFn = extractSongs }) {
-  const baseId = String(triggerRecord?.id || `add:${Date.now()}`).trim();
-  const quotedText = String(triggerRecord?.quotedText || '').trim();
-  const inlineText = stripCommandPrefix(triggerRecord?.text || '', ADD_COMMAND);
-  const sourceText = stripUrls(quotedText || inlineText);
-
-  if (!sourceText) {
-    await chat.sendMessage('🤖 צריך טקסט של השיר');
-    return;
-  }
-
-  if (isUrlOnly(quotedText || inlineText)) {
-    await chat.sendMessage('🤖 צריך טקסט של השיר, קישור לבד לא מספיק');
-    return;
-  }
-
-  const results = await extractSongsFn({
-    provider: config.llmProvider,
-    ollamaBaseUrl: config.ollamaBaseUrl,
-    ollamaModel: config.ollamaModel,
-    geminiApiKey: config.geminiApiKey,
-    geminiModel: config.geminiModel,
-    messages: [
-      {
-        id: `${baseId}:add`,
-        text: sourceText,
-        sender: triggerRecord?.sender || '',
-        from: triggerRecord?.from || '',
-        quotedText: null,
-        timestamp: triggerRecord?.timestamp || null
-      }
-    ],
-    triggerText: ADD_COMMAND
-  });
-
-  let addedCount = 0;
-  for (const [index, result] of results.entries()) {
-    const song = {
-      message_id: `${baseId}:add:${index}`,
-      source_text: result.source_text || sourceText,
-      song_title: result.song_title,
-      artist: result.artist ?? null,
-      language: result.language ?? null,
-      confidence: result.confidence ?? 0,
-      genres: Array.isArray(result.genres) ? result.genres : [],
-      difficulty: result.difficulty ?? null,
-      feel: result.feel ?? null,
-      used: false,
-      created_at: new Date().toISOString(),
-      normalized_title: normalizeText(result.song_title),
-      normalized_artist: normalizeText(result.artist || '')
-    };
-
-    if (stateStore.addSong(song)) {
-      addedCount += 1;
-    }
-  }
-
-  if (addedCount > 0) {
-    await stateStore.queueSave();
-    await chat.sendMessage('🤖 הוספתי');
-    return;
-  }
-
-  await chat.sendMessage('🤖 השיר קיים כבר');
 }
 
 async function bootstrap() {
@@ -776,7 +447,7 @@ async function bootstrap() {
     createWhatsAppClient,
     waitForReady,
     messageToRecord,
-    readQuotedText
+    readQuotedMessage
   } = require('./whatsapp');
   const config = loadConfig(process.env);
   const loadedState = await loadState(config.stateFile);
@@ -847,29 +518,12 @@ async function bootstrap() {
   }
 
   async function handleLiveMessage(record) {
-    const text = record.text || '';
     const chat = record.chat;
     if (!isMessageInTargetGroup(record, config.groupName, chat)) {
       return;
     }
 
-    if (isChordsReplyCommand(text)) {
-      console.log('[trigger] chords request');
-      await sendChordsRequest({ chat, stateStore, quotedText: record.quotedText });
-      return;
-    }
-
-    if (isRandomSongCommand(text)) {
-      console.log('[trigger] random song');
-      await sendSongRequest({ chat, stateStore, text });
-      return;
-    }
-
-    if (isAddSongCommand(text)) {
-      console.log('[trigger] add song');
-      await handleAddSongCommand({ chat, stateStore, config, triggerRecord: record });
-      return;
-    }
+    await handleAgentMessage({ chat, stateStore, config, record });
   }
 
   async function finalizeStartup() {
@@ -890,6 +544,8 @@ async function bootstrap() {
 
   const handleIncomingMessage = async (message) => {
     try {
+      if (message.fromMe) return;
+
       const messageId = message.id?._serialized || message.id?.id || '';
       if (!markProcessed(messageId)) return;
 
@@ -897,7 +553,9 @@ async function bootstrap() {
       if (!text) return;
 
       const record = messageToRecord(message);
-      record.quotedText = await readQuotedText(message);
+      const quoted = await readQuotedMessage(message);
+      record.quoted = quoted || record.quoted;
+      record.quotedText = quoted?.text || null;
 
       let chatId = record.chatId;
       if (typeof message.getChat === 'function') {
@@ -925,11 +583,7 @@ async function bootstrap() {
       }
 
       console.log(
-        `[message:raw] fromMe=${Boolean(message.fromMe)} from=${message.from || ''} to=${message.to || ''} text=${JSON.stringify(text)}`
-      );
-
-      console.log(
-        `[message] fromMe=${Boolean(message.fromMe)} chatId=${chatId} from=${record.from} text=${JSON.stringify(text)}`
+        `[message] chatId=${chatId} from=${record.from} text=${JSON.stringify(text)} reason=${shouldHandleMessage(record, config.triggerText).reason}`
       );
 
       if (!readyToProcess) {
@@ -976,16 +630,11 @@ async function bootstrap() {
 }
 
 module.exports = {
-  parseSongRequest,
-  detectArtistFilter,
-  normalizeArtistComparable,
-  matchesArtist,
-  matchesGenre,
-  matchesDifficulty,
-  matchesFeel,
-  pickSongsForRequest,
-  buildMixedLanguageRequest,
-  handleAddSongCommand
+  stripWakeWord,
+  shouldHandleMessage,
+  buildAgentReplyContext,
+  handleAgentMessage,
+  executeAgentAction
 };
 
 if (require.main === module) {

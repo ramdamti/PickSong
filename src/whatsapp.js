@@ -125,16 +125,29 @@ function messageToRecord(message) {
     text: String(message.body || '').trim(),
     sender: message._data?.notifyName || message.author || message.from || '',
     from: message.from || '',
+    fromMe: Boolean(message.fromMe),
     chatId,
-    timestamp: message.timestamp || null
+    timestamp: message.timestamp || null,
+    quoted: {
+      hasQuotedMsg: Boolean(message.hasQuotedMsg),
+      id: null,
+      text: null,
+      fromMe: null,
+      author: null
+    }
   };
 }
 
-async function readQuotedText(message) {
+async function readQuotedMessage(message) {
   if (!message.hasQuotedMsg) return null;
   try {
     const quoted = await message.getQuotedMessage();
-    return quoted?.body ? String(quoted.body).trim() : null;
+    return {
+      id: quoted?.id?._serialized || quoted?.id?.id || '',
+      text: quoted?.body ? String(quoted.body).trim() : null,
+      fromMe: quoted?.fromMe === undefined ? null : Boolean(quoted.fromMe),
+      author: quoted?.author || quoted?.from || null
+    };
   } catch (error) {
     return null;
   }
@@ -145,5 +158,5 @@ module.exports = {
   waitForReady,
   findGroupChat,
   messageToRecord,
-  readQuotedText
+  readQuotedMessage
 };

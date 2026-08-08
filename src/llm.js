@@ -1,3 +1,107 @@
+const { validateAgentAction } = require('./schemas');
+
+const SYSTEM_PROMPT = [
+  'You are a JSON-only semantic interpreter for a WhatsApp bot for a band.',
+  'Users usually write in Hebrew.',
+  'Return exactly one JSON object. No prose. No markdown. No explanations.',
+  'The application executes actions locally and deterministically.',
+  'Never invent a song_id.',
+  'When reply_context is provided and the user refers to previous results, use result_index values from that context.',
+  'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
+  'Allowed actions: search_songs, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, clarify.',
+  'search_songs and find_similar_songs return compact query semantics only.',
+  'add_song must return a complete canonical song payload when identity is sufficiently clear.',
+  'update_song_feedback must use result_index for list references.',
+  'Band-history questions use get_band_failure_reasons or explain_song_rejection.',
+  'Do not return formatted WhatsApp replies.'
+].join('\n');
+
+const MAX_CONCURRENT_AGENT_CALLS = 2;
+const DEFAULT_MAX_COMPLETION_TOKENS = 800;
+const DEFAULT_MAX_RETRIES = 1;
+
+let activeAgentCalls = 0;
+const pendingAgentCalls = [];
+const usageMetrics = {
+  minuteWindowStartedAt: 0,
+  minuteCalls: 0,
+  dayStamp: '',
+  dayCalls: 0,
+  minuteInputTokens: 0,
+  minuteOutputTokens: 0,
+  minuteCachedTokens: 0,
+  dayInputTokens: 0,
+  dayOutputTokens: 0,
+  dayCachedTokens: 0,
+  rateLimitResponses: 0
+};
+
+function resetUsageWindows(now = new Date()) {
+  const minuteBucket = Math.floor(now.getTime() / 60000);
+  if (usageMetrics.minuteWindowStartedAt !== minuteBucket) {
+    usageMetrics.minuteWindowStartedAt = minuteBucket;
+    usageMetrics.minuteCalls = 0;
+    usageMetrics.minuteInputTokens = 0;
+    usageMetrics.minuteOutputTokens = 0;
+    usageMetrics.minuteCachedTokens = 0;
+  }
+
+  const dayStamp = now.toISOString().slice(0, 10);
+  if (usageMetrics.dayStamp !== dayStamp) {
+    usageMetrics.dayStamp = dayStamp;
+    usageMetrics.dayCalls = 0;
+    usageMetrics.dayInputTokens = 0;
+    usageMetrics.dayOutputTokens = 0;
+    usageMetrics.dayCachedTokens = 0;
+    usageMetrics.rateLimitResponses = 0;
+  }
+}
+
+function getAgentUsageStats() {
+  resetUsageWindows(new Date());
+  return { ...usageMetrics, queueDepth: pendingAgentCalls.length, activeCalls: activeAgentCalls };
+}
+
+function recordUsage({ promptTokens = 0, completionTokens = 0, cachedTokens = 0, rateLimited = false } = {}) {
+  resetUsageWindows(new Date());
+  if (rateLimited) {
+    usageMetrics.rateLimitResponses += 1;
+    return;
+  }
+
+  usageMetrics.minuteCalls += 1;
+  usageMetrics.dayCalls += 1;
+  usageMetrics.minuteInputTokens += promptTokens;
+  usageMetrics.dayInputTokens += promptTokens;
+  usageMetrics.minuteOutputTokens += completionTokens;
+  usageMetrics.dayOutputTokens += completionTokens;
+  usageMetrics.minuteCachedTokens += cachedTokens;
+  usageMetrics.dayCachedTokens += cachedTokens;
+}
+
+function runWithAgentConcurrencyLimit(task) {
+  return new Promise((resolve, reject) => {
+    const start = () => {
+      activeAgentCalls += 1;
+      Promise.resolve()
+        .then(task)
+        .then(resolve, reject)
+        .finally(() => {
+          activeAgentCalls -= 1;
+          const next = pendingAgentCalls.shift();
+          if (next) next();
+        });
+    };
+
+    if (activeAgentCalls < MAX_CONCURRENT_AGENT_CALLS) {
+      start();
+      return;
+    }
+
+    pendingAgentCalls.push(start);
+  });
+}
+
 function extractJsonBlock(text) {
   if (!text) return null;
   const trimmed = String(text).trim();
@@ -29,199 +133,171 @@ function extractJsonBlock(text) {
   return null;
 }
 
-function buildPrompt(messages, triggerText) {
-  const payload = messages.map((message) => ({
-    message_id: message.id,
-    sender: message.sender,
-    text: message.text,
-    quoted_text: message.quotedText || null,
-    timestamp: message.timestamp || null
-  }));
-
-  return [
-    `Trigger text for the bot is: ${triggerText}`,
-    'You extract song suggestions from a WhatsApp group for a band.',
-    'The chat can contain Hebrew, English, or both.',
-    'Return JSON only. No markdown. No explanation.',
-    'Preserve the original language and spelling of the song title.',
-    'Never use a URL as the song title. If the message is only a URL, return no results.',
-    'A message is a song suggestion if it proposes a song for rehearsal, even indirectly.',
-    'Also classify each suggested song with 1 to 3 lowercase English genres, an overall difficulty for a 2 guitars + bass + drums + keyboard band, and an overall feel.',
-    'Ignore jokes, off-topic chat, and the trigger message itself.',
-    'Output shape:',
-    '{ "results": [ { "message_id": "...", "is_song_suggestion": true, "song_title": "...", "artist": null, "language": "he|en|mixed|null", "confidence": 0.0, "needs_review": false, "source_text": "...", "genres": ["rock"], "difficulty": "low|medium|high|null", "feel": "upbeat|calm|ballad|null" } ] }',
-    'Genres must be lowercase English strings. Difficulty must be low, medium, or high. Feel must be upbeat, calm, or ballad.',
-    'The message_id in each result must exactly match one of the input message_id values.',
-    'If there are no song suggestions, return { "results": [] }.',
-    'Messages to analyze:',
-    JSON.stringify(payload, null, 2)
-  ].join('\n');
+function buildAgentPrompt({ messageText, replyContext, currentDate }) {
+  return JSON.stringify(
+    {
+      current_date: currentDate,
+      user_message: messageText,
+      reply_context: replyContext || null
+    },
+    null,
+    2
+  );
 }
 
-function normalizeResults(parsed) {
-  const results = Array.isArray(parsed?.results) ? parsed.results : [];
-  return results
-    .filter((item) => item && typeof item === 'object')
-    .map((item) => ({
-      message_id: String(item.message_id || '').trim(),
-      is_song_suggestion: Boolean(item.is_song_suggestion),
-      song_title: item.song_title ? String(item.song_title).trim() : '',
-      artist: item.artist === null || item.artist === undefined ? null : String(item.artist).trim(),
-      language: item.language ? String(item.language).trim() : null,
-      confidence: Number.isFinite(Number(item.confidence)) ? Number(item.confidence) : 0,
-      needs_review: Boolean(item.needs_review),
-      source_text: item.source_text ? String(item.source_text).trim() : '',
-      genres: Array.isArray(item.genres)
-        ? Array.from(
-            new Set(
-              item.genres
-                .map((genre) => String(genre || '').trim().toLowerCase())
-                .filter(Boolean)
-            )
-          ).slice(0, 3)
-        : [],
-      difficulty: ['low', 'medium', 'high'].includes(String(item.difficulty || '').trim().toLowerCase())
-        ? String(item.difficulty).trim().toLowerCase()
-        : null,
-      feel: ['upbeat', 'calm', 'ballad'].includes(String(item.feel || '').trim().toLowerCase())
-        ? String(item.feel).trim().toLowerCase()
-        : null
-    }))
-    .filter((item) => item.is_song_suggestion && item.song_title);
+function buildRateLimitError(response, bodyText) {
+  const retryAfterHeader = response.headers.get('retry-after');
+  const retryAfterMs = retryAfterHeader ? Number.parseFloat(retryAfterHeader) * 1000 : null;
+  const error = new Error(`LLM request failed: ${response.status} ${response.statusText} ${bodyText}`);
+  error.status = response.status;
+  error.retryAfterMs = Number.isFinite(retryAfterMs) ? retryAfterMs : null;
+  error.rateLimited = response.status === 429;
+  return error;
 }
 
-async function extractSongsViaOllama({
+async function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function callOpenAiCompatibleChat({
   baseUrl,
+  apiKey,
   model,
-  messages,
-  triggerText
+  prompt,
+  requestFn = fetch,
+  maxCompletionTokens = DEFAULT_MAX_COMPLETION_TOKENS
 }) {
-  const response = await fetch(`${baseUrl}/api/chat`, {
+  const endpoint = `${String(baseUrl || '').replace(/\/$/, '')}/chat/completions`;
+  const startedAt = Date.now();
+  const response = await requestFn(endpoint, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
     },
     body: JSON.stringify({
       model,
-      stream: false,
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      max_completion_tokens: maxCompletionTokens,
       messages: [
         {
           role: 'system',
-          content: 'You are a strict JSON extraction engine.'
+          content: SYSTEM_PROMPT
         },
         {
           role: 'user',
-          content: buildPrompt(messages, triggerText)
+          content: prompt
         }
-      ],
-      options: {
-        temperature: 0
-      }
+      ]
     })
   });
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`Ollama request failed: ${response.status} ${response.statusText} ${body}`);
+    if (response.status === 429) {
+      recordUsage({ rateLimited: true });
+    }
+    throw buildRateLimitError(response, body);
   }
 
   const data = await response.json();
-  const content = data?.message?.content || data?.response || '';
+  const content = data?.choices?.[0]?.message?.content || '';
   const parsed = extractJsonBlock(content);
   if (!parsed || typeof parsed !== 'object') {
-    throw new Error(`Could not parse LLM JSON response: ${content}`);
+    throw new Error(`Could not parse agent JSON response: ${content}`);
   }
 
-  return normalizeResults(parsed);
+  const usage = data?.usage || {};
+  const promptTokens = Number.isFinite(Number(usage.prompt_tokens)) ? Number(usage.prompt_tokens) : 0;
+  const completionTokens = Number.isFinite(Number(usage.completion_tokens)) ? Number(usage.completion_tokens) : 0;
+  const cachedTokens = Number.isFinite(Number(usage?.prompt_tokens_details?.cached_tokens))
+    ? Number(usage.prompt_tokens_details.cached_tokens)
+    : 0;
+  const latencyMs = Date.now() - startedAt;
+
+  recordUsage({ promptTokens, completionTokens, cachedTokens });
+
+  return {
+    parsed,
+    usage: {
+      promptTokens,
+      completionTokens,
+      cachedTokens,
+      totalTokens: Number.isFinite(Number(usage.total_tokens)) ? Number(usage.total_tokens) : promptTokens + completionTokens,
+      latencyMs
+    }
+  };
 }
 
-async function extractSongsViaGemini({
+function estimateActionName(parsedAction) {
+  return typeof parsedAction?.action === 'string' ? parsedAction.action : 'unknown';
+}
+
+async function interpretMessage({
+  provider,
+  baseUrl,
   apiKey,
   model,
-  messages,
-  triggerText
+  messageText,
+  replyContext,
+  currentDate,
+  requestFn,
+  maxRetries = DEFAULT_MAX_RETRIES
 }) {
-  const endpoint = new URL(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`
-  );
-  endpoint.searchParams.set('key', apiKey);
+  const selectedProvider = String(provider || '').trim().toLowerCase();
+  if (!model) {
+    throw new Error('LLM model is required');
+  }
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      systemInstruction: {
-        parts: [{ text: 'You are a strict JSON extraction engine.' }]
-      },
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: buildPrompt(messages, triggerText) }]
+  if (selectedProvider !== 'groq' && selectedProvider !== 'openai_compatible') {
+    throw new Error(`Unsupported LLM_PROVIDER value: ${provider}`);
+  }
+
+  if (!baseUrl) {
+    throw new Error('LLM base URL is required');
+  }
+
+  const prompt = buildAgentPrompt({ messageText, replyContext, currentDate });
+
+  return runWithAgentConcurrencyLimit(async () => {
+    let attempt = 0;
+    // Retry only before any deterministic mutation happens. The mutation executes after this function returns.
+    while (true) {
+      try {
+        const { parsed, usage } = await callOpenAiCompatibleChat({
+          baseUrl,
+          apiKey,
+          model,
+          prompt,
+          requestFn
+        });
+        const action = validateAgentAction(parsed);
+        console.log(
+          `[agent] action=${estimateActionName(action)} input=${usage.promptTokens} cached=${usage.cachedTokens} output=${usage.completionTokens} total=${usage.totalTokens} latency=${usage.latencyMs}ms`
+        );
+        return action;
+      } catch (error) {
+        if (!error?.rateLimited || attempt >= maxRetries) {
+          throw error;
         }
-      ],
-      generationConfig: {
-        temperature: 0,
-        responseMimeType: 'application/json'
+
+        attempt += 1;
+        const retryDelayMs = error.retryAfterMs ?? 1000 * attempt;
+        console.warn(`[agent] rate_limited retry_in=${retryDelayMs}ms attempt=${attempt}`);
+        await sleep(retryDelayMs);
       }
-    })
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Gemini request failed: ${response.status} ${response.statusText} ${body}`);
-  }
-
-  const data = await response.json();
-  const content =
-    data?.candidates?.[0]?.content?.parts
-      ?.map((part) => part?.text || '')
-      .join('') || '';
-  const parsed = extractJsonBlock(content);
-  if (!parsed || typeof parsed !== 'object') {
-    throw new Error(`Could not parse Gemini JSON response: ${content}`);
-  }
-
-  return normalizeResults(parsed);
-}
-
-async function extractSongs({
-  provider,
-  messages,
-  triggerText,
-  ollamaBaseUrl,
-  ollamaModel,
-  geminiApiKey,
-  geminiModel
-}) {
-  const selectedProvider = (provider || '').trim().toLowerCase();
-  if (selectedProvider === 'gemini') {
-    if (!geminiApiKey) {
-      throw new Error('GEMINI_API_KEY is required when LLM_PROVIDER=gemini');
     }
-    return extractSongsViaGemini({
-      apiKey: geminiApiKey,
-      model: geminiModel,
-      messages,
-      triggerText
-    });
-  }
-
-  if (selectedProvider === 'ollama' || !selectedProvider) {
-    return extractSongsViaOllama({
-      baseUrl: ollamaBaseUrl,
-      model: ollamaModel,
-      messages,
-      triggerText
-    });
-  }
-
-  throw new Error(`Unsupported LLM_PROVIDER value: ${provider}`);
+  });
 }
 
 module.exports = {
-  extractSongs,
-  extractSongsViaOllama,
-  extractSongsViaGemini
+  SYSTEM_PROMPT,
+  MAX_CONCURRENT_AGENT_CALLS,
+  DEFAULT_MAX_COMPLETION_TOKENS,
+  extractJsonBlock,
+  buildAgentPrompt,
+  interpretMessage,
+  callOpenAiCompatibleChat,
+  getAgentUsageStats
 };
