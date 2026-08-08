@@ -432,7 +432,34 @@ function inferFitFromIssues(issues) {
 
 function normalizeFeedbackUpdates(action, messageText) {
   if (Array.isArray(action.updates) && action.updates.length > 0) {
-    return action.updates;
+    const fallbackIndexes = inferResultIndexesFromMessage(messageText);
+    return action.updates.map((entry, index) => {
+      const item = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : {};
+      const parsedEntryIndex = Number.parseInt(item.result_index, 10);
+      const fallbackResultIndex = fallbackIndexes[index] || fallbackIndexes[0] || null;
+      const resultIndex =
+        Number.isInteger(parsedEntryIndex) && parsedEntryIndex > 0
+          ? parsedEntryIndex
+          : fallbackResultIndex;
+      const issues = Array.isArray(item.issues) && item.issues.length > 0 ? item.issues : inferFeedbackIssue(messageText);
+      const fit =
+        item.fit ||
+        inferPositiveFeedbackFit(messageText) ||
+        inferFeedbackFit(messageText) ||
+        inferFitFromIssues(issues);
+      const notes =
+        item.notes === undefined || item.notes === null || String(item.notes).trim() === ''
+          ? String(messageText || '').trim()
+          : String(item.notes);
+
+      return {
+        ...item,
+        result_index: resultIndex,
+        fit,
+        issues,
+        notes
+      };
+    }).filter((entry) => Number.isInteger(entry.result_index) && entry.result_index > 0);
   }
 
   const explicitResultIndex = Number.parseInt(action.result_index, 10);
