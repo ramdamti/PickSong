@@ -528,6 +528,45 @@ function inferHeuristicFeedbackFit(messageText, issues) {
   return inferFitFromIssues(issues);
 }
 
+function inferPositiveFeedbackFit(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return null;
+
+  if (/(?:היה כיף|כיף לנגן|כיף לשיר|נהניתי|נהנינו|נהנו|נהנו לנגן|הלך טוב|הלכה טוב|עבד טוב|עבדה טוב|(?:^|\s)עבד(?:\s|$)|מעולה|מצוין|אהבנו|אהבנו אותו|זרם טוב|ישב טוב)/iu.test(source)) {
+    return 'good';
+  }
+
+  return null;
+}
+
+function inferHeuristicFeedbackFit(messageText, issues) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return inferFitFromIssues(issues);
+
+  const positiveFit = inferPositiveFeedbackFit(messageText);
+  if (positiveFit && hasDifficultyFeedback(messageText)) {
+    return 'maybe';
+  }
+
+  if (isComfortPositiveFeedback(messageText)) {
+    return 'good';
+  }
+
+  if (/(?:קל מדי|יותר מדי קל|פשוט מדי|פשוטה מדי)/iu.test(source)) {
+    return 'maybe';
+  }
+
+  if (/(?:לא עובד|לא עבד|לא מתאים|לא מתאימה|לא לנו|קשה מדי|קשה לנו|תסיר|להסיר)/iu.test(source)) {
+    return 'bad';
+  }
+
+  if (positiveFit) {
+    return positiveFit;
+  }
+
+  return inferFitFromIssues(issues);
+}
+
 function normalizeFeedbackUpdates(action, messageText) {
   if (Array.isArray(action.updates) && action.updates.length > 0) {
     const fallbackIndexes = inferResultIndexesFromMessage(messageText);

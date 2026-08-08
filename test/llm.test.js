@@ -525,6 +525,43 @@ test('interpretMessage treats challenging but enjoyable feedback as maybe instea
   assert.deepEqual(action.updates[0].issues, ['too_hard']);
 });
 
+test('interpretMessage treats bare worked feedback as good even when the model says bad', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05e9\u05d9\u05e8 1 \u05e2\u05d1\u05d3',
+    replyContext: {
+      results: [{ index: 1, song_id: 'song_a', title: 'Another Brick in the wall', artist: 'Pink Floyd' }]
+    },
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'update_song_feedback',
+                  result_index: 1,
+                  fit: 'bad'
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'update_song_feedback');
+  assert.equal(action.updates[0].result_index, 1);
+  assert.equal(action.updates[0].fit, 'good');
+  assert.deepEqual(action.updates[0].issues, []);
+});
+
 test('interpretMessage retries one rate limit response and records usage counters', async () => {
   let callCount = 0;
   const action = await interpretMessage({
