@@ -458,6 +458,7 @@ async function bootstrap() {
   const {
     createWhatsAppClient,
     waitForReady,
+    findGroupChat,
     messageToRecord,
     readQuotedMessage
   } = require('./whatsapp');
@@ -482,6 +483,7 @@ async function bootstrap() {
   let shuttingDown = false;
   let clientDestroyed = false;
   let heartbeatTimer = null;
+  let pollerTimer = null;
 
   async function destroyClient(reason) {
     if (clientDestroyed) return;
@@ -499,6 +501,7 @@ async function bootstrap() {
     shuttingDown = true;
     console.log(`[shutdown] received ${signal}`);
     clearInterval(heartbeatTimer);
+    clearInterval(pollerTimer);
     await destroyClient(signal);
     process.exit(0);
   }
@@ -512,9 +515,12 @@ async function bootstrap() {
 
   const pendingMessages = [];
   let readyToProcess = false;
+  let targetGroupChat = null;
   const startupTimeoutMs = 60000;
   const processedMessageIds = new Set();
   const heartbeatIntervalMs = 15 * 60 * 1000;
+  const pollIntervalMs = 5000;
+  const pollFetchLimit = 10;
   heartbeatTimer = setInterval(() => {
     const groupName = config.groupName || '(unknown)';
     console.log(
@@ -541,12 +547,90 @@ async function bootstrap() {
     await handleAgentMessage({ chat, stateStore, config, record });
   }
 
+  async function processMessageObject(message, source) {
+    const messageId = message.id?._serialized || message.id?.id || '';
+    if (!markProcessed(messageId)) return;
+    if (stateStore.hasSeenMessage(messageId)) return;
+
+    const text = String(message.body || '').trim();
+    if (!text) return;
+
+    const record = messageToRecord(message);
+    const quoted = await readQuotedMessage(message);
+    record.quoted = quoted || record.quoted;
+    record.quotedText = quoted?.text || null;
+
+    let chatId = record.chatId;
+    if (typeof message.getChat === 'function') {
+      try {
+        const chat = await message.getChat();
+        if (chat?.id?._serialized) {
+          record.chat = chat;
+          record.chatId = chat.id._serialized;
+          chatId = record.chatId;
+        }
+      } catch (error) {
+        // Ignore chat lookup failures here; we'll still keep the message record.
+      }
+    }
+
+    if (record.chat && record.chat.isGroup === false) {
+      console.log(`[message] ignored non-group source=${source} chatId=${chatId} text=${JSON.stringify(text)}`);
+      return;
+    }
+    if (!record.chat && chatId && !String(chatId).endsWith('@g.us')) {
+      console.log(`[message] ignored non-group source=${source} chatId=${chatId} text=${JSON.stringify(text)}`);
+      return;
+    }
+
+    const routing = summarizeMessageRouting(record, config);
+    if (!routing.inTargetGroup) {
+      console.log(
+        `[message] ignored group_mismatch source=${source} chatId=${chatId} actualGroup=${JSON.stringify(routing.chatName)} targetGroup=${JSON.stringify(config.groupName)} text=${JSON.stringify(text)}`
+      );
+      return;
+    }
+
+    stateStore.markSeenMessage(messageId);
+
+    console.log(
+      `[message] source=${source} chatId=${chatId} group=${JSON.stringify(routing.chatName)} from=${record.from} text=${JSON.stringify(text)} reason=${routing.handling.reason}`
+    );
+
+    if (!readyToProcess) {
+      pendingMessages.push(record);
+      return;
+    }
+
+    await handleLiveMessage(record);
+  }
+
+  async function pollTargetGroupMessages() {
+    if (!readyToProcess || shuttingDown || !targetGroupChat || typeof targetGroupChat.fetchMessages !== 'function') {
+      return;
+    }
+
+    try {
+      const messages = await targetGroupChat.fetchMessages({ limit: pollFetchLimit });
+      const orderedMessages = Array.isArray(messages) ? [...messages].reverse() : [];
+      for (const message of orderedMessages) {
+        await processMessageObject(message, 'poll');
+      }
+    } catch (error) {
+      console.error('[poll] failed:', error);
+    }
+  }
+
   async function finalizeStartup() {
     if (readyToProcess) return;
     readyToProcess = true;
     console.log('[bootstrap] saving state');
     stateStore.setBootstrapComplete();
     await stateStore.queueSave();
+    targetGroupChat = await findGroupChat(client, config.groupName);
+    console.log(
+      `[whatsapp] target group resolved id=${targetGroupChat.id?._serialized || '(unknown)'} name=${JSON.stringify(targetGroupChat.name || '')}`
+    );
 
     if (pendingMessages.length > 0) {
       for (const message of pendingMessages.splice(0, pendingMessages.length)) {
@@ -554,65 +638,18 @@ async function bootstrap() {
       }
     }
 
+    pollerTimer = setInterval(() => {
+      void pollTargetGroupMessages();
+    }, pollIntervalMs);
+    pollerTimer.unref();
+    void pollTargetGroupMessages();
+
     console.log('[whatsapp] watcher is live');
   }
 
   const handleIncomingMessage = async (message) => {
     try {
-      if (message.fromMe) return;
-
-      const messageId = message.id?._serialized || message.id?.id || '';
-      if (!markProcessed(messageId)) return;
-
-      const text = String(message.body || '').trim();
-      if (!text) return;
-
-      const record = messageToRecord(message);
-      const quoted = await readQuotedMessage(message);
-      record.quoted = quoted || record.quoted;
-      record.quotedText = quoted?.text || null;
-
-      let chatId = record.chatId;
-      if (typeof message.getChat === 'function') {
-        try {
-          const chat = await message.getChat();
-          if (chat?.id?._serialized) {
-            record.chat = chat;
-            record.chatId = chat.id._serialized;
-            chatId = record.chatId;
-          }
-        } catch (error) {
-          // Ignore chat lookup failures here; we'll still keep the message record.
-        }
-      }
-
-      if (record.chat && record.chat.isGroup === false) {
-        console.log(`[message] ignored non-group chatId=${chatId} text=${JSON.stringify(text)}`);
-        return;
-      }
-      if (!record.chat && chatId && !String(chatId).endsWith('@g.us')) {
-        console.log(`[message] ignored non-group chatId=${chatId} text=${JSON.stringify(text)}`);
-        return;
-      }
-
-      const routing = summarizeMessageRouting(record, config);
-      if (!routing.inTargetGroup) {
-        console.log(
-          `[message] ignored group_mismatch chatId=${chatId} actualGroup=${JSON.stringify(routing.chatName)} targetGroup=${JSON.stringify(config.groupName)} text=${JSON.stringify(text)}`
-        );
-        return;
-      }
-
-      console.log(
-        `[message] chatId=${chatId} group=${JSON.stringify(routing.chatName)} from=${record.from} text=${JSON.stringify(text)} reason=${routing.handling.reason}`
-      );
-
-      if (!readyToProcess) {
-        pendingMessages.push(record);
-        return;
-      }
-
-      await handleLiveMessage(record);
+      await processMessageObject(message, 'event');
     } catch (error) {
       console.error('[message] failed:', error);
     }
