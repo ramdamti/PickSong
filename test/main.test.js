@@ -5,6 +5,7 @@ const {
   stripWakeWord,
   shouldHandleMessage,
   buildAgentReplyContext,
+  buildAgentFailureReply,
   handleAgentMessage
 } = require('../src/main');
 
@@ -157,4 +158,18 @@ test('handleAgentMessage performs one agent call for a normal search request', a
   assert.equal(handled, true);
   assert.equal(agentCalls, 1);
   assert.equal(sentMessages.length, 1);
+});
+
+test('buildAgentFailureReply returns a specific message for rate limits', () => {
+  assert.equal(
+    buildAgentFailureReply({ rateLimited: true, status: 429, message: 'Too Many Requests' }),
+    'יש עכשיו עומס על המנוע. נסו שוב עוד רגע.'
+  );
+});
+
+test('buildAgentFailureReply returns a clarification message for invalid agent output', () => {
+  assert.equal(
+    buildAgentFailureReply(new Error('agent_action.updates must be a non-empty array')),
+    'לא הבנתי עד הסוף את הבקשה. נסו לנסח שוב במשפט קצר.'
+  );
 });

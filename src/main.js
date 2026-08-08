@@ -117,6 +117,34 @@ function buildChatResponder(message, chatId) {
   };
 }
 
+function classifyAgentFailure(error) {
+  if (error?.rateLimited || Number(error?.status) === 429) {
+    return 'rate_limited';
+  }
+
+  const message = String(error?.message || '').trim();
+  if (
+    /Could not parse agent JSON response/i.test(message) ||
+    /agent_action\./i.test(message) ||
+    /query must be an object/i.test(message)
+  ) {
+    return 'invalid_agent_output';
+  }
+
+  return 'generic_failure';
+}
+
+function buildAgentFailureReply(error) {
+  const failureType = classifyAgentFailure(error);
+  if (failureType === 'rate_limited') {
+    return 'יש עכשיו עומס על המנוע. נסו שוב עוד רגע.';
+  }
+  if (failureType === 'invalid_agent_output') {
+    return 'לא הבנתי עד הסוף את הבקשה. נסו לנסח שוב במשפט קצר.';
+  }
+  return 'יש לי עכשיו עומס קטן. נסו שוב עוד רגע.';
+}
+
 function resolveSongFromAction(stateStore, action, activeContext) {
   if (action.song_id) {
     return { song: stateStore.getSongById(action.song_id), reason: null };
@@ -498,7 +526,7 @@ async function handleAgentMessage({ chat, stateStore, config, record, interpretM
     await executeAgentAction({ action, stateStore, chat, record });
   } catch (error) {
     console.error('[agent] failed:', error);
-    await chat.sendMessage('\u05d9\u05e9 \u05dc\u05d9 \u05e2\u05db\u05e9\u05d9\u05d5 \u05e2\u05d5\u05de\u05e1 \u05e7\u05d8\u05df. \u05e0\u05e1\u05d5 \u05e9\u05d5\u05d1 \u05e2\u05d5\u05d3 \u05e8\u05d2\u05e2.');
+    await chat.sendMessage(buildAgentFailureReply(error));
   }
   return true;
 }
@@ -712,6 +740,7 @@ module.exports = {
   stripWakeWord,
   shouldHandleMessage,
   buildAgentReplyContext,
+  buildAgentFailureReply,
   handleAgentMessage,
   executeAgentAction
 };

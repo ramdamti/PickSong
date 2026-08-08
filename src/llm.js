@@ -12,6 +12,7 @@ const SYSTEM_PROMPT = [
   'Map those phrases into compact search query preferences or requirements when possible.',
   'Extract requested result counts carefully. Examples: "3 שירים", "שלושה שירים", "three songs" should set query.limit to 3.',
   'When reply_context exists and the user is asking for another recommendation list, fresh options, more songs, or different songs, set query.avoid_previous_results=true.',
+  'For short feedback like "שיר 1 הוא קשה", "1 לא מתאים", or "2 ו-4 לא עבדו", prefer update_song_feedback with a non-empty updates array.',
   'Prefer taking a reasonable search interpretation over asking a clarification question.',
   'For vague recommendation requests, default to search_songs with broad query semantics.',
   'Use clarify only when execution would be unsafe or impossible without missing identity: for example ambiguous remove/update target, missing song identity for destructive actions, or missing reference for result-index feedback.',
@@ -303,8 +304,84 @@ function shouldAvoidPreviousResults(messageText, replyContext) {
   return /(?:עוד|אחר(?:ים|ות)?|שונ(?:ים|ות)?|חדשים|חדש|נוספ(?:ים|ות)?|במקום|לא אלה|משהו אחר)/iu.test(source);
 }
 
+function inferFeedbackIssue(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return [];
+
+  if (/(?:קשה מדי|הוא קשה|היא קשה|קשה|מסובך|מסובכת|מסובכים|גבוה מדי|נמוך מדי)/iu.test(source)) {
+    return ['too_hard'];
+  }
+  if (/(?:קל מדי|קל|פשוט מדי|פשוטה מדי)/iu.test(source)) {
+    return ['too_easy'];
+  }
+  if (/(?:לא גרובי|לא יושב|לא זורם|לא עובד|לא עבד|לא מתאימ(?:ה|ים)|לא לנו)/iu.test(source)) {
+    return ['doesnt_groove'];
+  }
+  return [];
+}
+
+function inferFeedbackFit(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return null;
+
+  if (/(?:לא עובד|לא עבד|לא מתאים|לא מתאימה|קשה מדי|קל מדי|תסיר|להסיר|לא לנו)/iu.test(source)) {
+    return 'bad';
+  }
+  return null;
+}
+
+function inferResultIndexesFromMessage(messageText) {
+  const source = String(messageText || '').trim();
+  if (!source) return [];
+
+  const matches = Array.from(source.matchAll(/(?:שיר\s*)?(\d{1,2})(?!\d)/giu));
+  return Array.from(
+    new Set(
+      matches
+        .map((match) => Number.parseInt(match[1], 10))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    )
+  );
+}
+
+function normalizeFeedbackUpdates(action, messageText) {
+  if (Array.isArray(action.updates) && action.updates.length > 0) {
+    return action.updates;
+  }
+
+  const explicitResultIndex = Number.parseInt(action.result_index, 10);
+  const resultIndexes =
+    Number.isInteger(explicitResultIndex) && explicitResultIndex > 0
+      ? [explicitResultIndex]
+      : inferResultIndexesFromMessage(messageText);
+  if (!resultIndexes.length) {
+    return [];
+  }
+
+  const topLevelIssues = Array.isArray(action.issues) ? action.issues : inferFeedbackIssue(messageText);
+  const topLevelFit = action.fit || inferFeedbackFit(messageText);
+  const topLevelNotes =
+    action.notes === undefined || action.notes === null || String(action.notes).trim() === ''
+      ? String(messageText || '').trim()
+      : String(action.notes);
+
+  return resultIndexes.map((resultIndex) => ({
+    result_index: resultIndex,
+    fit: topLevelFit,
+    issues: topLevelIssues,
+    notes: topLevelNotes
+  }));
+}
+
 function normalizeAgentAction(action, { messageText, replyContext }) {
   if (!action || typeof action !== 'object') return action;
+  if (action.action === 'update_song_feedback') {
+    return {
+      ...action,
+      updates: normalizeFeedbackUpdates(action, messageText)
+    };
+  }
+
   if (action.action !== 'search_songs' && action.action !== 'find_similar_songs') {
     return action;
   }

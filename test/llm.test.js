@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { SYSTEM_PROMPT, buildAgentPrompt, interpretMessage, getAgentUsageStats } = require('../src/llm');
 
 test('SYSTEM_PROMPT stays compact and stable', () => {
-  assert.ok(SYSTEM_PROMPT.length < 2100);
+  assert.ok(SYSTEM_PROMPT.length < 2600);
   assert.doesNotMatch(SYSTEM_PROMPT, /state\.json|songs\[|migration/i);
   assert.match(SYSTEM_PROMPT, /מתאים לזמר/);
   assert.match(SYSTEM_PROMPT, /מתאים לגיטריסט/);
@@ -170,6 +170,41 @@ test('interpretMessage flags fresh follow-up searches to avoid previous results'
   assert.equal(action.action, 'search_songs');
   assert.equal(action.query.limit, 3);
   assert.equal(action.query.avoid_previous_results, true);
+});
+
+test('interpretMessage normalizes short feedback into update_song_feedback updates', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05e9\u05d9\u05e8 1 \u05d4\u05d5\u05d0 \u05e7\u05e9\u05d4',
+    replyContext: {
+      results: [{ index: 1, song_id: 'song_a', title: 'Zombie', artist: 'The Cranberries' }]
+    },
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'update_song_feedback'
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'update_song_feedback');
+  assert.equal(action.updates.length, 1);
+  assert.equal(action.updates[0].result_index, 1);
+  assert.deepEqual(action.updates[0].issues, ['too_hard']);
 });
 
 test('interpretMessage retries one rate limit response and records usage counters', async () => {
