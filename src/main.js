@@ -261,6 +261,12 @@ async function sendSongsReply({ chat, stateStore, chatId, songs }) {
     songs,
     createdAt: new Date().toISOString()
   });
+  if (typeof stateStore.recordRecommendations === 'function') {
+    stateStore.recordRecommendations(
+      chatId,
+      songs.map((song) => song.song_id).filter(Boolean)
+    );
+  }
   await stateStore.queueSave();
 }
 
@@ -278,9 +284,24 @@ async function executeAgentAction({ action, stateStore, chat, record }) {
       action.query?.avoid_previous_results && activeContext.context
         ? new Set(activeContext.context.results.map((entry) => entry.song_id).filter(Boolean))
         : null;
-    const candidateSongs = excludedSongIds
+    const afterPreviousFilter = excludedSongIds
       ? songs.filter((song) => !excludedSongIds.has(song.song_id))
       : songs;
+    const requestedLimit = Number.parseInt(action.query?.limit, 10);
+    const recentRecommendationIds = new Set(
+      typeof stateStore.getRecentRecommendations === 'function'
+        ? stateStore.getRecentRecommendations(record.chatId)
+        : []
+    );
+    const candidateSongs =
+      recentRecommendationIds.size > 0
+        ? (() => {
+            const filtered = afterPreviousFilter.filter((song) => !recentRecommendationIds.has(song.song_id));
+            return filtered.length >= (Number.isInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : 5)
+              ? filtered
+              : afterPreviousFilter;
+          })()
+        : afterPreviousFilter;
     const matches = searchSongs(candidateSongs, action.query || {});
     await sendSongsReply({ chat, stateStore, chatId: record.chatId, songs: matches });
     return;

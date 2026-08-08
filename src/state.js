@@ -2,6 +2,7 @@ const fs = require('fs/promises');
 const crypto = require('crypto');
 
 const MAX_SEEN_MESSAGE_IDS = 50;
+const MAX_RECENT_RECOMMENDATION_IDS = 25;
 const CURRENT_SCHEMA_VERSION = 2;
 const REQUIRED_AI_METADATA_FIELDS = [
   'original_vocal',
@@ -246,7 +247,10 @@ function normalizeChats(value) {
 
     chats[String(chatId).trim()] = {
       last_results: lastResults,
-      result_messages: resultMessages
+      result_messages: resultMessages,
+      recent_recommendations: Array.isArray(chatValue.recent_recommendations)
+        ? Array.from(new Set(chatValue.recent_recommendations.map((item) => String(item || '').trim()).filter(Boolean))).slice(-MAX_RECENT_RECOMMENDATION_IDS)
+        : []
     };
   }
 
@@ -574,7 +578,8 @@ function createStateStore(stateFilePath, seenFilePath, initialState, initialSeen
     const existingChat = state.chats[normalizedChatId] || { last_results: null, result_messages: {} };
     state.chats[normalizedChatId] = {
       last_results: normalizedContext,
-      result_messages: existingChat.result_messages || {}
+      result_messages: existingChat.result_messages || {},
+      recent_recommendations: existingChat.recent_recommendations || []
     };
     return true;
   }
@@ -597,7 +602,7 @@ function createStateStore(stateFilePath, seenFilePath, initialState, initialSeen
     if (!normalizedContext) return false;
 
     if (!state.chats[normalizedChatId]) {
-      state.chats[normalizedChatId] = { last_results: null, result_messages: {} };
+      state.chats[normalizedChatId] = { last_results: null, result_messages: {}, recent_recommendations: [] };
     }
     state.chats[normalizedChatId].result_messages[normalizedBotMessageId] = normalizedContext;
     state.result_messages[normalizedBotMessageId] = normalizedContext;
@@ -612,6 +617,33 @@ function createStateStore(stateFilePath, seenFilePath, initialState, initialSeen
 
   function setBootstrapComplete() {
     seenState.lastBootstrapAt = new Date().toISOString();
+  }
+
+  function getRecentRecommendations(chatId) {
+    const normalizedChatId = String(chatId || '').trim();
+    return Array.isArray(state.chats[normalizedChatId]?.recent_recommendations)
+      ? [...state.chats[normalizedChatId].recent_recommendations]
+      : [];
+  }
+
+  function recordRecommendations(chatId, songIds) {
+    const normalizedChatId = String(chatId || '').trim();
+    if (!normalizedChatId) return false;
+    const normalizedSongIds = Array.isArray(songIds)
+      ? songIds.map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+    if (!normalizedSongIds.length) return false;
+
+    if (!state.chats[normalizedChatId]) {
+      state.chats[normalizedChatId] = { last_results: null, result_messages: {}, recent_recommendations: [] };
+    }
+
+    const existing = Array.isArray(state.chats[normalizedChatId].recent_recommendations)
+      ? state.chats[normalizedChatId].recent_recommendations
+      : [];
+    const merged = Array.from(new Set([...existing, ...normalizedSongIds]));
+    state.chats[normalizedChatId].recent_recommendations = merged.slice(-MAX_RECENT_RECOMMENDATION_IDS);
+    return true;
   }
 
   function isEmpty() {
@@ -639,6 +671,8 @@ function createStateStore(stateFilePath, seenFilePath, initialState, initialSeen
     setSongChordsUrl,
     setLastResults,
     getLastResults,
+    getRecentRecommendations,
+    recordRecommendations,
     storeResultMessage,
     getResultMessage,
     setBootstrapComplete,

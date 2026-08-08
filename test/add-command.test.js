@@ -198,6 +198,62 @@ test('executeAgentAction search_songs can avoid previous result songs for a fres
   assert.doesNotMatch(sentMessages[0], /Zombie/);
 });
 
+test('executeAgentAction search_songs rotates away from recently recommended songs when enough alternatives exist', async () => {
+  const sentMessages = [];
+  const firstSong = createSong({ song_id: 'song_a', song_title: 'Zombie', artist: 'The Cranberries' });
+  const secondSong = createSong({ song_id: 'song_b', song_title: '1979', artist: 'The Smashing Pumpkins' });
+  const thirdSong = createSong({ song_id: 'song_c', song_title: 'The One I Love', artist: 'R.E.M.' });
+  const stateStore = {
+    getSongs() {
+      return [firstSong, secondSong, thirdSong];
+    },
+    getRecentRecommendations(chatId) {
+      return chatId === 'chat-1' ? ['song_a'] : [];
+    },
+    getResultMessage() {
+      return null;
+    },
+    getLastResults() {
+      return null;
+    },
+    setLastResults() {
+      return true;
+    },
+    storeResultMessage() {
+      return true;
+    },
+    recordRecommendations() {
+      return true;
+    },
+    async queueSave() {}
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+      return { id: { _serialized: 'wamid-3' } };
+    }
+  };
+
+  await executeAgentAction({
+    action: {
+      action: 'search_songs',
+      query: {
+        limit: 2
+      }
+    },
+    stateStore,
+    chat,
+    record: {
+      chatId: 'chat-1',
+      quoted: { id: '' }
+    }
+  });
+
+  assert.equal(sentMessages.length, 1);
+  assert.doesNotMatch(sentMessages[0], /Zombie/);
+  assert.match(sentMessages[0], /1979|The One I Love/);
+});
+
 test('executeAgentAction updates feedback by result index using stored context', async () => {
   const sentMessages = [];
   let saved = false;

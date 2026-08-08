@@ -284,6 +284,14 @@ function inferRequestedLimit(messageText) {
     if (Number.isInteger(parsed) && parsed > 0) return parsed;
   }
 
+  if (/(\s|^)שיר(\s|$)/iu.test(source) && !/שירים/iu.test(source)) {
+    return 1;
+  }
+
+  if (/(\s|^)song(\s|$)/i.test(source) && !/songs/i.test(source)) {
+    return 1;
+  }
+
   return null;
 }
 

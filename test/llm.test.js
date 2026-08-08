@@ -103,6 +103,40 @@ test('interpretMessage infers requested song count from Hebrew quantity phrases'
   assert.equal(action.query.limit, 3);
 });
 
+test('interpretMessage infers a single result for singular song phrasing', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8 \u05e9\u05de\u05ea\u05d0\u05d9\u05dd \u05dc\u05d6\u05de\u05e8\u05ea',
+    replyContext: null,
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {
+                    preferences: { singer_fit: 'great' }
+                  }
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.limit, 1);
+});
+
 test('interpretMessage flags fresh follow-up searches to avoid previous results', async () => {
   const action = await interpretMessage({
     provider: 'groq',

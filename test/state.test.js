@@ -175,3 +175,15 @@ test('createStateStore addSong fills canonical placeholders for legacy add flow'
   assert.equal(added.ai_metadata.original_vocal, 'unknown');
   assert.equal(added.band_status.fit, 'unknown');
 });
+
+test('createStateStore tracks recent recommendations per chat', () => {
+  const store = createStateStore('state.json', 'seen.json', createCanonicalState(), {
+    seenMessageIds: [],
+    lastBootstrapAt: null
+  });
+
+  const recorded = store.recordRecommendations('chat-1', ['song_a', 'song_b', 'song_a']);
+
+  assert.equal(recorded, true);
+  assert.deepEqual(store.getRecentRecommendations('chat-1'), ['song_a', 'song_b']);
+});
