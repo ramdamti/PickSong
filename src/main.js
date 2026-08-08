@@ -12,6 +12,7 @@ const { ALLOWED_UPDATE_FIELDS } = require('./schemas');
 
 const CURRENT_DATE = '2026-08-08';
 const MUTABLE_SONG_FIELDS = new Set(ALLOWED_UPDATE_FIELDS);
+const BOT_PREFIX = '\u200F🤖 ';
 const FIT_LABELS = {
   unknown: '\u05dc\u05d0 \u05d9\u05d3\u05d5\u05e2',
   good: '\u05e2\u05d5\u05d1\u05d3 \u05d8\u05d5\u05d1',
@@ -103,6 +104,19 @@ function extractBotMessageId(sentMessage) {
   );
 }
 
+function prefixBotReply(text) {
+  const body = String(text || '').trim();
+  if (!body) return BOT_PREFIX.trim();
+  if (/^\u200f?🤖(?:\s|$)/u.test(body)) {
+    return body;
+  }
+  return `${BOT_PREFIX}${body}`;
+}
+
+async function sendBotMessage(chat, text) {
+  return chat.sendMessage(prefixBotReply(text));
+}
+
 function buildChatResponder(message, chatId) {
   return {
     id: { _serialized: chatId || '' },
@@ -110,7 +124,7 @@ function buildChatResponder(message, chatId) {
     name: '',
     async sendMessage(text) {
       if (typeof message.reply === 'function') {
-        return message.reply(text);
+        return message.reply(prefixBotReply(text));
       }
       throw new Error('Chat responder is unavailable for this message');
     }
@@ -361,11 +375,11 @@ function buildBandStatusQuery(fit) {
 
 async function sendSongsReply({ chat, stateStore, chatId, songs }) {
   if (!songs.length) {
-    await chat.sendMessage('\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd.');
+    await sendBotMessage(chat, '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd.');
     return;
   }
 
-  const sentMessage = await chat.sendMessage(formatSongsReply(songs));
+  const sentMessage = await sendBotMessage(chat, formatSongsReply(songs));
   const botMessageId = extractBotMessageId(sentMessage);
   persistResultContext(stateStore, {
     chatId,
@@ -387,7 +401,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
   const songs = stateStore.getSongs();
 
   if (action.action === 'clarify') {
-    await chat.sendMessage(buildClarifyReply(action, { messageText, replyContext }));
+    await sendBotMessage(chat, buildClarifyReply(action, { messageText, replyContext }));
     return;
   }
 
@@ -422,14 +436,14 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
   if (action.action === 'find_similar_songs') {
     const referenceIndex = Number.parseInt(action.query?.reference_result_index, 10);
     if (!Number.isInteger(referenceIndex) || !activeContext.context) {
-      await chat.sendMessage('\u05dc\u05d0\u05d9\u05d6\u05d5 \u05e8\u05e9\u05d9\u05de\u05d4 \u05d0\u05ea\u05d4 \u05de\u05ea\u05db\u05d5\u05d5\u05df?');
+      await sendBotMessage(chat, '\u05dc\u05d0\u05d9\u05d6\u05d5 \u05e8\u05e9\u05d9\u05de\u05d4 \u05d0\u05ea\u05d4 \u05de\u05ea\u05db\u05d5\u05d5\u05df?');
       return;
     }
 
     const [entry] = findSongIdsByIndexes(activeContext.context, [referenceIndex]);
     const similarSong = entry?.song_id ? stateStore.getSongById(entry.song_id) : null;
     if (!similarSong) {
-      await chat.sendMessage('\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05d0\u05ea \u05d4\u05e9\u05d9\u05e8 \u05e9\u05d4\u05ea\u05db\u05d5\u05d5\u05e0\u05ea \u05d0\u05dc\u05d9\u05d5.');
+      await sendBotMessage(chat, '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05d0\u05ea \u05d4\u05e9\u05d9\u05e8 \u05e9\u05d4\u05ea\u05db\u05d5\u05d5\u05e0\u05ea \u05d0\u05dc\u05d9\u05d5.');
       return;
     }
 
@@ -451,7 +465,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
           : 'maybe';
     const matches = searchSongs(songs, buildBandStatusQuery(fit));
     if (action.action === 'get_band_bad_songs') {
-      await chat.sendMessage(formatBadSongsSummary(matches));
+      await sendBotMessage(chat, formatBadSongsSummary(matches));
       return;
     }
     await sendSongsReply({ chat, stateStore, chatId: record.chatId, songs: matches });
@@ -460,7 +474,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
 
   if (action.action === 'get_band_failure_reasons') {
     const matches = searchSongs(songs, buildBandStatusQuery('bad'));
-    await chat.sendMessage(formatBadSongsSummary(matches));
+    await sendBotMessage(chat, formatBadSongsSummary(matches));
     return;
   }
 
@@ -475,18 +489,18 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
     });
 
     if (!inserted) {
-      await chat.sendMessage('\u05d4\u05e9\u05d9\u05e8 \u05db\u05d1\u05e8 \u05e7\u05d9\u05d9\u05dd.');
+      await sendBotMessage(chat, '\u05d4\u05e9\u05d9\u05e8 \u05db\u05d1\u05e8 \u05e7\u05d9\u05d9\u05dd.');
       return;
     }
 
     await stateStore.queueSave();
-    await chat.sendMessage(`\u05d4\u05d5\u05e1\u05e4\u05ea\u05d9: ${action.song.song_title}${action.song.artist ? ` - ${action.song.artist}` : ''}`);
+    await sendBotMessage(chat, `\u05d4\u05d5\u05e1\u05e4\u05ea\u05d9: ${action.song.song_title}${action.song.artist ? ` - ${action.song.artist}` : ''}`);
     return;
   }
 
   if (action.action === 'update_song_feedback') {
     if (!activeContext.context) {
-      await chat.sendMessage('\u05dc\u05d0\u05d9\u05d6\u05d5 \u05e8\u05e9\u05d9\u05de\u05d4 \u05d0\u05ea\u05d4 \u05de\u05ea\u05db\u05d5\u05d5\u05df?');
+      await sendBotMessage(chat, '\u05dc\u05d0\u05d9\u05d6\u05d5 \u05e8\u05e9\u05d9\u05de\u05d4 \u05d0\u05ea\u05d4 \u05de\u05ea\u05db\u05d5\u05d5\u05df?');
       return;
     }
 
@@ -509,14 +523,14 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
     }
 
     await stateStore.queueSave();
-    await chat.sendMessage(buildFeedbackConfirmation(updatedSongs));
+    await sendBotMessage(chat, buildFeedbackConfirmation(updatedSongs));
     return;
   }
 
   if (action.action === 'get_song_info') {
     const { song, reason } = resolveSongFromAction(stateStore, action, activeContext);
     if (!song) {
-      await chat.sendMessage(
+      await sendBotMessage(chat,
         reason === 'ambiguous'
           ? '\u05d9\u05e9 \u05db\u05de\u05d4 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd. \u05ea\u05db\u05d5\u05d5\u05df \u05d1\u05e9\u05dd \u05d4\u05d0\u05d5\u05de\u05df \u05d0\u05d5 \u05d1\u05de\u05e1\u05e4\u05e8 \u05de\u05d4\u05e8\u05e9\u05d9\u05de\u05d4.'
           : '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05d0\u05d9\u05d6\u05d4 \u05e9\u05d9\u05e8 \u05d4\u05ea\u05db\u05d5\u05d5\u05e0\u05ea.'
@@ -524,14 +538,14 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       return;
     }
 
-    await chat.sendMessage(formatSongInfo(song));
+    await sendBotMessage(chat, formatSongInfo(song));
     return;
   }
 
   if (action.action === 'explain_song_rejection') {
     const { song, reason } = resolveSongFromAction(stateStore, action, activeContext);
     if (!song) {
-      await chat.sendMessage(
+      await sendBotMessage(chat,
         reason === 'ambiguous'
           ? '\u05d9\u05e9 \u05db\u05de\u05d4 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd. \u05ea\u05db\u05d5\u05d5\u05df \u05d1\u05e9\u05dd \u05d4\u05d0\u05d5\u05de\u05df \u05d0\u05d5 \u05d1\u05de\u05e1\u05e4\u05e8 \u05de\u05d4\u05e8\u05e9\u05d9\u05de\u05d4.'
           : '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05d0\u05d9\u05d6\u05d4 \u05e9\u05d9\u05e8 \u05d4\u05ea\u05db\u05d5\u05d5\u05e0\u05ea.'
@@ -539,14 +553,14 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       return;
     }
 
-    await chat.sendMessage(explainSongStatus(song));
+    await sendBotMessage(chat, explainSongStatus(song));
     return;
   }
 
   if (action.action === 'remove_song') {
     const { song, reason } = resolveSongFromAction(stateStore, action, activeContext);
     if (!song) {
-      await chat.sendMessage(
+      await sendBotMessage(chat,
         reason === 'ambiguous'
           ? '\u05d9\u05e9 \u05db\u05de\u05d4 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd. \u05ea\u05db\u05d5\u05d5\u05df \u05d1\u05e9\u05dd \u05d4\u05d0\u05d5\u05de\u05df \u05d0\u05d5 \u05d1\u05de\u05e1\u05e4\u05e8 \u05de\u05d4\u05e8\u05e9\u05d9\u05de\u05d4.'
           : '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05d0\u05d9\u05d6\u05d4 \u05e9\u05d9\u05e8 \u05dc\u05d4\u05e1\u05d9\u05e8.'
@@ -556,14 +570,14 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
 
     stateStore.removeSongById(song.song_id);
     await stateStore.queueSave();
-    await chat.sendMessage(`\u05d4\u05e1\u05e8\u05ea\u05d9: ${song.song_title}${song.artist ? ` - ${song.artist}` : ''}`);
+    await sendBotMessage(chat, `\u05d4\u05e1\u05e8\u05ea\u05d9: ${song.song_title}${song.artist ? ` - ${song.artist}` : ''}`);
     return;
   }
 
   if (action.action === 'update_song') {
     const { song, reason } = resolveSongFromAction(stateStore, action, activeContext);
     if (!song) {
-      await chat.sendMessage(
+      await sendBotMessage(chat,
         reason === 'ambiguous'
           ? '\u05d9\u05e9 \u05db\u05de\u05d4 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd. \u05ea\u05db\u05d5\u05d5\u05df \u05d1\u05e9\u05dd \u05d4\u05d0\u05d5\u05de\u05df \u05d0\u05d5 \u05d1\u05de\u05e1\u05e4\u05e8 \u05de\u05d4\u05e8\u05e9\u05d9\u05de\u05d4.'
           : '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05d0\u05d9\u05d6\u05d4 \u05e9\u05d9\u05e8 \u05dc\u05e2\u05d3\u05db\u05df.'
@@ -578,7 +592,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       ...sanitizedUpdates
     });
     await stateStore.queueSave();
-    await chat.sendMessage(`\u05e2\u05d3\u05db\u05e0\u05ea\u05d9: ${updated.song_title}${updated.artist ? ` - ${updated.artist}` : ''}`);
+    await sendBotMessage(chat, `\u05e2\u05d3\u05db\u05e0\u05ea\u05d9: ${updated.song_title}${updated.artist ? ` - ${updated.artist}` : ''}`);
     return;
   }
 
@@ -592,7 +606,7 @@ async function handleAgentMessage({ chat, stateStore, config, record, interpretM
   const replyContext = buildAgentReplyContext(stateStore, record);
   const messageText = handling.messageText;
   if (!messageText) {
-    await chat.sendMessage('\u05de\u05d4 \u05dc\u05d7\u05e4\u05e9?');
+    await sendBotMessage(chat, '\u05de\u05d4 \u05dc\u05d7\u05e4\u05e9?');
     return true;
   }
 
@@ -608,14 +622,14 @@ async function handleAgentMessage({ chat, stateStore, config, record, interpretM
     });
 
     if (shouldBlockGenericSearchFallback(action, { messageText, replyContext })) {
-      await chat.sendMessage('איזה שירים אתה רוצה?');
+      await sendBotMessage(chat, 'איזה שירים אתה רוצה?');
       return true;
     }
 
     await executeAgentAction({ action, stateStore, chat, record, messageText, replyContext });
   } catch (error) {
     console.error('[agent] failed:', error);
-    await chat.sendMessage(buildAgentFailureReply(error));
+    await sendBotMessage(chat, buildAgentFailureReply(error));
   }
   return true;
 }

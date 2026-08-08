@@ -381,7 +381,7 @@ test('interpretMessage repairs malformed update entries using the message result
     baseUrl: 'https://api.example.com',
     apiKey: 'test',
     model: 'test-model',
-    messageText: '\u05e9\u05d9\u05e8 4 \u05e7\u05dc \u05dc\u05e0\u05d5',
+    messageText: '\u05e9\u05d9\u05e8 4 \u05e7\u05dc \u05de\u05d3\u05d9',
     replyContext: {
       results: [{ index: 4, song_id: 'song_d', title: 'Another Brick in the wall', artist: 'Pink Floyd' }]
     },
@@ -412,7 +412,80 @@ test('interpretMessage repairs malformed update entries using the message result
 
   assert.equal(action.action, 'update_song_feedback');
   assert.equal(action.updates[0].result_index, 4);
-  assert.equal(action.updates[0].fit, 'bad');
+  assert.equal(action.updates[0].fit, 'maybe');
+  assert.deepEqual(action.updates[0].issues, ['too_easy']);
+});
+
+test('interpretMessage treats "easy for us to play" as positive feedback', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05e9\u05d9\u05e8 5 \u05e7\u05dc \u05dc\u05e0\u05d5 \u05dc\u05e0\u05d2\u05df',
+    replyContext: {
+      results: [{ index: 5, song_id: 'song_e', title: 'Black night', artist: 'Deep Purple' }]
+    },
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'update_song_feedback',
+                  result_index: 5
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'update_song_feedback');
+  assert.equal(action.updates[0].result_index, 5);
+  assert.equal(action.updates[0].fit, 'good');
+  assert.deepEqual(action.updates[0].issues, []);
+});
+
+test('interpretMessage treats "too easy" feedback as non-negative', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05e9\u05d9\u05e8 2 \u05e7\u05dc \u05de\u05d3\u05d9',
+    replyContext: {
+      results: [{ index: 2, song_id: 'song_b', title: '1979', artist: 'The Smashing Pumpkins' }]
+    },
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'update_song_feedback',
+                  result_index: 2,
+                  fit: 'bad'
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'update_song_feedback');
+  assert.equal(action.updates[0].result_index, 2);
+  assert.equal(action.updates[0].fit, 'maybe');
   assert.deepEqual(action.updates[0].issues, ['too_easy']);
 });
 

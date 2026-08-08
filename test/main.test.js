@@ -244,7 +244,7 @@ test('handleAgentMessage blocks generic fallback for short specific hints with a
   });
 
   assert.equal(handled, true);
-  assert.deepEqual(sentMessages, ['איזה שירים אתה רוצה?']);
+  assert.deepEqual(sentMessages, ['\u200F🤖 איזה שירים אתה רוצה?']);
 });
 
 test('buildAgentFailureReply returns a specific message for rate limits', () => {

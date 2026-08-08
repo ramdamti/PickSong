@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { handleAgentMessage, executeAgentAction } = require('../src/main');
+const BOT_PREFIX = '\u200F🤖 ';
 
 function createSong(overrides = {}) {
   return {
@@ -95,7 +96,7 @@ test('handleAgentMessage routes wake-word add_song requests through the agent', 
   });
 
   assert.equal(stateStore.song.song_title, 'Zombie');
-  assert.deepEqual(sentMessages, ['\u05d4\u05d5\u05e1\u05e4\u05ea\u05d9: Zombie - The Cranberries']);
+  assert.deepEqual(sentMessages, [`${BOT_PREFIX}\u05d4\u05d5\u05e1\u05e4\u05ea\u05d9: Zombie - The Cranberries`]);
 });
 
 test('executeAgentAction get_band_failure_reasons summarizes bad songs with reasons', async () => {
@@ -312,7 +313,9 @@ test('executeAgentAction updates feedback by result index using stored context',
   assert.equal(saved, true);
   assert.equal(updated.band_status.fit, 'bad');
   assert.deepEqual(updated.band_status.issues, ['vocals_too_high']);
-  assert.equal(sentMessages[0], '\u05e2\u05d3\u05db\u05e0\u05ea\u05d9: Zombie - לא עבד');
+  assert.match(sentMessages[0], /^\u200F🤖 /u);
+  assert.match(sentMessages[0], /Zombie - /u);
+  assert.match(sentMessages[0], /\u05dc\u05d0 \u05e2\u05d1\u05d3/u);
 });
 
 test('executeAgentAction confirms positive feedback as good instead of unknown', async () => {
@@ -372,7 +375,71 @@ test('executeAgentAction confirms positive feedback as good instead of unknown',
 
   assert.equal(saved, true);
   assert.equal(updated.band_status.fit, 'good');
-  assert.equal(sentMessages[0], 'עדכנתי: Zombie - עובד טוב');
+  assert.match(sentMessages[0], /^\u200F🤖 /u);
+  assert.match(sentMessages[0], /Zombie - /u);
+  assert.match(sentMessages[0], /\u05e2\u05d5\u05d1\u05d3 \u05d8\u05d5\u05d1/u);
+});
+
+test('executeAgentAction confirms too-easy feedback as maybe instead of bad', async () => {
+  const sentMessages = [];
+  let saved = false;
+  const updated = createSong();
+  const stateStore = {
+    getSongs() {
+      return [updated];
+    },
+    getSongById(songId) {
+      return songId === 'song_a' ? updated : null;
+    },
+    updateSongById(songId, updater) {
+      const nextSong = updater(updated);
+      Object.assign(updated, nextSong);
+      return updated;
+    },
+    getResultMessage(messageId) {
+      if (messageId !== 'wamid-1') return null;
+      return {
+        results: [{ index: 1, song_id: 'song_a', title: 'Zombie', artist: 'The Cranberries' }]
+      };
+    },
+    getLastResults() {
+      return null;
+    },
+    async queueSave() {
+      saved = true;
+    }
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+    }
+  };
+
+  await executeAgentAction({
+    action: {
+      action: 'update_song_feedback',
+      updates: [
+        {
+          result_index: 1,
+          fit: 'maybe',
+          issues: ['too_easy'],
+          notes: 'קל מדי'
+        }
+      ]
+    },
+    stateStore,
+    chat,
+    record: {
+      chatId: 'chat-1',
+      quoted: { id: 'wamid-1' }
+    }
+  });
+
+  assert.equal(saved, true);
+  assert.equal(updated.band_status.fit, 'maybe');
+  assert.match(sentMessages[0], /^\u200F🤖 /u);
+  assert.match(sentMessages[0], /Zombie - /u);
+  assert.match(sentMessages[0], /\u05d0\u05d5\u05dc\u05d9/u);
 });
 
 test('executeAgentAction explain_song_rejection explains why a bad song was rejected', async () => {
@@ -480,7 +547,7 @@ test('executeAgentAction update_song applies only allowed mutable fields', async
   assert.equal(saved, true);
   assert.equal(song.song_title, 'Zombie (Live)');
   assert.equal(song.source_text, 'Zombie');
-  assert.equal(sentMessages[0], '\u05e2\u05d3\u05db\u05e0\u05ea\u05d9: Zombie (Live) - The Cranberries');
+  assert.equal(sentMessages[0], `${BOT_PREFIX}\u05e2\u05d3\u05db\u05e0\u05ea\u05d9: Zombie (Live) - The Cranberries`);
 });
 
 test('executeAgentAction update_song resolves by result index from stored bot context', async () => {
@@ -535,7 +602,7 @@ test('executeAgentAction update_song resolves by result index from stored bot co
 
   assert.equal(saved, true);
   assert.equal(song.artist, 'Cranberries');
-  assert.equal(sentMessages[0], '\u05e2\u05d3\u05db\u05e0\u05ea\u05d9: Zombie - Cranberries');
+  assert.equal(sentMessages[0], `${BOT_PREFIX}\u05e2\u05d3\u05db\u05e0\u05ea\u05d9: Zombie - Cranberries`);
 });
 
 test('executeAgentAction remove_song resolves by title and artist when no result context exists', async () => {
@@ -589,7 +656,7 @@ test('executeAgentAction remove_song resolves by title and artist when no result
   });
 
   assert.equal(removedSongId, 'song_a');
-  assert.equal(sentMessages[0], '\u05d4\u05e1\u05e8\u05ea\u05d9: Zombie - The Cranberries');
+  assert.equal(sentMessages[0], `${BOT_PREFIX}\u05d4\u05e1\u05e8\u05ea\u05d9: Zombie - The Cranberries`);
 });
 
 test('executeAgentAction remove_song resolves by result index from stored bot context', async () => {
@@ -638,7 +705,7 @@ test('executeAgentAction remove_song resolves by result index from stored bot co
   });
 
   assert.equal(removedSongId, 'song_a');
-  assert.equal(sentMessages[0], '\u05d4\u05e1\u05e8\u05ea\u05d9: Zombie - The Cranberries');
+  assert.equal(sentMessages[0], `${BOT_PREFIX}\u05d4\u05e1\u05e8\u05ea\u05d9: Zombie - The Cranberries`);
 });
 
 test('executeAgentAction update_song asks for clarification on ambiguous title matches', async () => {

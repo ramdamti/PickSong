@@ -423,11 +423,40 @@ function inferFitFromIssues(issues) {
     return null;
   }
 
-  if (issues.some((issue) => issue === 'too_hard' || issue === 'too_easy' || issue === 'doesnt_groove')) {
+  if (issues.some((issue) => issue === 'too_hard' || issue === 'doesnt_groove')) {
     return 'bad';
+  }
+  if (issues.some((issue) => issue === 'too_easy')) {
+    return 'maybe';
   }
 
   return null;
+}
+
+function isComfortPositiveFeedback(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return false;
+
+  return /(?:קל לנו|קל לנו לנגן|קל לשיר|יושב לנו טוב|זורם לנו)/iu.test(source);
+}
+
+function inferHeuristicFeedbackFit(messageText, issues) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return inferFitFromIssues(issues);
+
+  if (isComfortPositiveFeedback(messageText)) {
+    return 'good';
+  }
+
+  if (/(?:קל מדי|יותר מדי קל|פשוט מדי|פשוטה מדי)/iu.test(source)) {
+    return 'maybe';
+  }
+
+  if (/(?:לא עובד|לא עבד|לא מתאים|לא מתאימה|לא לנו|קשה מדי|קשה לנו|תסיר|להסיר)/iu.test(source)) {
+    return 'bad';
+  }
+
+  return inferFitFromIssues(issues);
 }
 
 function normalizeFeedbackUpdates(action, messageText) {
@@ -441,8 +470,13 @@ function normalizeFeedbackUpdates(action, messageText) {
         Number.isInteger(parsedEntryIndex) && parsedEntryIndex > 0
           ? parsedEntryIndex
           : fallbackResultIndex;
-      const issues = Array.isArray(item.issues) && item.issues.length > 0 ? item.issues : inferFeedbackIssue(messageText);
+      const rawIssues = Array.isArray(item.issues) && item.issues.length > 0 ? item.issues : inferFeedbackIssue(messageText);
+      const issues =
+        isComfortPositiveFeedback(messageText) && rawIssues.includes('too_easy')
+          ? rawIssues.filter((issue) => issue !== 'too_easy')
+          : rawIssues;
       const fit =
+        inferHeuristicFeedbackFit(messageText, issues) ||
         item.fit ||
         inferPositiveFeedbackFit(messageText) ||
         inferFeedbackFit(messageText) ||
@@ -471,8 +505,13 @@ function normalizeFeedbackUpdates(action, messageText) {
     return [];
   }
 
-  const topLevelIssues = Array.isArray(action.issues) ? action.issues : inferFeedbackIssue(messageText);
+  const rawTopLevelIssues = Array.isArray(action.issues) ? action.issues : inferFeedbackIssue(messageText);
+  const topLevelIssues =
+    isComfortPositiveFeedback(messageText) && rawTopLevelIssues.includes('too_easy')
+      ? rawTopLevelIssues.filter((issue) => issue !== 'too_easy')
+      : rawTopLevelIssues;
   const topLevelFit =
+    inferHeuristicFeedbackFit(messageText, topLevelIssues) ||
     action.fit ||
     inferPositiveFeedbackFit(messageText) ||
     inferFeedbackFit(messageText) ||
