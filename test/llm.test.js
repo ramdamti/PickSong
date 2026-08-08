@@ -339,6 +339,42 @@ test('interpretMessage infers positive fit for rehearsal-success feedback', asyn
   assert.equal(action.updates[0].fit, 'good');
 });
 
+test('interpretMessage infers bad fit for "too hard for us" feedback', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05e9\u05d9\u05e8 4 \u05e7\u05e9\u05d4 \u05dc\u05e0\u05d5',
+    replyContext: {
+      results: [{ index: 4, song_id: 'song_d', title: '21st Century Schizoid Man', artist: 'April Wine' }]
+    },
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'update_song_feedback',
+                  result_index: 4
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'update_song_feedback');
+  assert.equal(action.updates[0].result_index, 4);
+  assert.equal(action.updates[0].fit, 'bad');
+  assert.deepEqual(action.updates[0].issues, ['too_hard']);
+});
+
 test('interpretMessage retries one rate limit response and records usage counters', async () => {
   let callCount = 0;
   const action = await interpretMessage({

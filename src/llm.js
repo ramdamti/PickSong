@@ -418,6 +418,18 @@ function inferPositiveFeedbackFit(messageText) {
   return null;
 }
 
+function inferFitFromIssues(issues) {
+  if (!Array.isArray(issues) || issues.length === 0) {
+    return null;
+  }
+
+  if (issues.some((issue) => issue === 'too_hard' || issue === 'too_easy' || issue === 'doesnt_groove')) {
+    return 'bad';
+  }
+
+  return null;
+}
+
 function normalizeFeedbackUpdates(action, messageText) {
   if (Array.isArray(action.updates) && action.updates.length > 0) {
     return action.updates;
@@ -433,7 +445,11 @@ function normalizeFeedbackUpdates(action, messageText) {
   }
 
   const topLevelIssues = Array.isArray(action.issues) ? action.issues : inferFeedbackIssue(messageText);
-  const topLevelFit = action.fit || inferPositiveFeedbackFit(messageText) || inferFeedbackFit(messageText);
+  const topLevelFit =
+    action.fit ||
+    inferPositiveFeedbackFit(messageText) ||
+    inferFeedbackFit(messageText) ||
+    inferFitFromIssues(topLevelIssues);
   const topLevelNotes =
     action.notes === undefined || action.notes === null || String(action.notes).trim() === ''
       ? String(messageText || '').trim()
