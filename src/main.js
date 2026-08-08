@@ -274,7 +274,14 @@ async function executeAgentAction({ action, stateStore, chat, record }) {
   }
 
   if (action.action === 'search_songs') {
-    const matches = searchSongs(songs, action.query || {});
+    const excludedSongIds =
+      action.query?.avoid_previous_results && activeContext.context
+        ? new Set(activeContext.context.results.map((entry) => entry.song_id).filter(Boolean))
+        : null;
+    const candidateSongs = excludedSongIds
+      ? songs.filter((song) => !excludedSongIds.has(song.song_id))
+      : songs;
+    const matches = searchSongs(candidateSongs, action.query || {});
     await sendSongsReply({ chat, stateStore, chatId: record.chatId, songs: matches });
     return;
   }

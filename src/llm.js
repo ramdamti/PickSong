@@ -7,6 +7,14 @@ const SYSTEM_PROMPT = [
   'The application executes actions locally and deterministically.',
   'Never invent a song_id.',
   'When reply_context is provided and the user refers to previous results, use result_index values from that context.',
+  'Treat performer-fit phrases as direct search intent, not ambiguity.',
+  'Examples of performer-fit language: מתאים לזמר, מתאים לזמרת, מתאים לזמר שלנו, מתאים לקול שלנו, שהסולן יוכל לשיר, שהסולנית תוכל לשיר, מתאים לגיטריסט, מתאים לבסיסט, מתאים למתופף, מתאים לקלידים.',
+  'Map those phrases into compact search query preferences or requirements when possible.',
+  'Extract requested result counts carefully. Examples: "3 שירים", "שלושה שירים", "three songs" should set query.limit to 3.',
+  'When reply_context exists and the user is asking for another recommendation list, fresh options, more songs, or different songs, set query.avoid_previous_results=true.',
+  'Prefer taking a reasonable search interpretation over asking a clarification question.',
+  'For vague recommendation requests, default to search_songs with broad query semantics.',
+  'Use clarify only when execution would be unsafe or impossible without missing identity: for example ambiguous remove/update target, missing song identity for destructive actions, or missing reference for result-index feedback.',
   'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
   'Allowed actions: search_songs, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, clarify.',
   'search_songs and find_similar_songs return compact query semantics only.',
@@ -234,6 +242,87 @@ function estimateActionName(parsedAction) {
   return typeof parsedAction?.action === 'string' ? parsedAction.action : 'unknown';
 }
 
+function inferRequestedLimit(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return null;
+
+  const digitMatch = source.match(/(?:^|\s)(\d{1,2})\s+שירים?(?:\s|$)|שירים?\s+(\d{1,2})(?:\s|$)/iu);
+  if (digitMatch) {
+    const parsed = Number.parseInt(digitMatch[1] || digitMatch[2], 10);
+    if (Number.isInteger(parsed) && parsed > 0) return parsed;
+  }
+
+  const hebrewWordLimits = [
+    { limit: 1, values: ['אחד', 'אחת'] },
+    { limit: 2, values: ['שניים', 'שני', 'שתיים', 'שתי'] },
+    { limit: 3, values: ['שלושה', 'שלוש'] },
+    { limit: 4, values: ['ארבעה', 'ארבע'] },
+    { limit: 5, values: ['חמישה', 'חמש'] },
+    { limit: 6, values: ['שישה', 'שש'] },
+    { limit: 7, values: ['שבעה', 'שבע'] },
+    { limit: 8, values: ['שמונה'] },
+    { limit: 9, values: ['תשעה', 'תשע'] },
+    { limit: 10, values: ['עשרה', 'עשר'] }
+  ];
+
+  for (const candidate of hebrewWordLimits) {
+    for (const value of candidate.values) {
+      if (
+        source.includes(`${value} שירים`) ||
+        source.includes(`${value} שיר`) ||
+        source.includes(`שירים ${value}`) ||
+        source.includes(`שיר ${value}`)
+      ) {
+        return candidate.limit;
+      }
+    }
+  }
+
+  const englishDigitMatch = source.match(/(?:^|\s)(\d{1,2})\s+songs?\b|songs?\s+(\d{1,2})(?:\s|$)/i);
+  if (englishDigitMatch) {
+    const parsed = Number.parseInt(englishDigitMatch[1] || englishDigitMatch[2], 10);
+    if (Number.isInteger(parsed) && parsed > 0) return parsed;
+  }
+
+  return null;
+}
+
+function shouldAvoidPreviousResults(messageText, replyContext) {
+  if (!replyContext?.results?.length) return false;
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return false;
+
+  return /(?:עוד|אחר(?:ים|ות)?|שונ(?:ים|ות)?|חדשים|חדש|נוספ(?:ים|ות)?|במקום|לא אלה|משהו אחר)/iu.test(source);
+}
+
+function normalizeAgentAction(action, { messageText, replyContext }) {
+  if (!action || typeof action !== 'object') return action;
+  if (action.action !== 'search_songs' && action.action !== 'find_similar_songs') {
+    return action;
+  }
+
+  const query =
+    action.query && typeof action.query === 'object' && !Array.isArray(action.query)
+      ? { ...action.query }
+      : {};
+
+  if (!Number.isInteger(Number.parseInt(query.limit, 10))) {
+    const inferredLimit = inferRequestedLimit(messageText);
+    if (inferredLimit) {
+      query.limit = inferredLimit;
+    }
+  }
+
+  if (action.action === 'search_songs' && shouldAvoidPreviousResults(messageText, replyContext)) {
+    query.avoid_previous_results = true;
+  }
+
+  return {
+    ...action,
+    query
+  };
+}
+
 async function interpretMessage({
   provider,
   baseUrl,
@@ -272,7 +361,9 @@ async function interpretMessage({
           prompt,
           requestFn
         });
-        const action = validateAgentAction(parsed);
+        const action = validateAgentAction(
+          normalizeAgentAction(parsed, { messageText, replyContext })
+        );
         console.log(
           `[agent] action=${estimateActionName(action)} input=${usage.promptTokens} cached=${usage.cachedTokens} output=${usage.completionTokens} total=${usage.totalTokens} latency=${usage.latencyMs}ms`
         );

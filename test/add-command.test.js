@@ -145,6 +145,59 @@ test('executeAgentAction get_band_failure_reasons summarizes bad songs with reas
   assert.match(sentMessages[0], /vocals_too_high/);
 });
 
+test('executeAgentAction search_songs can avoid previous result songs for a fresh list', async () => {
+  const sentMessages = [];
+  const firstSong = createSong({ song_id: 'song_a', song_title: 'Zombie', artist: 'The Cranberries' });
+  const secondSong = createSong({ song_id: 'song_b', song_title: '1979', artist: 'The Smashing Pumpkins' });
+  const stateStore = {
+    getSongs() {
+      return [firstSong, secondSong];
+    },
+    getResultMessage() {
+      return null;
+    },
+    getLastResults(chatId) {
+      if (chatId !== 'chat-1') return null;
+      return {
+        results: [{ index: 1, song_id: 'song_a', title: 'Zombie', artist: 'The Cranberries' }]
+      };
+    },
+    setLastResults() {
+      return true;
+    },
+    storeResultMessage() {
+      return true;
+    },
+    async queueSave() {}
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+      return { id: { _serialized: 'wamid-2' } };
+    }
+  };
+
+  await executeAgentAction({
+    action: {
+      action: 'search_songs',
+      query: {
+        avoid_previous_results: true,
+        limit: 5
+      }
+    },
+    stateStore,
+    chat,
+    record: {
+      chatId: 'chat-1',
+      quoted: { id: '' }
+    }
+  });
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /1979/);
+  assert.doesNotMatch(sentMessages[0], /Zombie/);
+});
+
 test('executeAgentAction updates feedback by result index using stored context', async () => {
   const sentMessages = [];
   let saved = false;

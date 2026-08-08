@@ -4,8 +4,12 @@ const assert = require('node:assert/strict');
 const { SYSTEM_PROMPT, buildAgentPrompt, interpretMessage, getAgentUsageStats } = require('../src/llm');
 
 test('SYSTEM_PROMPT stays compact and stable', () => {
-  assert.ok(SYSTEM_PROMPT.length < 1200);
+  assert.ok(SYSTEM_PROMPT.length < 2100);
   assert.doesNotMatch(SYSTEM_PROMPT, /state\.json|songs\[|migration/i);
+  assert.match(SYSTEM_PROMPT, /מתאים לזמר/);
+  assert.match(SYSTEM_PROMPT, /מתאים לגיטריסט/);
+  assert.match(SYSTEM_PROMPT, /Prefer taking a reasonable search interpretation/);
+  assert.match(SYSTEM_PROMPT, /Use clarify only when execution would be unsafe or impossible/);
 });
 
 test('buildAgentPrompt includes reply context without full database payloads', () => {
@@ -63,6 +67,75 @@ test('interpretMessage validates the structured response from the provider', asy
 
   assert.equal(action.action, 'search_songs');
   assert.equal(action.query.limit, 5);
+});
+
+test('interpretMessage infers requested song count from Hebrew quantity phrases', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05ea\u05d1\u05d9\u05d0 \u05e9\u05dc\u05d5\u05e9\u05d4 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05d2\u05e0\u05d9\u05d1\u05d9\u05dd',
+    replyContext: null,
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {
+                    preferences: { band_energy: 'high' }
+                  }
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.limit, 3);
+});
+
+test('interpretMessage flags fresh follow-up searches to avoid previous results', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05ea\u05d1\u05d9\u05d0 \u05e2\u05d5\u05d3 \u05e9\u05dc\u05d5\u05e9\u05d4 \u05e9\u05d9\u05e8\u05d9\u05dd',
+    replyContext: {
+      results: [{ index: 1, song_id: 'song_a', title: 'Zombie', artist: 'The Cranberries' }]
+    },
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {}
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.limit, 3);
+  assert.equal(action.query.avoid_previous_results, true);
 });
 
 test('interpretMessage retries one rate limit response and records usage counters', async () => {
