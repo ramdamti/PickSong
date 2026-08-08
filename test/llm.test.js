@@ -489,6 +489,42 @@ test('interpretMessage treats "too easy" feedback as non-negative', async () => 
   assert.deepEqual(action.updates[0].issues, ['too_easy']);
 });
 
+test('interpretMessage treats challenging but enjoyable feedback as maybe instead of unknown', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05e9\u05d9\u05e8 1 \u05d4\u05d9\u05d4 \u05de\u05d0\u05ea\u05d2\u05e8 \u05d0\u05d1\u05dc \u05e0\u05d4\u05e0\u05d5 \u05dc\u05e0\u05d2\u05df',
+    replyContext: {
+      results: [{ index: 1, song_id: 'song_a', title: 'A Day in the Life', artist: 'The Beatles' }]
+    },
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'update_song_feedback',
+                  result_index: 1
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'update_song_feedback');
+  assert.equal(action.updates[0].result_index, 1);
+  assert.equal(action.updates[0].fit, 'maybe');
+  assert.deepEqual(action.updates[0].issues, ['too_hard']);
+});
+
 test('interpretMessage retries one rate limit response and records usage counters', async () => {
   let callCount = 0;
   const action = await interpretMessage({
