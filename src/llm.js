@@ -331,6 +331,57 @@ function inferRequestedGenres(messageText) {
     .map((entry) => entry.genre);
 }
 
+function inferInstrumentDifficultyPreferences(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return {};
+
+  const difficulty =
+    /(?:קשה|קשים|קשות|קשוח|קשוחה|מאתגר|מאתגרת|מסובך|מסובכת|hard|challenging)/iu.test(source)
+      ? 'high'
+      : /(?:^|\s)(?:קל|קלה|קלים|קלות|פשוט|פשוטה|easy)(?:\s|$)/iu.test(source)
+        ? 'low'
+        : null;
+
+  if (!difficulty) return {};
+
+  const preferences = {};
+  if (/(?:תיפוף|תופים|מתופף|drums?|drumming)/iu.test(source)) {
+    preferences.drums_difficulty = difficulty;
+  }
+  if (/(?:גיטרה|גיטר[היסטס]?|guitar)/iu.test(source)) {
+    preferences.guitar_difficulty = difficulty;
+  }
+  if (/(?:בס|בסיסט|bass)/iu.test(source)) {
+    preferences.bass_difficulty = difficulty;
+  }
+  if (/(?:קלידים|פסנתר|keys|keyboard|piano)/iu.test(source)) {
+    preferences.keys_difficulty = difficulty;
+  }
+
+  return preferences;
+}
+
+function inferPerformerFitPreferences(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return {};
+
+  const preferences = {};
+
+  if (/(?:זמרת|סולנית|female vocal|female singer)/iu.test(source)) {
+    preferences.original_vocal = 'female';
+    preferences.singer_fit = 'great';
+  } else if (/(?:זמר|סולן|male vocal|male singer)/iu.test(source)) {
+    preferences.original_vocal = 'male';
+    preferences.singer_fit = 'great';
+  }
+
+  if (/(?:מתאים לקול שלנו|שיתאים לנו לשיר|שנוכל לשיר|singable|easy to sing)/iu.test(source)) {
+    preferences.singer_fit = preferences.singer_fit || 'great';
+  }
+
+  return preferences;
+}
+
 const ARTIST_ALIAS_MAP = new Map([
   ['פינק פלויד', 'Pink Floyd'],
   ['פינקפלויד', 'Pink Floyd'],
@@ -677,6 +728,10 @@ function normalizeAgentAction(action, { messageText, replyContext }) {
     query.requirements && typeof query.requirements === 'object' && !Array.isArray(query.requirements)
       ? { ...query.requirements }
       : {};
+  const preferences =
+    query.preferences && typeof query.preferences === 'object' && !Array.isArray(query.preferences)
+      ? { ...query.preferences }
+      : {};
 
   if (!Number.isInteger(Number.parseInt(query.limit, 10))) {
     const inferredLimit = inferRequestedLimit(messageText);
@@ -710,11 +765,19 @@ function normalizeAgentAction(action, { messageText, replyContext }) {
     }
   }
 
+  Object.assign(
+    preferences,
+    inferInstrumentDifficultyPreferences(messageText),
+    inferPerformerFitPreferences(messageText),
+    preferences
+  );
+
   return {
     ...action,
     query: {
       ...query,
-      requirements
+      requirements,
+      preferences
     }
   };
 }

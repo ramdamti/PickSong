@@ -301,6 +301,167 @@ test('interpretMessage infers genre constraints from explicit blues requests', a
   assert.deepEqual(action.query.requirements.genres, ['blues']);
 });
 
+test('interpretMessage infers drum difficulty preferences from hard drumming requests', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05d1\u05d5\u05d8 \u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8 \u05e2\u05dd \u05ea\u05d9\u05e4\u05d5\u05e3 \u05e7\u05e9\u05d4',
+    replyContext: null,
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {}
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.preferences.drums_difficulty, 'high');
+});
+
+test('interpretMessage infers guitar difficulty preferences from hard guitar requests', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05d1\u05d5\u05d8 \u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8 \u05e2\u05dd \u05d2\u05d9\u05d8\u05e8\u05d4 \u05e7\u05e9\u05d4',
+    replyContext: null,
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {}
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.preferences.guitar_difficulty, 'high');
+});
+
+test('interpretMessage infers bass difficulty preferences from hard bass requests', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05d1\u05d5\u05d8 \u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8 \u05e2\u05dd \u05d1\u05e1 \u05e7\u05e9\u05d4',
+    replyContext: null,
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {}
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.preferences.bass_difficulty, 'high');
+});
+
+test('interpretMessage infers keys difficulty preferences from hard keys requests', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05d1\u05d5\u05d8 \u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8 \u05e2\u05dd \u05e7\u05dc\u05d9\u05d3\u05d9\u05dd \u05e7\u05e9\u05d9\u05dd',
+    replyContext: null,
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {}
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.preferences.keys_difficulty, 'high');
+});
+
+test('interpretMessage infers female vocal fit preferences from singer phrasing', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05d1\u05d5\u05d8 \u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8 \u05e9\u05de\u05ea\u05d0\u05d9\u05dd \u05dc\u05d6\u05de\u05e8\u05ea',
+    replyContext: null,
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {}
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.preferences.original_vocal, 'female');
+  assert.equal(action.query.preferences.singer_fit, 'great');
+});
+
 test('interpretMessage normalizes short feedback into update_song_feedback updates', async () => {
   const action = await interpretMessage({
     provider: 'groq',
