@@ -1,6 +1,3 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
-
 function normalizeName(value) {
   return String(value || '')
     .trim()
@@ -9,6 +6,8 @@ function normalizeName(value) {
 }
 
 function createWhatsAppClient({ headless, executablePath, authDir }) {
+  const { Client, LocalAuth } = require('whatsapp-web.js');
+  const qrcode = require('qrcode-terminal');
   console.log(
     `[whatsapp] puppeteer executable: ${executablePath || '(default chromium)'}`
   );
@@ -115,6 +114,7 @@ async function findGroupChat(client, groupName) {
 function messageToRecord(message) {
   const chatId =
     (message.fromMe ? message.to : null) ||
+    message._data?.from ||
     message._data?.to ||
     message.id?.remote ||
     message.from ||
