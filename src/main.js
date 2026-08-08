@@ -145,6 +145,90 @@ function buildAgentFailureReply(error) {
   return 'יש לי עכשיו עומס קטן. נסו שוב עוד רגע.';
 }
 
+function shouldUseGenericClarifyReply(messageText, replyContext) {
+  if (replyContext?.results?.length) {
+    return false;
+  }
+
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) {
+    return true;
+  }
+
+  if (
+    /(?:להסיר|תסיר|למחוק|תמחק|לעדכן|תעדכן|שנה|לשנות|למה|מדוע|פרטים|מידע|similar|דומה|כמו\s+\d+|שיר\s+\d+|\d+\s+לא)/iu.test(source)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function buildClarifyReply(action, { messageText, replyContext }) {
+  if (shouldUseGenericClarifyReply(messageText, replyContext)) {
+    return 'איזה שירים אתה רוצה?';
+  }
+
+  return action.question;
+}
+
+function querySectionHasContent(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  return Object.values(value).some((entry) => {
+    if (Array.isArray(entry)) {
+      return entry.length > 0;
+    }
+    if (entry && typeof entry === 'object') {
+      return querySectionHasContent(entry);
+    }
+    return entry !== undefined && entry !== null && String(entry).trim() !== '';
+  });
+}
+
+function searchQueryHasSemanticConstraints(query) {
+  const normalized = query && typeof query === 'object' && !Array.isArray(query) ? query : {};
+  return (
+    querySectionHasContent(normalized.requirements) ||
+    querySectionHasContent(normalized.preferences) ||
+    querySectionHasContent(normalized.exclusions) ||
+    Number.isInteger(Number.parseInt(normalized.reference_result_index, 10))
+  );
+}
+
+function looksLikeBareSpecificHint(messageText) {
+  const source = String(messageText || '').trim();
+  if (!source) return false;
+
+  const compact = source.replace(/\s+/g, ' ').trim();
+  const tokens = compact.split(' ').filter(Boolean);
+  if (tokens.length === 0 || tokens.length > 4) {
+    return false;
+  }
+
+  if (/(?:תביא|תן|תני|find|give|show|play|עוד|שירים?|songs?|something|משהו|רשימה)/iu.test(compact)) {
+    return false;
+  }
+
+  return /[\p{L}]/u.test(compact);
+}
+
+function shouldBlockGenericSearchFallback(action, { messageText, replyContext }) {
+  if (action?.action !== 'search_songs') {
+    return false;
+  }
+  if (replyContext?.results?.length) {
+    return false;
+  }
+  if (searchQueryHasSemanticConstraints(action.query || {})) {
+    return false;
+  }
+
+  return looksLikeBareSpecificHint(messageText);
+}
+
 function resolveSongFromAction(stateStore, action, activeContext) {
   if (action.song_id) {
     return { song: stateStore.getSongById(action.song_id), reason: null };
@@ -298,12 +382,12 @@ async function sendSongsReply({ chat, stateStore, chatId, songs }) {
   await stateStore.queueSave();
 }
 
-async function executeAgentAction({ action, stateStore, chat, record }) {
+async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext }) {
   const activeContext = resolveActiveResultContext(stateStore, record);
   const songs = stateStore.getSongs();
 
   if (action.action === 'clarify') {
-    await chat.sendMessage(action.question);
+    await chat.sendMessage(buildClarifyReply(action, { messageText, replyContext }));
     return;
   }
 
@@ -523,7 +607,12 @@ async function handleAgentMessage({ chat, stateStore, config, record, interpretM
       currentDate: CURRENT_DATE
     });
 
-    await executeAgentAction({ action, stateStore, chat, record });
+    if (shouldBlockGenericSearchFallback(action, { messageText, replyContext })) {
+      await chat.sendMessage('איזה שירים אתה רוצה?');
+      return true;
+    }
+
+    await executeAgentAction({ action, stateStore, chat, record, messageText, replyContext });
   } catch (error) {
     console.error('[agent] failed:', error);
     await chat.sendMessage(buildAgentFailureReply(error));
@@ -741,6 +830,7 @@ module.exports = {
   shouldHandleMessage,
   buildAgentReplyContext,
   buildAgentFailureReply,
+  buildClarifyReply,
   handleAgentMessage,
   executeAgentAction
 };

@@ -296,6 +296,69 @@ function inferRequestedLimit(messageText) {
   return null;
 }
 
+function inferRequestedLanguage(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return null;
+
+  if (/(?:בעברית|עברית|שירים עבריים|שיר עברי|hebrew)/iu.test(source)) {
+    return 'he';
+  }
+
+  if (/(?:באנגלית|אנגלית|שירים באנגלית|שיר באנגלית|english)/iu.test(source)) {
+    return 'en';
+  }
+
+  return null;
+}
+
+function inferRequestedGenres(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return [];
+
+  const genrePatterns = [
+    { genre: 'blues', patterns: [/(?:בלוז|blues)/iu] },
+    { genre: 'rock', patterns: [/(?:רוק|rock)/iu] },
+    { genre: 'funk', patterns: [/(?:פאנק|funk)/iu] },
+    { genre: 'jazz', patterns: [/(?:ג'?אז|jazz)/iu] },
+    { genre: 'metal', patterns: [/(?:מטאל|metal)/iu] },
+    { genre: 'pop', patterns: [/(?:פופ|pop)/iu] },
+    { genre: 'ballad', patterns: [/(?:בלדה|ballad)/iu] }
+  ];
+
+  return genrePatterns
+    .filter((entry) => entry.patterns.some((pattern) => pattern.test(source)))
+    .map((entry) => entry.genre);
+}
+
+function cleanInferredArtistName(value) {
+  return String(value || '')
+    .replace(/^(?:של|by)\s+/iu, '')
+    .replace(/\s+(?:בעברית|עברית|באנגלית|אנגלית|hebrew|english)\b.*$/iu, '')
+    .replace(/\s+(?:עם|לזמר(?:ת)?|ללהקה)\b.*$/iu, '')
+    .trim();
+}
+
+function inferRequestedArtist(messageText) {
+  const source = String(messageText || '').trim();
+  if (!source) return null;
+
+  const patterns = [
+    /(?:^|\s)שירים?\s+של\s+(.+)$/iu,
+    /(?:^|\s)תביא\s+שירים?\s+של\s+(.+)$/iu,
+    /(?:^|\s)songs?\s+by\s+(.+)$/i,
+    /(?:^|\s)play\s+songs?\s+by\s+(.+)$/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (!match) continue;
+    const artist = cleanInferredArtistName(match[1]);
+    if (artist) return artist;
+  }
+
+  return null;
+}
+
 function shouldAvoidPreviousResults(messageText, replyContext) {
   if (!replyContext?.results?.length) return false;
   const source = String(messageText || '').trim().toLowerCase();
@@ -390,6 +453,10 @@ function normalizeAgentAction(action, { messageText, replyContext }) {
     action.query && typeof action.query === 'object' && !Array.isArray(action.query)
       ? { ...action.query }
       : {};
+  const requirements =
+    query.requirements && typeof query.requirements === 'object' && !Array.isArray(query.requirements)
+      ? { ...query.requirements }
+      : {};
 
   if (!Number.isInteger(Number.parseInt(query.limit, 10))) {
     const inferredLimit = inferRequestedLimit(messageText);
@@ -402,9 +469,33 @@ function normalizeAgentAction(action, { messageText, replyContext }) {
     query.avoid_previous_results = true;
   }
 
+  if (!requirements.language) {
+    const inferredLanguage = inferRequestedLanguage(messageText);
+    if (inferredLanguage) {
+      requirements.language = inferredLanguage;
+    }
+  }
+
+  if (!requirements.artist) {
+    const inferredArtist = inferRequestedArtist(messageText);
+    if (inferredArtist) {
+      requirements.artist = inferredArtist;
+    }
+  }
+
+  if ((!Array.isArray(requirements.genres) || requirements.genres.length === 0)) {
+    const inferredGenres = inferRequestedGenres(messageText);
+    if (inferredGenres.length > 0) {
+      requirements.genres = inferredGenres;
+    }
+  }
+
   return {
     ...action,
-    query
+    query: {
+      ...query,
+      requirements
+    }
   };
 }
 

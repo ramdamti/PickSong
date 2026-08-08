@@ -136,3 +136,65 @@ test('searchSongs strongly penalizes bad band fit even with decent metadata', ()
 
   assert.equal(results[0].song_title, 'Good Status');
 });
+
+test('searchSongs enforces artist and language as hard requirements', () => {
+  const pinkFloyd = createSong({
+    song_title: 'Time',
+    artist: 'Pink Floyd',
+    language: 'en'
+  });
+  const theWho = createSong({
+    song_title: 'Baba O Riley',
+    artist: 'The Who',
+    language: 'en'
+  });
+  const hebrewSong = createSong({
+    song_title: 'גשם',
+    artist: 'מאיר בנאי',
+    language: 'he'
+  });
+
+  const artistResults = searchSongs([pinkFloyd, theWho], {
+    requirements: { artist: 'Pink Floyd' },
+    preferences: {},
+    exclusions: {},
+    limit: 5
+  });
+  const languageResults = searchSongs([pinkFloyd, hebrewSong], {
+    requirements: { language: 'he' },
+    preferences: {},
+    exclusions: {},
+    limit: 5
+  });
+
+  assert.deepEqual(
+    artistResults.map((song) => song.song_title),
+    ['Time']
+  );
+  assert.deepEqual(
+    languageResults.map((song) => song.song_title),
+    ['גשם']
+  );
+});
+
+test('searchSongs returns no matches when an explicit genre requirement is absent from the catalog', () => {
+  const rockSong = createSong({
+    song_title: 'Time',
+    artist: 'Pink Floyd',
+    genres: ['rock']
+  });
+  const popSong = createSong({
+    song_title: 'All Right Now',
+    artist: 'Free',
+    genres: ['pop']
+  });
+
+  const results = searchSongs([rockSong, popSong], {
+    requirements: { genres: ['blues'] },
+    preferences: {},
+    exclusions: {},
+    limit: 5
+  });
+
+  assert.deepEqual(results, []);
+});

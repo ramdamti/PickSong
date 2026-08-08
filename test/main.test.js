@@ -6,6 +6,7 @@ const {
   shouldHandleMessage,
   buildAgentReplyContext,
   buildAgentFailureReply,
+  buildClarifyReply,
   handleAgentMessage
 } = require('../src/main');
 
@@ -160,6 +161,92 @@ test('handleAgentMessage performs one agent call for a normal search request', a
   assert.equal(sentMessages.length, 1);
 });
 
+test('handleAgentMessage blocks generic fallback for short specific hints with an empty search query', async () => {
+  const sentMessages = [];
+  const stateStore = {
+    getResultMessage() {
+      return null;
+    },
+    getLastResults() {
+      return null;
+    },
+    getSongs() {
+      return [
+        {
+          song_id: 'song_a',
+          song_title: 'Zombie',
+          artist: 'The Cranberries',
+          genres: ['rock'],
+          difficulty: 'medium',
+          feel: 'upbeat',
+          ai_metadata: {
+            singer_fit: 'great',
+            original_vocal: 'female',
+            vocal_range: 'medium-high',
+            vocal_style: ['rock'],
+            vocal_energy: 'high',
+            band_energy: 'high',
+            crowd_friendly: true,
+            groove_level: 'medium',
+            guitar_difficulty: 'low',
+            bass_difficulty: 'low',
+            drums_difficulty: 'medium',
+            keys_role: 'optional',
+            keys_difficulty: 'low',
+            bass_interest: 'medium'
+          },
+          band_status: {
+            fit: 'unknown',
+            issues: [],
+            notes: '',
+            attempts: 0,
+            last_reviewed: null,
+            last_rehearsed: null,
+            last_played: null
+          }
+        }
+      ];
+    },
+    setLastResults() {
+      return true;
+    },
+    storeResultMessage() {
+      return true;
+    },
+    async queueSave() {}
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+      return { id: { _serialized: 'wamid-2' } };
+    }
+  };
+
+  const handled = await handleAgentMessage({
+    chat,
+    stateStore,
+    config: {
+      triggerText: 'בוט',
+      llmProvider: 'groq',
+      llmBaseUrl: 'https://example.com',
+      llmApiKey: 'test',
+      llmModel: 'test-model'
+    },
+    record: {
+      text: 'בוט מייקל גקסון',
+      quoted: { fromMe: false },
+      chatId: 'chat-1'
+    },
+    interpretMessageFn: async () => ({
+      action: 'search_songs',
+      query: {}
+    })
+  });
+
+  assert.equal(handled, true);
+  assert.deepEqual(sentMessages, ['איזה שירים אתה רוצה?']);
+});
+
 test('buildAgentFailureReply returns a specific message for rate limits', () => {
   assert.equal(
     buildAgentFailureReply({ rateLimited: true, status: 429, message: 'Too Many Requests' }),
@@ -171,5 +258,15 @@ test('buildAgentFailureReply returns a clarification message for invalid agent o
   assert.equal(
     buildAgentFailureReply(new Error('agent_action.updates must be a non-empty array')),
     'לא הבנתי עד הסוף את הבקשה. נסו לנסח שוב במשפט קצר.'
+  );
+});
+
+test('buildClarifyReply collapses broad recommendation clarifications into a fixed prompt', () => {
+  assert.equal(
+    buildClarifyReply(
+      { action: 'clarify', question: 'האם תוכל להסביר מה בדיוק אתה רוצה לדעת?' },
+      { messageText: 'תני מייקל גקסון', replyContext: null }
+    ),
+    'איזה שירים אתה רוצה?'
   );
 });

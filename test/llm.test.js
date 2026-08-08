@@ -172,6 +172,103 @@ test('interpretMessage flags fresh follow-up searches to avoid previous results'
   assert.equal(action.query.avoid_previous_results, true);
 });
 
+test('interpretMessage infers artist constraints from "songs by" phrasing', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8\u05d9\u05dd \u05e9\u05dc Pink Floyd',
+    replyContext: null,
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {}
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.requirements.artist, 'Pink Floyd');
+});
+
+test('interpretMessage infers Hebrew language constraints from the message text', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05d1\u05d5\u05d8 \u05ea\u05d1\u05d9\u05d0 3 \u05e9\u05d9\u05e8\u05d9\u05dd \u05d1\u05e2\u05d1\u05e8\u05d9\u05ea',
+    replyContext: null,
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {}
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.limit, 3);
+  assert.equal(action.query.requirements.language, 'he');
+});
+
+test('interpretMessage infers genre constraints from explicit blues requests', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05d1\u05d5\u05d8 \u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8 \u05d1\u05dc\u05d5\u05d6',
+    replyContext: null,
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {}
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.deepEqual(action.query.requirements.genres, ['blues']);
+});
+
 test('interpretMessage normalizes short feedback into update_song_feedback updates', async () => {
   const action = await interpretMessage({
     provider: 'groq',

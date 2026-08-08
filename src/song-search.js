@@ -17,6 +17,17 @@ function songGenres(song) {
   return normalizeList(song?.genres);
 }
 
+function artistMatches(songArtist, requestedArtist) {
+  const songValue = normalizeScalar(songArtist);
+  const requestedValue = normalizeScalar(requestedArtist);
+  if (!songValue || !requestedValue) return false;
+  return (
+    songValue === requestedValue ||
+    songValue.includes(requestedValue) ||
+    requestedValue.includes(songValue)
+  );
+}
+
 function scalarList(value) {
   return Array.isArray(value) ? normalizeList(value) : [normalizeScalar(value)].filter(Boolean);
 }
@@ -49,6 +60,10 @@ function songMatchesHardRequirement(song, requirements = {}) {
   if (requirements.language) {
     const language = normalizeScalar(song.language);
     if (language !== normalizeScalar(requirements.language)) return false;
+  }
+
+  if (requirements.artist) {
+    if (!artistMatches(song.artist, requirements.artist)) return false;
   }
 
   if (requirements.feel) {
