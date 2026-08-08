@@ -315,6 +315,66 @@ test('executeAgentAction updates feedback by result index using stored context',
   assert.equal(sentMessages[0], '\u05e2\u05d3\u05db\u05e0\u05ea\u05d9: Zombie - לא עבד');
 });
 
+test('executeAgentAction confirms positive feedback as good instead of unknown', async () => {
+  const sentMessages = [];
+  let saved = false;
+  const updated = createSong();
+  const stateStore = {
+    getSongs() {
+      return [updated];
+    },
+    getSongById(songId) {
+      return songId === 'song_a' ? updated : null;
+    },
+    updateSongById(songId, updater) {
+      const nextSong = updater(updated);
+      Object.assign(updated, nextSong);
+      return updated;
+    },
+    getResultMessage(messageId) {
+      if (messageId !== 'wamid-1') return null;
+      return {
+        results: [{ index: 1, song_id: 'song_a', title: 'Zombie', artist: 'The Cranberries' }]
+      };
+    },
+    getLastResults() {
+      return null;
+    },
+    async queueSave() {
+      saved = true;
+    }
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+    }
+  };
+
+  await executeAgentAction({
+    action: {
+      action: 'update_song_feedback',
+      updates: [
+        {
+          result_index: 1,
+          fit: 'good',
+          issues: [],
+          notes: 'היה כיף לנגן את השיר'
+        }
+      ]
+    },
+    stateStore,
+    chat,
+    record: {
+      chatId: 'chat-1',
+      quoted: { id: 'wamid-1' }
+    }
+  });
+
+  assert.equal(saved, true);
+  assert.equal(updated.band_status.fit, 'good');
+  assert.equal(sentMessages[0], 'עדכנתי: Zombie - עובד טוב');
+});
+
 test('executeAgentAction explain_song_rejection explains why a bad song was rejected', async () => {
   const sentMessages = [];
   const song = createSong({

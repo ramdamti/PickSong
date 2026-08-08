@@ -407,6 +407,17 @@ function inferResultIndexesFromMessage(messageText) {
   );
 }
 
+function inferPositiveFeedbackFit(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return null;
+
+  if (/(?:היה כיף|כיף לנגן|כיף לשיר|הלך טוב|הלכה טוב|עבד טוב|עבדה טוב|מעולה|מצוין|אהבנו|אהבנו אותו|זרם טוב|ישב טוב)/iu.test(source)) {
+    return 'good';
+  }
+
+  return null;
+}
+
 function normalizeFeedbackUpdates(action, messageText) {
   if (Array.isArray(action.updates) && action.updates.length > 0) {
     return action.updates;
@@ -422,7 +433,7 @@ function normalizeFeedbackUpdates(action, messageText) {
   }
 
   const topLevelIssues = Array.isArray(action.issues) ? action.issues : inferFeedbackIssue(messageText);
-  const topLevelFit = action.fit || inferFeedbackFit(messageText);
+  const topLevelFit = action.fit || inferPositiveFeedbackFit(messageText) || inferFeedbackFit(messageText);
   const topLevelNotes =
     action.notes === undefined || action.notes === null || String(action.notes).trim() === ''
       ? String(messageText || '').trim()

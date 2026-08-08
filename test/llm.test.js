@@ -304,6 +304,41 @@ test('interpretMessage normalizes short feedback into update_song_feedback updat
   assert.deepEqual(action.updates[0].issues, ['too_hard']);
 });
 
+test('interpretMessage infers positive fit for rehearsal-success feedback', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05d4\u05d9\u05d4 \u05db\u05d9\u05e3 \u05dc\u05e0\u05d2\u05df \u05d0\u05ea \u05d4\u05e9\u05d9\u05e8 \u05e9\u05d4\u05d1\u05d0\u05ea',
+    replyContext: {
+      results: [{ index: 1, song_id: 'song_a', title: 'Zombie', artist: 'The Cranberries' }]
+    },
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'update_song_feedback',
+                  result_index: 1
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'update_song_feedback');
+  assert.equal(action.updates[0].result_index, 1);
+  assert.equal(action.updates[0].fit, 'good');
+});
+
 test('interpretMessage retries one rate limit response and records usage counters', async () => {
   let callCount = 0;
   const action = await interpretMessage({
