@@ -41,6 +41,7 @@ function createCanonicalSong(overrides = {}) {
       bass_difficulty: 'low',
       drums_difficulty: 'medium',
       keys_role: 'optional',
+      keys_type: [],
       keys_difficulty: 'low',
       bass_interest: 'medium'
     },
@@ -59,7 +60,7 @@ function createCanonicalSong(overrides = {}) {
 
 function createCanonicalState(overrides = {}) {
   return {
-    schema_version: 2,
+    schema_version: 3,
     ai_enrichment: {
       complete: true,
       version: 1,
@@ -79,6 +80,7 @@ function createCanonicalState(overrides = {}) {
         'bass_difficulty',
         'drums_difficulty',
         'keys_role',
+        'keys_type',
         'keys_difficulty',
         'bass_interest'
       ]
@@ -114,7 +116,7 @@ test('normalizeState preserves canonical song fields and top-level metadata', ()
 
   const normalized = normalizeState(raw, { validateCanonical: true, filePath: 'fixture.json' });
 
-  assert.equal(normalized.schema_version, 2);
+  assert.equal(normalized.schema_version, 3);
   assert.equal(normalized.ai_enrichment.complete, true);
   assert.deepEqual(normalized.custom_top_level, { keep: true });
   assert.equal(normalized.songs[0].song_id, 'song_123456789abc');
@@ -143,7 +145,7 @@ test('createStateStore stores per-chat result context and preserves it on save',
     await store.queueSave();
 
     const reloaded = await loadState(stateFile);
-    assert.equal(reloaded.schema_version, 2);
+    assert.equal(reloaded.schema_version, 3);
     assert.equal(reloaded.chats['chat-1'].last_results.results[0].song_id, 'song_123456789abc');
     assert.equal(reloaded.result_messages['wamid-1'].results[0].title, 'Zombie');
   } finally {
@@ -173,7 +175,16 @@ test('createStateStore addSong fills canonical placeholders for legacy add flow'
   assert.ok(added);
   assert.match(added.song_id, /^song_[a-f0-9]{12}$/);
   assert.equal(added.ai_metadata.original_vocal, 'unknown');
+  assert.deepEqual(added.ai_metadata.keys_type, []);
   assert.equal(added.band_status.fit, 'unknown');
+});
+
+test('loadState accepts the schema-v3 workspace dataset', async () => {
+  const loaded = await loadState(path.resolve('state.json'));
+
+  assert.equal(loaded.schema_version, 3);
+  assert.ok(loaded.songs.length > 0);
+  assert.ok(loaded.songs.every((song) => Array.isArray(song.ai_metadata.keys_type)));
 });
 
 test('createStateStore tracks recent recommendations per chat', () => {

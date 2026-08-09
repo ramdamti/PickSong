@@ -28,6 +28,7 @@ function createSong() {
       bass_difficulty: 'low',
       drums_difficulty: 'medium',
       keys_role: 'optional',
+      keys_type: ['piano'],
       keys_difficulty: 'low',
       bass_interest: 'medium'
     },
@@ -108,4 +109,42 @@ test('validateAgentAction tolerates missing or malformed search query payloads',
 
   assert.equal(validated.action, 'search_songs');
   assert.deepEqual(validated.query, {});
+});
+
+test('validateAgentAction accepts keyboard type search constraints', () => {
+  const validated = validateAgentAction({
+    action: 'search_songs',
+    query: {
+      requirements: {
+        keys_type_any: ['piano'],
+        has_keys: true
+      },
+      preferences: {
+        keys_type_any: ['electric_piano']
+      },
+      exclusions: {
+        keys_type_any: ['synth']
+      },
+      limit: 3
+    }
+  });
+
+  assert.deepEqual(validated.query.requirements.keys_type_any, ['piano']);
+  assert.equal(validated.query.requirements.has_keys, true);
+  assert.deepEqual(validated.query.preferences.keys_type_any, ['electric_piano']);
+  assert.deepEqual(validated.query.exclusions.keys_type_any, ['synth']);
+});
+
+test('validateSong rejects invalid keyboard type values', () => {
+  assert.throws(
+    () =>
+      validateSong({
+        ...createSong(),
+        ai_metadata: {
+          ...createSong().ai_metadata,
+          keys_type: ['accordion']
+        }
+      }),
+    /must be one of/
+  );
 });

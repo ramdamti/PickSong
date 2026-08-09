@@ -1,9 +1,10 @@
 const fs = require('fs/promises');
 const crypto = require('crypto');
+const { KEYS_TYPES } = require('./schemas');
 
 const MAX_SEEN_MESSAGE_IDS = 50;
 const MAX_RECENT_RECOMMENDATION_IDS = 25;
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 const REQUIRED_AI_METADATA_FIELDS = [
   'original_vocal',
   'vocal_range',
@@ -17,6 +18,7 @@ const REQUIRED_AI_METADATA_FIELDS = [
   'bass_difficulty',
   'drums_difficulty',
   'keys_role',
+  'keys_type',
   'keys_difficulty',
   'bass_interest'
 ];
@@ -91,6 +93,7 @@ function createDefaultAiMetadata() {
     bass_difficulty: 'medium',
     drums_difficulty: 'medium',
     keys_role: 'optional',
+    keys_type: [],
     keys_difficulty: 'medium',
     bass_interest: 'medium'
   };
@@ -123,6 +126,15 @@ function normalizeAiMetadata(value = {}) {
     bass_difficulty: String(source.bass_difficulty ?? base.bass_difficulty).trim().toLowerCase(),
     drums_difficulty: String(source.drums_difficulty ?? base.drums_difficulty).trim().toLowerCase(),
     keys_role: String(source.keys_role ?? base.keys_role).trim().toLowerCase(),
+    keys_type: Array.isArray(source.keys_type)
+      ? Array.from(
+          new Set(
+            source.keys_type
+              .map((item) => String(item || '').trim().toLowerCase())
+              .filter(Boolean)
+          )
+        )
+      : [],
     keys_difficulty: String(source.keys_difficulty ?? base.keys_difficulty).trim().toLowerCase(),
     bass_interest: String(source.bass_interest ?? base.bass_interest).trim().toLowerCase()
   };
@@ -310,6 +322,19 @@ function validateCanonicalState(state, filePath = 'state.json') {
       for (const field of REQUIRED_AI_METADATA_FIELDS) {
         if (!(field in song.ai_metadata)) {
           problems.push(`${prefix}.ai_metadata.${field} is required`);
+        }
+      }
+      if (!Array.isArray(song.ai_metadata.keys_type)) {
+        problems.push(`${prefix}.ai_metadata.keys_type must be an array`);
+      } else {
+        const normalizedKeysTypes = song.ai_metadata.keys_type.map((item) => String(item || '').trim().toLowerCase());
+        if (new Set(normalizedKeysTypes).size !== normalizedKeysTypes.length) {
+          problems.push(`${prefix}.ai_metadata.keys_type must not contain duplicates`);
+        }
+        for (const value of normalizedKeysTypes) {
+          if (!KEYS_TYPES.has(value)) {
+            problems.push(`${prefix}.ai_metadata.keys_type contains invalid value: ${JSON.stringify(value)}`);
+          }
         }
       }
     }

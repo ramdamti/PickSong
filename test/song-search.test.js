@@ -24,6 +24,7 @@ function createSong(overrides = {}) {
       bass_difficulty: 'medium',
       drums_difficulty: 'medium',
       keys_role: 'optional',
+      keys_type: [],
       keys_difficulty: 'low',
       bass_interest: 'high'
     },
@@ -57,6 +58,7 @@ test('searchSongs prefers stronger AI metadata matches when hard requirements ar
         bass_difficulty: 'medium',
         drums_difficulty: 'medium',
         keys_role: 'optional',
+        keys_type: [],
         keys_difficulty: 'low',
         bass_interest: 'high'
       }
@@ -76,6 +78,7 @@ test('searchSongs prefers stronger AI metadata matches when hard requirements ar
         bass_difficulty: 'low',
         drums_difficulty: 'low',
         keys_role: 'important',
+        keys_type: [],
         keys_difficulty: 'high',
         bass_interest: 'low'
       }
@@ -212,7 +215,10 @@ test('searchSongs trusts the stored language field even when title and artist ar
     limit: 5
   });
 
-  assert.deepEqual(results.map((song) => song.song_title), ['Dancing queen', 'גשם']);
+  assert.deepEqual(
+    results.map((song) => song.song_title).sort((left, right) => left.localeCompare(right)),
+    ['Dancing queen', 'גשם'].sort((left, right) => left.localeCompare(right))
+  );
 });
 
 test('searchSongs matches common Hebrew artist transliterations against English catalog artists', () => {
@@ -259,4 +265,139 @@ test('searchSongs can match a Hebrew artist request from catalog source_text eve
   });
 
   assert.deepEqual(results.map((song) => song.song_title), ['Some Song']);
+});
+
+test('searchSongs randomizes equal-score songs instead of returning a fixed alphabetical order', () => {
+  const songs = [
+    createSong({ song_title: 'Alpha' }),
+    createSong({ song_title: 'Beta' }),
+    createSong({ song_title: 'Gamma' })
+  ];
+
+  const randomValues = [0.99, 0.0];
+  const results = searchSongs(
+    songs,
+    {
+      requirements: { genres: ['rock'] },
+      preferences: {},
+      exclusions: {},
+      limit: 3
+    },
+    {
+      random() {
+        return randomValues.shift() ?? 0;
+      }
+    }
+  );
+
+  assert.deepEqual(results.map((song) => song.song_title), ['Beta', 'Alpha', 'Gamma']);
+});
+
+test('searchSongs distinguishes exact keyboard types', () => {
+  const songs = [
+    createSong({
+      song_title: 'A Day in the Life',
+      artist: 'The Beatles',
+      ai_metadata: {
+        ...createSong().ai_metadata,
+        keys_role: 'important',
+        keys_type: ['piano']
+      }
+    }),
+    createSong({
+      song_title: 'A Kind of Magic',
+      artist: 'Queen',
+      ai_metadata: {
+        ...createSong().ai_metadata,
+        keys_role: 'important',
+        keys_type: ['synth']
+      }
+    }),
+    createSong({
+      song_title: 'Superstition',
+      artist: 'Stevie Wonder',
+      ai_metadata: {
+        ...createSong().ai_metadata,
+        keys_role: 'important',
+        keys_type: ['clavinet']
+      }
+    }),
+    createSong({
+      song_title: 'Get Back',
+      artist: 'The Beatles',
+      ai_metadata: {
+        ...createSong().ai_metadata,
+        keys_role: 'important',
+        keys_type: ['electric_piano']
+      }
+    })
+  ];
+
+  const pianoResults = searchSongs(songs, {
+    requirements: { keys_type_any: ['piano'] },
+    preferences: {},
+    exclusions: {},
+    limit: 5
+  });
+  const synthResults = searchSongs(songs, {
+    requirements: { keys_type_any: ['synth'] },
+    preferences: {},
+    exclusions: {},
+    limit: 5
+  });
+  const clavinetResults = searchSongs(songs, {
+    requirements: { keys_type_any: ['clavinet'] },
+    preferences: {},
+    exclusions: {},
+    limit: 5
+  });
+  const electricPianoResults = searchSongs(songs, {
+    requirements: { keys_type_any: ['electric_piano'] },
+    preferences: {},
+    exclusions: {},
+    limit: 5
+  });
+
+  assert.deepEqual(pianoResults.map((song) => song.song_title), ['A Day in the Life']);
+  assert.deepEqual(synthResults.map((song) => song.song_title), ['A Kind of Magic']);
+  assert.deepEqual(clavinetResults.map((song) => song.song_title), ['Superstition']);
+  assert.deepEqual(electricPianoResults.map((song) => song.song_title), ['Get Back']);
+});
+
+test('searchSongs generic keyboard search requires a meaningful keyboard type and prefers important keys', () => {
+  const songs = [
+    createSong({
+      song_title: 'Important Keys',
+      ai_metadata: {
+        ...createSong().ai_metadata,
+        keys_role: 'important',
+        keys_type: ['organ']
+      }
+    }),
+    createSong({
+      song_title: 'Optional Keys',
+      ai_metadata: {
+        ...createSong().ai_metadata,
+        keys_role: 'optional',
+        keys_type: ['synth']
+      }
+    }),
+    createSong({
+      song_title: 'No Keys Type',
+      ai_metadata: {
+        ...createSong().ai_metadata,
+        keys_role: 'important',
+        keys_type: []
+      }
+    })
+  ];
+
+  const results = searchSongs(songs, {
+    requirements: { has_keys: true },
+    preferences: {},
+    exclusions: {},
+    limit: 5
+  });
+
+  assert.deepEqual(results.map((song) => song.song_title), ['Important Keys', 'Optional Keys']);
 });

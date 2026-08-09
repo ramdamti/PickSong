@@ -17,6 +17,7 @@ const ACTION_NAMES = new Set([
 const DIFFICULTIES = new Set(['low', 'medium', 'high']);
 const FEELS = new Set(['upbeat', 'calm', 'ballad']);
 const BAND_FITS = new Set(['unknown', 'good', 'maybe', 'bad']);
+const KEYS_TYPES = new Set(['piano', 'electric_piano', 'organ', 'synth', 'clavinet', 'mellotron', 'other']);
 const ISSUE_VALUES = new Set([
   'vocals',
   'vocals_too_high',
@@ -45,6 +46,7 @@ const REQUIRED_AI_METADATA_FIELDS = [
   'bass_difficulty',
   'drums_difficulty',
   'keys_role',
+  'keys_type',
   'keys_difficulty',
   'bass_interest'
 ];
@@ -93,6 +95,13 @@ function ensureStringArray(value, label) {
   return Array.from(new Set(value.map((item) => ensureString(item, label)).filter(Boolean)));
 }
 
+function ensureEnumArray(value, allowedValues, label) {
+  if (!Array.isArray(value)) {
+    throw new Error(`${label} must be an array`);
+  }
+  return Array.from(new Set(value.map((item) => ensureEnum(item, allowedValues, label)).filter(Boolean)));
+}
+
 function validateAiMetadata(value) {
   const metadata = ensureObject(value, 'ai_metadata');
   for (const field of REQUIRED_AI_METADATA_FIELDS) {
@@ -115,9 +124,26 @@ function validateAiMetadata(value) {
     bass_difficulty: ensureString(metadata.bass_difficulty, 'ai_metadata.bass_difficulty').toLowerCase(),
     drums_difficulty: ensureString(metadata.drums_difficulty, 'ai_metadata.drums_difficulty').toLowerCase(),
     keys_role: ensureString(metadata.keys_role, 'ai_metadata.keys_role').toLowerCase(),
+    keys_type: ensureEnumArray(metadata.keys_type, KEYS_TYPES, 'ai_metadata.keys_type[]'),
     keys_difficulty: ensureString(metadata.keys_difficulty, 'ai_metadata.keys_difficulty').toLowerCase(),
     bass_interest: ensureString(metadata.bass_interest, 'ai_metadata.bass_interest').toLowerCase()
   };
+}
+
+function validateSongQuerySection(value, label) {
+  if (value === undefined || value === null) return undefined;
+  const section = ensureObject(value, label);
+  const validated = { ...section };
+
+  if ('keys_type_any' in validated) {
+    validated.keys_type_any = ensureEnumArray(validated.keys_type_any, KEYS_TYPES, `${label}.keys_type_any[]`);
+  }
+
+  if ('has_keys' in validated && typeof validated.has_keys !== 'boolean') {
+    throw new Error(`${label}.has_keys must be a boolean`);
+  }
+
+  return validated;
 }
 
 function validateBandStatus(value) {
@@ -182,13 +208,24 @@ function validateSong(value, options = {}) {
 
 function validateSongQuery(value) {
   const query = ensureObject(value, 'query');
+  const validated = { ...query };
   if ('limit' in query) {
     const limit = Number.parseInt(query.limit, 10);
     if (!Number.isInteger(limit) || limit <= 0) {
       throw new Error('query.limit must be a positive integer');
     }
+    validated.limit = limit;
   }
-  return query;
+  if ('requirements' in query) {
+    validated.requirements = validateSongQuerySection(query.requirements, 'query.requirements');
+  }
+  if ('preferences' in query) {
+    validated.preferences = validateSongQuerySection(query.preferences, 'query.preferences');
+  }
+  if ('exclusions' in query) {
+    validated.exclusions = validateSongQuerySection(query.exclusions, 'query.exclusions');
+  }
+  return validated;
 }
 
 function validateAgentAction(value) {
@@ -306,6 +343,7 @@ module.exports = {
   DIFFICULTIES,
   FEELS,
   BAND_FITS,
+  KEYS_TYPES,
   ISSUE_VALUES,
   REQUIRED_AI_METADATA_FIELDS,
   ALLOWED_UPDATE_FIELDS,

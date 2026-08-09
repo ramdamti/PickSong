@@ -45,6 +45,10 @@ function songGenres(song) {
   return normalizeList(song?.genres);
 }
 
+function songKeysTypes(song) {
+  return normalizeList(song?.ai_metadata?.keys_type);
+}
+
 function artistMatches(songArtist, requestedArtist, song = null) {
   const songValue = canonicalizeArtistName(songArtist);
   const requestedValue = canonicalizeArtistName(requestedArtist);
@@ -118,6 +122,32 @@ function songMatchesHardRequirement(song, requirements = {}) {
     if (difficulties.length > 0 && !difficulties.includes(normalizeScalar(song.difficulty))) return false;
   }
 
+  if (requirements.keys_difficulty) {
+    const difficulties = Array.isArray(requirements.keys_difficulty)
+      ? normalizeList(requirements.keys_difficulty)
+      : [normalizeScalar(requirements.keys_difficulty)].filter(Boolean);
+    if (difficulties.length > 0 && !difficulties.includes(normalizeScalar(song?.ai_metadata?.keys_difficulty))) return false;
+  }
+
+  if (requirements.keys_role) {
+    const roles = Array.isArray(requirements.keys_role)
+      ? normalizeList(requirements.keys_role)
+      : [normalizeScalar(requirements.keys_role)].filter(Boolean);
+    if (roles.length > 0 && !roles.includes(normalizeScalar(song?.ai_metadata?.keys_role))) return false;
+  }
+
+  const requiredKeysTypes = normalizeList(requirements.keys_type_any);
+  if (requiredKeysTypes.length > 0) {
+    const values = songKeysTypes(song);
+    if (!requiredKeysTypes.some((value) => values.includes(value))) {
+      return false;
+    }
+  }
+
+  if (requirements.has_keys === true && songKeysTypes(song).length === 0) {
+    return false;
+  }
+
   if (requirements.excludeRejected && normalizeScalar(song?.band_status?.fit) === 'bad') {
     return false;
   }
@@ -137,6 +167,14 @@ function songMatchesExclusions(song, exclusions = {}) {
   if (excludedGenres.length > 0) {
     const values = songGenres(song);
     if (excludedGenres.some((genre) => values.some((value) => value === genre || value.includes(genre) || genre.includes(value)))) {
+      return false;
+    }
+  }
+
+  const excludedKeysTypes = normalizeList(exclusions.keys_type_any);
+  if (excludedKeysTypes.length > 0) {
+    const values = songKeysTypes(song);
+    if (excludedKeysTypes.some((value) => values.includes(value))) {
       return false;
     }
   }
@@ -185,9 +223,14 @@ function scoreSong(song, query = {}, options = {}) {
   score += scoreScalarPreference(song?.ai_metadata?.keys_difficulty, scalarList(preferences.keys_difficulty), 5);
   score += scoreScalarPreference(song?.ai_metadata?.bass_interest, scalarList(preferences.bass_interest), 6);
   score += scoreScalarPreference(song?.ai_metadata?.keys_role, scalarList(preferences.keys_role), 3);
+  score += scoreArrayMatch(songKeysTypes(song), normalizeList(preferences.keys_type_any), 7);
   if (preferences.crowd_friendly === true && song?.ai_metadata?.crowd_friendly === true) score += 5;
   if (preferences.crowd_friendly === false && song?.ai_metadata?.crowd_friendly === false) score += 2;
   if (preferences.untried === true && (song?.band_status?.attempts || 0) === 0) score += 10;
+
+  if ((normalizeList(requirements.keys_type_any).length > 0 || requirements.has_keys === true) && normalizeScalar(song?.ai_metadata?.keys_role) === 'important') {
+    score += 3;
+  }
 
   const bandFit = normalizeScalar(song?.band_status?.fit);
   if (bandFit === 'good') score += 25;
@@ -211,21 +254,49 @@ function scoreSong(song, query = {}, options = {}) {
   return score;
 }
 
+function shuffleArray(items, random = Math.random) {
+  const copy = Array.isArray(items) ? [...items] : [];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+  }
+  return copy;
+}
+
 function searchSongs(songs, query = {}, options = {}) {
   const limit = Number.parseInt(query.limit, 10);
   const requestedLimit = Number.isInteger(limit) && limit > 0 ? limit : 5;
+  const random = typeof options.random === 'function' ? options.random : Math.random;
   const scored = (Array.isArray(songs) ? songs : [])
     .map((song) => ({ song, score: scoreSong(song, query, options) }))
     .filter((entry) => Number.isFinite(entry.score))
     .sort((left, right) => {
-      if (right.score !== left.score) return right.score - left.score;
-      return String(left.song.song_title || '').localeCompare(String(right.song.song_title || ''));
+      return right.score - left.score;
     });
 
-  return scored.slice(0, requestedLimit).map((entry) => entry.song);
+  const randomized = [];
+  for (let index = 0; index < scored.length;) {
+    const score = scored[index].score;
+    let groupEnd = index + 1;
+    while (groupEnd < scored.length && scored[groupEnd].score === score) {
+      groupEnd += 1;
+    }
+    randomized.push(...shuffleArray(scored.slice(index, groupEnd), random));
+    index = groupEnd;
+  }
+
+  return randomized.slice(0, requestedLimit).map((entry) => entry.song);
+}
+
+function countHardFilterMatches(songs, query = {}) {
+  const normalizedSongs = Array.isArray(songs) ? songs : [];
+  const requirements = query?.requirements || {};
+  const exclusions = query?.exclusions || {};
+  return normalizedSongs.filter((song) => songMatchesHardRequirement(song, requirements) && songMatchesExclusions(song, exclusions)).length;
 }
 
 module.exports = {
   searchSongs,
-  scoreSong
+  scoreSong,
+  countHardFilterMatches
 };

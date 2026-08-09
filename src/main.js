@@ -6,7 +6,7 @@ const {
   resolveActiveResultContext,
   findSongIdsByIndexes
 } = require('./result-context');
-const { searchSongs } = require('./song-search');
+const { searchSongs, countHardFilterMatches } = require('./song-search');
 const { formatSongsReply } = require('./chords');
 const { ALLOWED_UPDATE_FIELDS } = require('./schemas');
 
@@ -280,6 +280,9 @@ function resolveSongFromAction(stateStore, action, activeContext) {
 }
 
 function formatSongInfo(song) {
+  const keysType = Array.isArray(song?.ai_metadata?.keys_type) && song.ai_metadata.keys_type.length > 0
+    ? song.ai_metadata.keys_type.join(', ')
+    : 'אין סוג קלידים משמעותי';
   const issues = Array.isArray(song?.band_status?.issues) && song.band_status.issues.length > 0
     ? song.band_status.issues.join(', ')
     : '\u05d0\u05d9\u05df';
@@ -291,6 +294,9 @@ function formatSongInfo(song) {
   return [
     `${song.song_title}${song.artist ? ` - ${song.artist}` : ''}`,
     `\u05de\u05e6\u05d1: ${FIT_LABELS[song.band_status.fit] || song.band_status.fit}`,
+    `קלידים: ${keysType}`,
+    `תפקיד קלידים: ${song?.ai_metadata?.keys_role || 'לא ידוע'}`,
+    `קושי קלידים: ${song?.ai_metadata?.keys_difficulty || 'לא ידוע'}`,
     `\u05d1\u05e2\u05d9\u05d5\u05ea: ${issues}`,
     `\u05e0\u05d9\u05e1\u05d9\u05d5\u05e0\u05d5\u05ea: ${attempts}`,
     `\u05e0\u05e1\u05e7\u05e8 \u05dc\u05d0\u05d7\u05e8\u05d5\u05e0\u05d4: ${reviewed}`,
@@ -410,6 +416,10 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
   }
 
   if (action.action === 'search_songs') {
+    const hardMatchCount = countHardFilterMatches(songs, action.query || {});
+    console.log(
+      `[search] keys_type_hard=${JSON.stringify(action.query?.requirements?.keys_type_any || [])} keys_type_pref=${JSON.stringify(action.query?.preferences?.keys_type_any || [])} keys_type_excluded=${JSON.stringify(action.query?.exclusions?.keys_type_any || [])} keys_difficulty=${JSON.stringify(action.query?.preferences?.keys_difficulty || action.query?.requirements?.keys_difficulty || null)} hard_matches=${hardMatchCount}`
+    );
     const excludedSongIds =
       action.query?.avoid_previous_results && activeContext.context
         ? new Set(activeContext.context.results.map((entry) => entry.song_id).filter(Boolean))

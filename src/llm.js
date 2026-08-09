@@ -15,6 +15,11 @@ const SYSTEM_PROMPT = [
   'Use the provided supported_search_fields guide as the source of truth for which query fields exist.',
   'If the user asks for something that has no exact field, map it to the nearest supported field instead of ignoring it.',
   'Examples: cool bass or interesting bass -> preferences.bass_interest=high; groove or groovy -> preferences.groove_level=high; hard guitar solo -> preferences.guitar_difficulty=high; important keys -> preferences.keys_role=important; energetic -> preferences.band_energy=high; crowd friendly -> preferences.crowd_friendly=true; new to us -> preferences.untried=true.',
+  'Keyboard instrument type must be represented structurally, not vaguely. Use keys_type_any for exact keyboard instrument constraints such as piano, electric_piano, organ, synth, clavinet, mellotron, or other.',
+  'Do not treat piano as the same thing as synth, organ, or electric_piano unless the user was vague and you intentionally choose a soft preference.',
+  'For a generic keyboard request, you may use requirements.has_keys=true and/or preferences.keys_role=important.',
+  'For an exact piano request, prefer requirements.keys_type_any=["piano"]. For an exact synth request, prefer requirements.keys_type_any=["synth"].',
+  'You own keyboard semantic understanding. The application only validates and executes the structured keyboard constraints you return.',
   'When users ask for songs by an artist or band and write the name in Hebrew or another non-English script, prefer the standard English canonical artist/band name in query.requirements.artist whenever you know it.',
   'For artist or band requests, preserve the artist constraint strongly and do not answer with unrelated songs.',
   'For language requests, preserve query.requirements.language strongly and do not answer with songs from another language.',
@@ -28,7 +33,7 @@ const SYSTEM_PROMPT = [
   'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
   'Allowed actions: search_songs, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, clarify.',
   'search_songs and find_similar_songs return compact query semantics only.',
-  'add_song must return a complete canonical song payload when identity is sufficiently clear.',
+  'add_song must return a complete canonical song payload when identity is sufficiently clear, including keys_role, keys_type, and keys_difficulty.',
   'update_song_feedback must use result_index for list references.',
   'Band-history questions use get_band_failure_reasons or explain_song_rejection.',
   'Do not return formatted WhatsApp replies.'
@@ -41,6 +46,8 @@ const SUPPORTED_SEARCH_FIELDS = {
     genres: 'Required genres such as rock, blues, funk, jazz, metal, pop, ballad.',
     feel: 'Required overall feel such as upbeat, calm, ballad.',
     difficulty: 'Required overall song difficulty: low, medium, high.',
+    keys_type_any: 'Required keyboard instrument types. Match if the song contains at least one of the listed values.',
+    has_keys: 'Require a meaningful keyboard part with a non-empty keys_type array.',
     excludeRejected: 'Exclude songs with known bad band fit.',
     excludePlayed: 'Exclude songs already marked as played.'
   },
@@ -59,9 +66,13 @@ const SUPPORTED_SEARCH_FIELDS = {
     drums_difficulty: 'Preferred drums difficulty.',
     keys_difficulty: 'Preferred keys difficulty.',
     keys_role: 'How important keys are in the arrangement, such as important or optional.',
+    keys_type_any: 'Preferred keyboard instrument types such as piano, electric_piano, organ, synth, clavinet, mellotron, other.',
     bass_interest: 'How interesting or prominent the bass part should be.',
     crowd_friendly: 'Whether the song should be crowd friendly.',
     untried: 'Prefer songs the band has not tried yet.'
+  },
+  exclusions: {
+    keys_type_any: 'Keyboard instrument types that must not appear in the song.'
   }
 };
 
@@ -417,6 +428,34 @@ function inferPerformerFitPreferences(messageText) {
 
   if (/(?:מתאים לקול שלנו|שיתאים לנו לשיר|שנוכל לשיר|singable|easy to sing)/iu.test(source)) {
     preferences.singer_fit = preferences.singer_fit || 'great';
+  }
+
+  return preferences;
+}
+
+// Override the earlier helper so keyboard semantics stay with the agent.
+function inferInstrumentDifficultyPreferences(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return {};
+
+  const difficulty =
+    /(?:×§×©×”|×§×©×™×|×§×©×•×ª|×§×©×•×—|×§×©×•×—×”|×ž××ª×’×¨|×ž××ª×’×¨×ª|×ž×¡×•×‘×š|×ž×¡×•×‘×›×ª|hard|challenging)/iu.test(source)
+      ? 'high'
+      : /(?:^|\s)(?:×§×œ|×§×œ×”|×§×œ×™×|×§×œ×•×ª|×¤×©×•×˜|×¤×©×•×˜×”|easy)(?:\s|$)/iu.test(source)
+        ? 'low'
+        : null;
+
+  if (!difficulty) return {};
+
+  const preferences = {};
+  if (/(?:×ª×™×¤×•×£|×ª×•×¤×™×|×ž×ª×•×¤×£|drums?|drumming)/iu.test(source)) {
+    preferences.drums_difficulty = difficulty;
+  }
+  if (/(?:×’×™×˜×¨×”|×’×™×˜×¨[×”×™×¡×˜×¡]?|guitar)/iu.test(source)) {
+    preferences.guitar_difficulty = difficulty;
+  }
+  if (/(?:×‘×¡|×‘×¡×™×¡×˜|bass)/iu.test(source)) {
+    preferences.bass_difficulty = difficulty;
   }
 
   return preferences;
@@ -820,6 +859,89 @@ function normalizeAgentAction(action, { messageText, replyContext }) {
       preferences
     }
   };
+}
+
+// Final override with Unicode escapes so Hebrew instrument parsing stays stable for drums/guitar/bass only.
+function inferInstrumentDifficultyPreferences(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return {};
+
+  const difficulty =
+    /(?:\u05e7\u05e9\u05d4|\u05e7\u05e9\u05d9\u05dd|\u05e7\u05e9\u05d5\u05ea|\u05e7\u05e9\u05d5\u05d7|\u05e7\u05e9\u05d5\u05d7\u05d4|\u05de\u05d0\u05ea\u05d2\u05e8|\u05de\u05d0\u05ea\u05d2\u05e8\u05ea|\u05de\u05e1\u05d5\u05d1\u05da|\u05de\u05e1\u05d5\u05d1\u05db\u05ea|hard|challenging)/iu.test(source)
+      ? 'high'
+      : /(?:^|\s)(?:\u05e7\u05dc|\u05e7\u05dc\u05d4|\u05e7\u05dc\u05d9\u05dd|\u05e7\u05dc\u05d5\u05ea|\u05e4\u05e9\u05d5\u05d8|\u05e4\u05e9\u05d5\u05d8\u05d4|easy)(?:\s|$)/iu.test(source)
+        ? 'low'
+        : null;
+
+  if (!difficulty) return {};
+
+  const preferences = {};
+  if (/(?:\u05ea\u05d9\u05e4\u05d5\u05e3|\u05ea\u05d5\u05e4\u05d9\u05dd|\u05de\u05ea\u05d5\u05e4\u05e3|drums?|drumming)/iu.test(source)) {
+    preferences.drums_difficulty = difficulty;
+  }
+  if (/(?:\u05d2\u05d9\u05d8\u05e8\u05d4|\u05d2\u05d9\u05d8\u05e8[\u05d4\u05d9\u05e1\u05d8\u05e1]?|guitar)/iu.test(source)) {
+    preferences.guitar_difficulty = difficulty;
+  }
+  if (/(?:\u05d1\u05e1|\u05d1\u05e1\u05d9\u05e1\u05d8|bass)/iu.test(source)) {
+    preferences.bass_difficulty = difficulty;
+  }
+
+  return preferences;
+}
+
+// Final override for feedback phrases so Hebrew negative rehearsal language stays stable.
+function inferFeedbackIssue(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return [];
+
+  if (/(?:\u05e7\u05e9\u05d4 \u05de\u05d3\u05d9|\u05d4\u05d5\u05d0 \u05e7\u05e9\u05d4|\u05d4\u05d9\u05d0 \u05e7\u05e9\u05d4|\u05e7\u05e9\u05d4|\u05de\u05d0\u05ea\u05d2\u05e8|\u05de\u05d0\u05ea\u05d2\u05e8\u05ea|\u05de\u05d0\u05ea\u05d2\u05e8\u05d9\u05dd|challenging|\u05de\u05e1\u05d5\u05d1\u05da|\u05de\u05e1\u05d5\u05d1\u05db\u05ea|\u05de\u05e1\u05d5\u05d1\u05db\u05d9\u05dd|\u05d2\u05d1\u05d5\u05d4 \u05de\u05d3\u05d9|\u05e0\u05de\u05d5\u05da \u05de\u05d3\u05d9)/iu.test(source)) {
+    return ['too_hard'];
+  }
+  if (/(?:\u05e7\u05dc \u05de\u05d3\u05d9|\u05e7\u05dc|\u05e4\u05e9\u05d5\u05d8 \u05de\u05d3\u05d9|\u05e4\u05e9\u05d5\u05d8\u05d4 \u05de\u05d3\u05d9)/iu.test(source)) {
+    return ['too_easy'];
+  }
+  if (/(?:\u05dc\u05d0 \u05d2\u05e8\u05d5\u05d1\u05d9|\u05dc\u05d0 \u05d9\u05d5\u05e9\u05d1|\u05dc\u05d0 \u05d6\u05d5\u05e8\u05dd|\u05dc\u05d0 \u05e2\u05d5\u05d1\u05d3|\u05dc\u05d0 \u05e2\u05d1\u05d3|\u05dc\u05d0 \u05d4\u05dc\u05da(?: \u05dc\u05e0\u05d5)?|\u05dc\u05d0 \u05d4\u05dc\u05db\u05d4(?: \u05dc\u05e0\u05d5)?|\u05dc\u05d0 \u05de\u05ea\u05d0\u05d9\u05dd(?:\u05d4|\u05d9\u05dd)?|\u05dc\u05d0 \u05dc\u05e0\u05d5)/iu.test(source)) {
+    return ['doesnt_groove'];
+  }
+  return [];
+}
+
+function inferFeedbackFit(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return null;
+
+  if (/(?:\u05dc\u05d0 \u05e2\u05d5\u05d1\u05d3|\u05dc\u05d0 \u05e2\u05d1\u05d3|\u05dc\u05d0 \u05d4\u05dc\u05da(?: \u05dc\u05e0\u05d5)?|\u05dc\u05d0 \u05d4\u05dc\u05db\u05d4(?: \u05dc\u05e0\u05d5)?|\u05dc\u05d0 \u05de\u05ea\u05d0\u05d9\u05dd|\u05dc\u05d0 \u05de\u05ea\u05d0\u05d9\u05de\u05d4|\u05e7\u05e9\u05d4 \u05de\u05d3\u05d9|\u05e7\u05dc \u05de\u05d3\u05d9|\u05ea\u05e1\u05d9\u05e8|\u05dc\u05d4\u05e1\u05d9\u05e8|\u05dc\u05d0 \u05dc\u05e0\u05d5)/iu.test(source)) {
+    return 'bad';
+  }
+  return null;
+}
+
+function inferHeuristicFeedbackFit(messageText, issues) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return inferFitFromIssues(issues);
+
+  const positiveFit = inferPositiveFeedbackFit(messageText);
+  if (positiveFit && hasDifficultyFeedback(messageText)) {
+    return 'maybe';
+  }
+
+  if (isComfortPositiveFeedback(messageText)) {
+    return 'good';
+  }
+
+  if (/(?:\u05e7\u05dc \u05de\u05d3\u05d9|\u05d9\u05d5\u05ea\u05e8 \u05de\u05d3\u05d9 \u05e7\u05dc|\u05e4\u05e9\u05d5\u05d8 \u05de\u05d3\u05d9|\u05e4\u05e9\u05d5\u05d8\u05d4 \u05de\u05d3\u05d9)/iu.test(source)) {
+    return 'maybe';
+  }
+
+  if (/(?:\u05dc\u05d0 \u05e2\u05d5\u05d1\u05d3|\u05dc\u05d0 \u05e2\u05d1\u05d3|\u05dc\u05d0 \u05d4\u05dc\u05da(?: \u05dc\u05e0\u05d5)?|\u05dc\u05d0 \u05d4\u05dc\u05db\u05d4(?: \u05dc\u05e0\u05d5)?|\u05dc\u05d0 \u05de\u05ea\u05d0\u05d9\u05dd|\u05dc\u05d0 \u05de\u05ea\u05d0\u05d9\u05de\u05d4|\u05dc\u05d0 \u05dc\u05e0\u05d5|\u05e7\u05e9\u05d4 \u05de\u05d3\u05d9|\u05e7\u05e9\u05d4 \u05dc\u05e0\u05d5|\u05ea\u05e1\u05d9\u05e8|\u05dc\u05d4\u05e1\u05d9\u05e8)/iu.test(source)) {
+    return 'bad';
+  }
+
+  if (positiveFit) {
+    return positiveFit;
+  }
+
+  return inferFitFromIssues(issues);
 }
 
 async function interpretMessage({

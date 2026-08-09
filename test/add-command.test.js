@@ -33,6 +33,7 @@ function createSong(overrides = {}) {
       bass_difficulty: 'low',
       drums_difficulty: 'medium',
       keys_role: 'optional',
+      keys_type: [],
       keys_difficulty: 'low',
       bass_interest: 'medium'
     },

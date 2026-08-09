@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { SYSTEM_PROMPT, buildAgentPrompt, interpretMessage, getAgentUsageStats } = require('../src/llm');
 
 test('SYSTEM_PROMPT stays compact and stable', () => {
-  assert.ok(SYSTEM_PROMPT.length < 4200);
+  assert.ok(SYSTEM_PROMPT.length < 5200);
   assert.doesNotMatch(SYSTEM_PROMPT, /state\.json|songs\[|migration/i);
   assert.match(SYSTEM_PROMPT, /מתאים לזמר/);
   assert.match(SYSTEM_PROMPT, /מתאים לגיטריסט/);
@@ -402,15 +402,55 @@ test('interpretMessage infers bass difficulty preferences from hard bass request
   assert.equal(action.query.preferences.bass_difficulty, 'high');
 });
 
-test('interpretMessage infers keys difficulty preferences from hard keys requests', async () => {
+test('interpretMessage preserves agent-provided keyboard type constraints', async () => {
   const action = await interpretMessage({
     provider: 'groq',
     baseUrl: 'https://api.example.com',
     apiKey: 'test',
     model: 'test-model',
-    messageText: '\u05d1\u05d5\u05d8 \u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8 \u05e2\u05dd \u05e7\u05dc\u05d9\u05d3\u05d9\u05dd \u05e7\u05e9\u05d9\u05dd',
+    messageText: '\u05d1\u05d5\u05d8 \u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8 \u05dc\u05e4\u05e1\u05e0\u05ea\u05e8 \u05e7\u05e9\u05d4',
     replyContext: null,
-    currentDate: '2026-08-08',
+    currentDate: '2026-08-09',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {
+                    requirements: {
+                      keys_type_any: ['piano']
+                    },
+                    preferences: {
+                      keys_difficulty: 'high'
+                    }
+                  }
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.deepEqual(action.query.requirements.keys_type_any, ['piano']);
+  assert.equal(action.query.preferences.keys_difficulty, 'high');
+});
+
+test('interpretMessage does not invent keyboard type constraints from the raw message when the agent does not provide them', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05d1\u05d5\u05d8 \u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8 \u05dc\u05e4\u05e1\u05e0\u05ea\u05e8',
+    replyContext: null,
+    currentDate: '2026-08-09',
     requestFn: async () => ({
       ok: true,
       async json() {
@@ -431,7 +471,9 @@ test('interpretMessage infers keys difficulty preferences from hard keys request
   });
 
   assert.equal(action.action, 'search_songs');
-  assert.equal(action.query.preferences.keys_difficulty, 'high');
+  assert.equal(action.query.limit, 1);
+  assert.equal(action.query.requirements?.keys_type_any, undefined);
+  assert.equal(action.query.preferences?.keys_difficulty, undefined);
 });
 
 test('interpretMessage infers female vocal fit preferences from singer phrasing', async () => {
@@ -758,6 +800,42 @@ test('interpretMessage treats bare worked feedback as good even when the model s
   assert.equal(action.updates[0].result_index, 1);
   assert.equal(action.updates[0].fit, 'good');
   assert.deepEqual(action.updates[0].issues, []);
+});
+
+test('interpretMessage treats "did not work for us" feedback as bad instead of unknown', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05d1\u05d5\u05d8 \u05e9\u05d9\u05e8 2 \u05dc\u05d0 \u05d4\u05dc\u05da \u05dc\u05e0\u05d5',
+    replyContext: {
+      results: [{ index: 2, song_id: 'song_b', title: '21st Century Schizoid Man', artist: 'April Wine' }]
+    },
+    currentDate: '2026-08-09',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'update_song_feedback',
+                  result_index: 2
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'update_song_feedback');
+  assert.equal(action.updates[0].result_index, 2);
+  assert.equal(action.updates[0].fit, 'bad');
+  assert.deepEqual(action.updates[0].issues, ['doesnt_groove']);
 });
 
 test('interpretMessage retries one rate limit response and records usage counters', async () => {

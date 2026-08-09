@@ -127,6 +127,7 @@ test('handleAgentMessage performs one agent call for a normal search request', a
             bass_difficulty: 'low',
             drums_difficulty: 'medium',
             keys_role: 'optional',
+            keys_type: [],
             keys_difficulty: 'low',
             bass_interest: 'medium'
           },
@@ -222,6 +223,7 @@ test('handleAgentMessage blocks generic fallback for short specific hints with a
             bass_difficulty: 'low',
             drums_difficulty: 'medium',
             keys_role: 'optional',
+            keys_type: [],
             keys_difficulty: 'low',
             bass_interest: 'medium'
           },
