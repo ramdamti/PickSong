@@ -317,6 +317,76 @@ test('handleAgentMessage rewrites generic add-to-library requests using the late
   assert.equal(sentMessages.length, 1);
 });
 
+test('handleAgentMessage rewrites plain add requests using the replied song message first', async () => {
+  let agentCalls = 0;
+  let capturedMessageText = null;
+  const sentMessages = [];
+  const stateStore = {
+    addSong(song) {
+      this.song = song;
+      return true;
+    },
+    async queueSave() {},
+    getSongs() {
+      return [];
+    },
+    getResultMessage() {
+      return null;
+    },
+    getLastResults() {
+      return null;
+    }
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+      return { id: { _serialized: 'wamid-add-2' } };
+    }
+  };
+
+  const handled = await handleAgentMessage({
+    chat,
+    stateStore,
+    config: {
+      triggerText: '\u05d1\u05d5\u05d8',
+      llmProvider: 'groq',
+      llmBaseUrl: 'https://example.com',
+      llmApiKey: 'test',
+      llmModel: 'test-model'
+    },
+    record: {
+      text: '\u05d1\u05d5\u05d8 \u05ea\u05d5\u05e1\u05d9\u05e3',
+      quoted: { fromMe: false, text: 'wish you where here - pink floyd' },
+      chatId: 'chat-1'
+    },
+    recentMessages: [
+      { text: 'something else - another artist', from_me: false, sender: 'Member A' }
+    ],
+    interpretMessageFn: async (params) => {
+      agentCalls += 1;
+      capturedMessageText = params?.messageText || null;
+      return {
+        action: 'add_song',
+        song: {
+          song_title: 'Wish You Were Here',
+          artist: 'Pink Floyd',
+          genres: ['rock'],
+          difficulty: 'medium',
+          feel: 'calm',
+          confidence: 0.95
+        }
+      };
+    }
+  });
+
+  assert.equal(handled, true);
+  assert.equal(agentCalls, 1);
+  assert.equal(capturedMessageText, '\u05ea\u05d5\u05e1\u05d9\u05e3 wish you where here \u05e9\u05dc pink floyd');
+  assert.equal(stateStore.song.song_title, 'Wish You Were Here');
+  assert.equal(stateStore.song.artist, 'Pink Floyd');
+  assert.equal(sentMessages.length, 1);
+});
+
 test('handleAgentMessage returns reply-context songs with chords without calling the agent', async () => {
   let agentCalls = 0;
   let saved = 0;

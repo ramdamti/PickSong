@@ -313,7 +313,7 @@ function isGenericAddToLibraryRequest(messageText) {
   return /^(?:תוסיף|תוסיפי|להוסיף|הוסף|add)(?:\s+(?:למאגר|לרשימה|למאגר השירים))?\s*$/iu.test(source);
 }
 
-function inferRecentAddSongPayload(messageText, recentMessages) {
+function inferRecentAddSongPayload(messageText, recentMessages, quotedText = '') {
   const direct = inferDirectAddSongFromMessage(messageText);
   if (direct) {
     return direct;
@@ -321,6 +321,11 @@ function inferRecentAddSongPayload(messageText, recentMessages) {
 
   if (!isGenericAddToLibraryRequest(messageText)) {
     return null;
+  }
+
+  const quotedCandidate = parseSongIdentityText(quotedText);
+  if (quotedCandidate) {
+    return quotedCandidate;
   }
 
   const items = Array.isArray(recentMessages) ? recentMessages : [];
@@ -334,14 +339,14 @@ function inferRecentAddSongPayload(messageText, recentMessages) {
   return null;
 }
 
-function buildAgentMessageText(messageText, recentMessages) {
+function buildAgentMessageText(messageText, recentMessages, quotedText = '') {
   const source = String(messageText || '').trim();
   const directAddSong = inferDirectAddSongFromMessage(source);
   if (directAddSong) {
     return source;
   }
 
-  const inferredAddSong = inferRecentAddSongPayload(source, recentMessages);
+  const inferredAddSong = inferRecentAddSongPayload(source, recentMessages, quotedText);
   if (!inferredAddSong) {
     return source;
   }
@@ -828,7 +833,11 @@ async function handleAgentMessage({
   }
 
   try {
-    const agentMessageText = buildAgentMessageText(messageText, recentMessages);
+    const agentMessageText = buildAgentMessageText(
+      messageText,
+      recentMessages,
+      record?.quoted?.text || record?.quotedText || ''
+    );
     const action = await interpretMessageFn({
       provider: config.llmProvider,
       baseUrl: config.llmBaseUrl,
