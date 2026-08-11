@@ -435,6 +435,117 @@ test('interpretMessage infers artist constraints from bare "של <artist>" phras
   assert.equal(action.query.requirements.artist, 'החברים של נטאשה');
 });
 
+test('interpretMessage overrides transliterated artist output with Hebrew artist inferred from the message', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'תביא שירים של פורטיס',
+    replyContext: null,
+    recentMessages: [],
+    currentDate: '2026-08-11',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {
+                    requirements: {
+                      artist: 'Portis'
+                    }
+                  }
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.requirements.artist, 'פורטיס');
+});
+
+test('interpretMessage overrides transliterated Hebrew artist variants with the original Hebrew phrasing', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'תביא שירים של נטאשה',
+    replyContext: null,
+    recentMessages: [],
+    currentDate: '2026-08-11',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {
+                    requirements: {
+                      artist: 'Netasha'
+                    }
+                  }
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.requirements.artist, 'נטאשה');
+});
+
+test('interpretMessage preserves canonical English artist mappings for known Hebrew names', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'תביא שירים של פינק פלויד',
+    replyContext: null,
+    recentMessages: [],
+    currentDate: '2026-08-11',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {
+                    requirements: {
+                      artist: 'Pink Floyd'
+                    }
+                  }
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.requirements.artist, 'Pink Floyd');
+});
+
 test('interpretMessage infers Hebrew language constraints from the message text', async () => {
   const action = await interpretMessage({
     provider: 'groq',

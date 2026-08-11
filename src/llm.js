@@ -482,6 +482,27 @@ function inferRequestedArtist(messageText) {
   return null;
 }
 
+function messageContainsHebrew(value) {
+  return /[\u0590-\u05FF]/u.test(String(value || ''));
+}
+
+function shouldOverrideArtistRequirement({ messageText, inferredArtist, existingArtist }) {
+  if (!inferredArtist) return false;
+  if (!existingArtist) return true;
+  if (!messageContainsHebrew(messageText)) return false;
+
+  const normalizedExistingArtist = String(existingArtist || '').trim();
+  if (!normalizedExistingArtist) return true;
+  if (normalizedExistingArtist === inferredArtist) return false;
+
+  const canonicalInferredArtist = canonicalizeRequestedArtistName(inferredArtist);
+  if (normalizedExistingArtist === canonicalInferredArtist) {
+    return false;
+  }
+
+  return true;
+}
+
 function shouldAvoidPreviousResults(messageText, replyContext) {
   if (!replyContext?.results?.length) return false;
   const source = String(messageText || '').trim().toLowerCase();
@@ -878,11 +899,13 @@ function normalizeAgentAction(action, { messageText, replyContext }) {
     }
   }
 
-  if (!requirements.artist) {
-    const inferredArtist = inferRequestedArtist(messageText);
-    if (inferredArtist) {
-      requirements.artist = inferredArtist;
-    }
+  const inferredArtist = inferRequestedArtist(messageText);
+  if (shouldOverrideArtistRequirement({
+    messageText,
+    inferredArtist,
+    existingArtist: requirements.artist
+  })) {
+    requirements.artist = inferredArtist;
   }
 
   if ((!Array.isArray(requirements.genres) || requirements.genres.length === 0)) {
