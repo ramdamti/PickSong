@@ -586,7 +586,141 @@ function buildBandStatusQuery(fit) {
   };
 }
 
-async function sendSongsReply({ chat, stateStore, chatId, songs }) {
+function cloneQuery(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  return {
+    ...value,
+    requirements:
+      value.requirements && typeof value.requirements === 'object' && !Array.isArray(value.requirements)
+        ? { ...value.requirements }
+        : {},
+    preferences:
+      value.preferences && typeof value.preferences === 'object' && !Array.isArray(value.preferences)
+        ? { ...value.preferences }
+        : {},
+    exclusions:
+      value.exclusions && typeof value.exclusions === 'object' && !Array.isArray(value.exclusions)
+        ? { ...value.exclusions }
+        : {}
+  };
+}
+
+function sanitizeQueryForResultContext(query, fallbackLimit = null) {
+  const cloned = cloneQuery(query);
+  delete cloned.avoid_previous_results;
+  delete cloned.replace_result_indexes;
+  if (!Number.isInteger(Number.parseInt(cloned.limit, 10)) && Number.isInteger(fallbackLimit) && fallbackLimit > 0) {
+    cloned.limit = fallbackLimit;
+  }
+  return cloned;
+}
+
+function mergeSearchQueries(baseQuery, overrideQuery) {
+  const base = cloneQuery(baseQuery);
+  const override = cloneQuery(overrideQuery);
+
+  return {
+    ...base,
+    ...override,
+    requirements: {
+      ...(base.requirements || {}),
+      ...(override.requirements || {})
+    },
+    preferences: {
+      ...(base.preferences || {}),
+      ...(override.preferences || {})
+    },
+    exclusions: {
+      ...(base.exclusions || {}),
+      ...(override.exclusions || {})
+    }
+  };
+}
+
+function buildSearchCandidates({ songs, query, activeContext, stateStore, chatId }) {
+  const excludedSongIds =
+    query?.avoid_previous_results && activeContext?.context
+      ? new Set(activeContext.context.results.map((entry) => entry.song_id).filter(Boolean))
+      : null;
+  const afterPreviousFilter = excludedSongIds
+    ? songs.filter((song) => !excludedSongIds.has(song.song_id))
+    : songs;
+  const requestedLimit = Number.parseInt(query?.limit, 10);
+  const recentRecommendationIds = new Set(
+    typeof stateStore.getRecentRecommendations === 'function'
+      ? stateStore.getRecentRecommendations(chatId)
+      : []
+  );
+
+  const candidateSongs =
+    recentRecommendationIds.size > 0
+      ? (() => {
+          const filtered = afterPreviousFilter.filter((song) => !recentRecommendationIds.has(song.song_id));
+          return filtered.length >= (Number.isInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : 5)
+            ? filtered
+            : afterPreviousFilter;
+        })()
+      : afterPreviousFilter;
+
+  return {
+    candidateSongs,
+    afterPreviousFilter
+  };
+}
+
+function runSongSearchWithFallback({ songs, query, candidateSongs, afterPreviousFilter }) {
+  const hardMatchCount = countHardFilterMatches(songs, query || {});
+  console.log(
+    `[search] artist=${JSON.stringify(query?.requirements?.artist || null)} language=${JSON.stringify(query?.requirements?.language || null)} genres=${JSON.stringify(query?.requirements?.genres || [])} keys_type_hard=${JSON.stringify(query?.requirements?.keys_type_any || [])} keys_type_pref=${JSON.stringify(query?.preferences?.keys_type_any || [])} keys_type_excluded=${JSON.stringify(query?.exclusions?.keys_type_any || [])} keys_difficulty=${JSON.stringify(query?.preferences?.keys_difficulty || query?.requirements?.keys_difficulty || null)} hard_matches=${hardMatchCount}`
+  );
+
+  let matches = searchSongs(candidateSongs, query || {});
+  if (matches.length === 0 && hardMatchCount > 0) {
+    matches = searchSongs(afterPreviousFilter, query || {});
+  }
+  if (matches.length === 0 && hardMatchCount > 0 && afterPreviousFilter !== songs) {
+    matches = searchSongs(songs, query || {});
+  }
+  return matches;
+}
+
+function buildReplacementIndexes(query, activeContext) {
+  const indexes = Array.isArray(query?.replace_result_indexes)
+    ? Array.from(
+        new Set(
+          query.replace_result_indexes
+            .map((value) => Number.parseInt(value, 10))
+            .filter((value) => Number.isInteger(value) && value > 0)
+        )
+      )
+    : [];
+  if (!indexes.length || !activeContext?.context) {
+    return [];
+  }
+  const validIndexes = new Set(activeContext.context.results.map((entry) => entry.index));
+  return indexes.filter((index) => validIndexes.has(index));
+}
+
+function rebuildResultListWithReplacements({ context, stateStore, replacementIndexes, replacementSongs }) {
+  const replacementMap = new Map();
+  replacementIndexes.forEach((index, replacementPosition) => {
+    replacementMap.set(index, replacementSongs[replacementPosition] || null);
+  });
+
+  return context.results
+    .map((entry) => {
+      if (replacementMap.has(entry.index)) {
+        return replacementMap.get(entry.index);
+      }
+      return entry.song_id ? stateStore.getSongById(entry.song_id) : null;
+    })
+    .filter(Boolean);
+}
+
+async function sendSongsReply({ chat, stateStore, chatId, songs, query = null }) {
   if (!songs.length) {
     await sendBotMessage(chat, '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd.');
     return;
@@ -598,6 +732,7 @@ async function sendSongsReply({ chat, stateStore, chatId, songs }) {
     chatId,
     botMessageId,
     songs,
+    query,
     createdAt: new Date().toISOString()
   });
   if (typeof stateStore.recordRecommendations === 'function') {
@@ -619,40 +754,67 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
   }
 
   if (action.action === 'search_songs') {
-    const hardMatchCount = countHardFilterMatches(songs, action.query || {});
-    console.log(
-      `[search] artist=${JSON.stringify(action.query?.requirements?.artist || null)} language=${JSON.stringify(action.query?.requirements?.language || null)} genres=${JSON.stringify(action.query?.requirements?.genres || [])} keys_type_hard=${JSON.stringify(action.query?.requirements?.keys_type_any || [])} keys_type_pref=${JSON.stringify(action.query?.preferences?.keys_type_any || [])} keys_type_excluded=${JSON.stringify(action.query?.exclusions?.keys_type_any || [])} keys_difficulty=${JSON.stringify(action.query?.preferences?.keys_difficulty || action.query?.requirements?.keys_difficulty || null)} hard_matches=${hardMatchCount}`
-    );
-    const excludedSongIds =
-      action.query?.avoid_previous_results && activeContext.context
-        ? new Set(activeContext.context.results.map((entry) => entry.song_id).filter(Boolean))
-        : null;
-    const afterPreviousFilter = excludedSongIds
-      ? songs.filter((song) => !excludedSongIds.has(song.song_id))
-      : songs;
-    const requestedLimit = Number.parseInt(action.query?.limit, 10);
-    const recentRecommendationIds = new Set(
-      typeof stateStore.getRecentRecommendations === 'function'
-        ? stateStore.getRecentRecommendations(record.chatId)
-        : []
-    );
-    const candidateSongs =
-      recentRecommendationIds.size > 0
-        ? (() => {
-            const filtered = afterPreviousFilter.filter((song) => !recentRecommendationIds.has(song.song_id));
-            return filtered.length >= (Number.isInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : 5)
-              ? filtered
-              : afterPreviousFilter;
-          })()
-        : afterPreviousFilter;
-    let matches = searchSongs(candidateSongs, action.query || {});
-    if (matches.length === 0 && hardMatchCount > 0) {
-      matches = searchSongs(afterPreviousFilter, action.query || {});
+    const replacementIndexes = buildReplacementIndexes(action.query, activeContext);
+    if (replacementIndexes.length > 0) {
+      const baseQuery = mergeSearchQueries(activeContext.context?.query || {}, action.query || {});
+      const replacementQuery = {
+        ...baseQuery,
+        limit: replacementIndexes.length,
+        avoid_previous_results: true
+      };
+      const { candidateSongs, afterPreviousFilter } = buildSearchCandidates({
+        songs,
+        query: replacementQuery,
+        activeContext,
+        stateStore,
+        chatId: record.chatId
+      });
+      const replacementSongs = runSongSearchWithFallback({
+        songs,
+        query: replacementQuery,
+        candidateSongs,
+        afterPreviousFilter
+      });
+      if (!replacementSongs.length) {
+        await sendBotMessage(chat, '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05d4\u05d7\u05dc\u05e4\u05d5\u05ea \u05de\u05ea\u05d0\u05d9\u05de\u05d5\u05ea.');
+        return;
+      }
+      const rebuiltSongs = rebuildResultListWithReplacements({
+        context: activeContext.context,
+        stateStore,
+        replacementIndexes,
+        replacementSongs
+      });
+      await sendSongsReply({
+        chat,
+        stateStore,
+        chatId: record.chatId,
+        songs: rebuiltSongs,
+        query: sanitizeQueryForResultContext(baseQuery, rebuiltSongs.length)
+      });
+      return;
     }
-    if (matches.length === 0 && hardMatchCount > 0 && afterPreviousFilter !== songs) {
-      matches = searchSongs(songs, action.query || {});
-    }
-    await sendSongsReply({ chat, stateStore, chatId: record.chatId, songs: matches });
+
+    const { candidateSongs, afterPreviousFilter } = buildSearchCandidates({
+      songs,
+      query: action.query || {},
+      activeContext,
+      stateStore,
+      chatId: record.chatId
+    });
+    const matches = runSongSearchWithFallback({
+      songs,
+      query: action.query || {},
+      candidateSongs,
+      afterPreviousFilter
+    });
+    await sendSongsReply({
+      chat,
+      stateStore,
+      chatId: record.chatId,
+      songs: matches,
+      query: sanitizeQueryForResultContext(action.query || {}, matches.length)
+    });
     return;
   }
 
@@ -675,7 +837,13 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       { ...action.query, limit: action.query?.limit || 5 },
       { similarSong }
     );
-    await sendSongsReply({ chat, stateStore, chatId: record.chatId, songs: matches });
+    await sendSongsReply({
+      chat,
+      stateStore,
+      chatId: record.chatId,
+      songs: matches,
+      query: sanitizeQueryForResultContext(action.query || {}, matches.length)
+    });
     return;
   }
 
@@ -691,7 +859,13 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       await sendBotMessage(chat, formatBadSongsSummary(matches));
       return;
     }
-    await sendSongsReply({ chat, stateStore, chatId: record.chatId, songs: matches });
+    await sendSongsReply({
+      chat,
+      stateStore,
+      chatId: record.chatId,
+      songs: matches,
+      query: sanitizeQueryForResultContext(buildBandStatusQuery(fit), matches.length)
+    });
     return;
   }
 

@@ -1388,3 +1388,46 @@ test('interpretMessage retries once with compact prompt after json_validate_fail
   assert.equal(action.action, 'search_songs');
   assert.equal(action.query.requirements.artist, 'רוקפור');
 });
+
+test('interpretMessage rewrites replacement follow-ups into replacement search queries', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'תחליף את 2,5,7',
+    quotedText: '',
+    replyContext: {
+      results: [
+        { index: 1, song_id: 'song_a', title: 'Zombie', artist: 'The Cranberries' },
+        { index: 2, song_id: 'song_b', title: 'Dreams', artist: 'The Cranberries' },
+        { index: 5, song_id: 'song_e', title: '1979', artist: 'The Smashing Pumpkins' },
+        { index: 7, song_id: 'song_g', title: 'Alive', artist: 'Pearl Jam' }
+      ]
+    },
+    recentMessages: [],
+    currentDate: '2026-08-11',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'clarify',
+                  question: 'איזה שירים אתה רוצה?'
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.deepEqual(action.query.replace_result_indexes, [2, 5, 7]);
+  assert.equal(action.query.avoid_previous_results, true);
+  assert.equal(action.query.limit, 3);
+});

@@ -1,6 +1,6 @@
 const { validateResultContext } = require('./schemas');
 
-function buildResultContext({ chatId, botMessageId, songs, createdAt = new Date().toISOString() }) {
+function buildResultContext({ chatId, botMessageId, songs, query = null, createdAt = new Date().toISOString() }) {
   const results = Array.isArray(songs)
     ? songs.map((song, index) => ({
         index: index + 1,
@@ -14,12 +14,13 @@ function buildResultContext({ chatId, botMessageId, songs, createdAt = new Date(
     chat_id: chatId || null,
     bot_message_id: botMessageId || null,
     created_at: createdAt,
-    results
+    results,
+    query
   });
 }
 
-function persistResultContext(stateStore, { chatId, botMessageId, songs, createdAt }) {
-  const context = buildResultContext({ chatId, botMessageId, songs, createdAt });
+function persistResultContext(stateStore, { chatId, botMessageId, songs, query, createdAt }) {
+  const context = buildResultContext({ chatId, botMessageId, songs, query, createdAt });
   if (chatId) {
     stateStore.setLastResults(chatId, context);
   }

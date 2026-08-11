@@ -41,6 +41,10 @@ test('buildResultContext creates numbered song references', () => {
   const context = buildResultContext({
     chatId: 'chat-1',
     botMessageId: 'wamid-1',
+    query: {
+      requirements: { genres: ['rock'] },
+      limit: 2
+    },
     songs: [
       { song_id: 'song_a', song_title: 'Zombie', artist: 'The Cranberries' },
       { song_id: 'song_b', song_title: 'Dreams', artist: 'The Cranberries' }
@@ -50,6 +54,7 @@ test('buildResultContext creates numbered song references', () => {
 
   assert.equal(context.results[0].index, 1);
   assert.equal(context.results[1].song_id, 'song_b');
+  assert.equal(context.query.requirements.genres[0], 'rock');
 });
 
 test('resolveActiveResultContext prioritizes quoted bot message context over last_results', () => {

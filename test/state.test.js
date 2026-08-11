@@ -135,10 +135,18 @@ test('createStateStore stores per-chat result context and preserves it on save',
 
     store.setLastResults('chat-1', {
       created_at: '2026-08-08T01:00:00.000Z',
+      query: {
+        requirements: { artist: 'Rockfour' },
+        limit: 5
+      },
       results: [{ index: 1, song_id: 'song_123456789abc', title: 'Zombie', artist: 'The Cranberries' }]
     });
     store.storeResultMessage('chat-1', 'wamid-1', {
       created_at: '2026-08-08T01:00:00.000Z',
+      query: {
+        requirements: { artist: 'Rockfour' },
+        limit: 5
+      },
       results: [{ index: 1, song_id: 'song_123456789abc', title: 'Zombie', artist: 'The Cranberries' }]
     });
 
@@ -147,6 +155,7 @@ test('createStateStore stores per-chat result context and preserves it on save',
     const reloaded = await loadState(stateFile);
     assert.equal(reloaded.schema_version, 3);
     assert.equal(reloaded.chats['chat-1'].last_results.results[0].song_id, 'song_123456789abc');
+    assert.equal(reloaded.chats['chat-1'].last_results.query.requirements.artist, 'Rockfour');
     assert.equal(reloaded.result_messages['wamid-1'].results[0].title, 'Zombie');
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });

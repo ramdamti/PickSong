@@ -170,7 +170,7 @@ function validateResultContext(value) {
     throw new Error('result_context.results must be an array');
   }
 
-  return {
+  const validated = {
     bot_message_id: context.bot_message_id ? String(context.bot_message_id).trim() : null,
     chat_id: context.chat_id ? String(context.chat_id).trim() : null,
     created_at: context.created_at || null,
@@ -188,6 +188,12 @@ function validateResultContext(value) {
       };
     })
   };
+
+  if (context.query && typeof context.query === 'object' && !Array.isArray(context.query)) {
+    validated.query = validateSongQuery(context.query);
+  }
+
+  return validated;
 }
 
 function validateSong(value, options = {}) {
@@ -248,6 +254,18 @@ function validateSongQuery(value) {
   }
   if ('exclusions' in query) {
     validated.exclusions = validateSongQuerySection(query.exclusions, 'query.exclusions');
+  }
+  if ('replace_result_indexes' in query) {
+    if (!Array.isArray(query.replace_result_indexes)) {
+      throw new Error('query.replace_result_indexes must be an array');
+    }
+    validated.replace_result_indexes = Array.from(
+      new Set(
+        query.replace_result_indexes
+          .map((value) => Number.parseInt(value, 10))
+          .filter((value) => Number.isInteger(value) && value > 0)
+      )
+    );
   }
   return validated;
 }

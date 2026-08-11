@@ -365,6 +365,86 @@ test('executeAgentAction search_songs falls back to broader candidates when filt
   assert.match(sentMessages[0], /פורטיס|ניצוצות|אמריקה/);
 });
 
+test('executeAgentAction search_songs replaces only requested result indexes in the active list', async () => {
+  const sentMessages = [];
+  const firstSong = createSong({ song_id: 'song_a', song_title: 'Zombie', artist: 'The Cranberries' });
+  const secondSong = createSong({ song_id: 'song_b', song_title: 'Dreams', artist: 'The Cranberries' });
+  const thirdSong = createSong({ song_id: 'song_c', song_title: 'Alive', artist: 'Pearl Jam' });
+  const replacementOne = createSong({ song_id: 'song_d', song_title: '1979', artist: 'The Smashing Pumpkins' });
+  const replacementTwo = createSong({ song_id: 'song_e', song_title: 'Jeremy', artist: 'Pearl Jam' });
+  const allSongs = [firstSong, secondSong, thirdSong, replacementOne, replacementTwo];
+  const stateStore = {
+    getSongs() {
+      return allSongs;
+    },
+    getSongById(songId) {
+      return allSongs.find((song) => song.song_id === songId) || null;
+    },
+    getRecentRecommendations() {
+      return [];
+    },
+    getResultMessage() {
+      return null;
+    },
+    getLastResults(chatId) {
+      if (chatId !== 'chat-1') return null;
+      return {
+        query: {
+          requirements: { genres: ['rock'] },
+          limit: 3
+        },
+        results: [
+          { index: 1, song_id: 'song_a', title: 'Zombie', artist: 'The Cranberries' },
+          { index: 2, song_id: 'song_b', title: 'Dreams', artist: 'The Cranberries' },
+          { index: 3, song_id: 'song_c', title: 'Alive', artist: 'Pearl Jam' }
+        ]
+      };
+    },
+    setLastResults(_chatId, context) {
+      this.savedContext = context;
+      return true;
+    },
+    storeResultMessage() {
+      return true;
+    },
+    recordRecommendations() {
+      return true;
+    },
+    async queueSave() {}
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+      return { id: { _serialized: 'wamid-replace-1' } };
+    }
+  };
+
+  await executeAgentAction({
+    action: {
+      action: 'search_songs',
+      query: {
+        replace_result_indexes: [2, 3],
+        avoid_previous_results: true
+      }
+    },
+    stateStore,
+    chat,
+    record: {
+      chatId: 'chat-1',
+      quoted: { id: '' }
+    }
+  });
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /Zombie/);
+  assert.match(sentMessages[0], /1979/);
+  assert.match(sentMessages[0], /Jeremy/);
+  assert.doesNotMatch(sentMessages[0], /Dreams/);
+  assert.doesNotMatch(sentMessages[0], /Alive/);
+  assert.equal(stateStore.savedContext.query.requirements.genres[0], 'rock');
+  assert.equal(stateStore.savedContext.results.length, 3);
+});
+
 test('executeAgentAction updates feedback by result index using stored context', async () => {
   const sentMessages = [];
   let saved = false;

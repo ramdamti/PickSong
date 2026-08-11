@@ -577,6 +577,13 @@ function shouldAvoidPreviousResults(messageText, replyContext) {
   return /(?:עוד|אחר(?:ים|ות)?|שונ(?:ים|ות)?|חדשים|חדש|נוספ(?:ים|ות)?|במקום|לא אלה|משהו אחר)/iu.test(source);
 }
 
+function isReplacementRequest(messageText, replyContext) {
+  if (!replyContext?.results?.length) return false;
+  const source = String(messageText || '').trim();
+  if (!source) return false;
+  return /(?:תחליף|תחליפי|להחליף|אחרים במקום|במקום\s+\d|replace)/iu.test(source);
+}
+
 function inferFeedbackIssue(messageText) {
   const source = String(messageText || '').trim().toLowerCase();
   if (!source) return [];
@@ -963,6 +970,18 @@ function normalizeAgentAction(action, { messageText, replyContext }) {
         song: inferredAddSong
       };
     }
+
+    const replacementIndexes = inferResultIndexesFromMessage(messageText);
+    if (isReplacementRequest(messageText, replyContext) && replacementIndexes.length > 0) {
+      return {
+        action: 'search_songs',
+        query: {
+          replace_result_indexes: replacementIndexes,
+          avoid_previous_results: true,
+          limit: replacementIndexes.length
+        }
+      };
+    }
   }
 
   if (action.action !== 'search_songs' && action.action !== 'find_similar_songs') {
@@ -991,6 +1010,17 @@ function normalizeAgentAction(action, { messageText, replyContext }) {
 
   if (action.action === 'search_songs' && shouldAvoidPreviousResults(messageText, replyContext)) {
     query.avoid_previous_results = true;
+  }
+
+  if (action.action === 'search_songs') {
+    const replacementIndexes = inferResultIndexesFromMessage(messageText);
+    if (isReplacementRequest(messageText, replyContext) && replacementIndexes.length > 0) {
+      query.replace_result_indexes = replacementIndexes;
+      query.avoid_previous_results = true;
+      if (!Number.isInteger(Number.parseInt(query.limit, 10))) {
+        query.limit = replacementIndexes.length;
+      }
+    }
   }
 
   if (!requirements.language) {

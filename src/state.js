@@ -224,11 +224,40 @@ function normalizeResultContext(value) {
     ? value.results.map(normalizeResultEntry).filter(Boolean)
     : [];
 
+  const query =
+    value.query && typeof value.query === 'object' && !Array.isArray(value.query)
+      ? {
+          ...value.query,
+          requirements:
+            value.query.requirements && typeof value.query.requirements === 'object' && !Array.isArray(value.query.requirements)
+              ? { ...value.query.requirements }
+              : undefined,
+          preferences:
+            value.query.preferences && typeof value.query.preferences === 'object' && !Array.isArray(value.query.preferences)
+              ? { ...value.query.preferences }
+              : undefined,
+          exclusions:
+            value.query.exclusions && typeof value.query.exclusions === 'object' && !Array.isArray(value.query.exclusions)
+              ? { ...value.query.exclusions }
+              : undefined,
+          replace_result_indexes: Array.isArray(value.query.replace_result_indexes)
+            ? Array.from(
+                new Set(
+                  value.query.replace_result_indexes
+                    .map((item) => Number.parseInt(item, 10))
+                    .filter((item) => Number.isInteger(item) && item > 0)
+                )
+              )
+            : undefined
+        }
+      : undefined;
+
   return {
     bot_message_id: value.bot_message_id ? String(value.bot_message_id).trim() : null,
     chat_id: value.chat_id ? String(value.chat_id).trim() : null,
     created_at: value.created_at || null,
-    results
+    results,
+    query
   };
 }
 

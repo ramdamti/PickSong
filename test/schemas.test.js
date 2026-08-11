@@ -135,6 +135,19 @@ test('validateAgentAction accepts keyboard type search constraints', () => {
   assert.deepEqual(validated.query.exclusions.keys_type_any, ['synth']);
 });
 
+test('validateAgentAction accepts search replacement indexes', () => {
+  const validated = validateAgentAction({
+    action: 'search_songs',
+    query: {
+      replace_result_indexes: [2, '5', 5, 7],
+      avoid_previous_results: true
+    }
+  });
+
+  assert.deepEqual(validated.query.replace_result_indexes, [2, 5, 7]);
+  assert.equal(validated.query.avoid_previous_results, true);
+});
+
 test('validateSong rejects invalid keyboard type values', () => {
   assert.throws(
     () =>
