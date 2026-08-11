@@ -18,7 +18,16 @@ test('stripWakeWord removes standalone bot trigger variants', () => {
   assert.equal(stripWakeWord('\u05d1\u05d5\u05d8 - \u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7'), '\u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7');
 });
 
-test('shouldHandleMessage accepts direct bot requests and bot replies only', () => {
+test('shouldHandleMessage accepts direct bot requests and ignores raw reply markers', () => {
+  assert.deepEqual(
+    shouldHandleMessage({ text: '\u200f🤖 יש עכשיו עומס על המנוע. נסו שוב עוד רגע.', fromMe: true, quoted: { fromMe: false } }, '\u05d1\u05d5\u05d8'),
+    {
+      shouldHandle: false,
+      reason: 'bot_self_message',
+      messageText: null
+    }
+  );
+
   assert.deepEqual(
     shouldHandleMessage({ text: '\u05d1\u05d5\u05d8 \u05ea\u05df 5 \u05e9\u05d9\u05e8\u05d9\u05dd', quoted: { fromMe: false } }, '\u05d1\u05d5\u05d8'),
     {
@@ -28,13 +37,9 @@ test('shouldHandleMessage accepts direct bot requests and bot replies only', () 
     }
   );
 
-  assert.deepEqual(
-    shouldHandleMessage({ text: '2 \u05d5-4 \u05dc\u05d0 \u05d4\u05ea\u05d0\u05d9\u05de\u05d5', quoted: { fromMe: true } }, '\u05d1\u05d5\u05d8'),
-    {
-      shouldHandle: true,
-      reason: 'reply_to_bot',
-      messageText: '2 \u05d5-4 \u05dc\u05d0 \u05d4\u05ea\u05d0\u05d9\u05de\u05d5'
-    }
+  assert.equal(
+    shouldHandleMessage({ text: '2 \u05d5-4 \u05dc\u05d0 \u05d4\u05ea\u05d0\u05d9\u05de\u05d5', quoted: { fromMe: true } }, '\u05d1\u05d5\u05d8').shouldHandle,
+    false
   );
 
   assert.equal(
@@ -57,13 +62,28 @@ test('buildAgentReplyContext returns stored numbered results only', () => {
 
   const context = buildAgentReplyContext(stateStore, {
     chatId: 'chat-1',
-    quoted: { id: 'wamid-1' }
+    quoted: { id: 'wamid-1', text: '\u200f🤖 1. Zombie - The Cranberries' }
   });
 
   assert.deepEqual(context, {
     source: 'reply',
     results: [{ index: 1, song_id: 'song_a', title: 'Zombie', artist: 'The Cranberries' }]
   });
+});
+
+test('buildAgentReplyContext ignores quoted messages without the bot prefix', () => {
+  const stateStore = {
+    getResultMessage() {
+      throw new Error('bot context lookup should not run for non-bot quoted text');
+    }
+  };
+
+  const context = buildAgentReplyContext(stateStore, {
+    chatId: 'chat-1',
+    quoted: { id: 'wamid-1', text: '1. Zombie - The Cranberries' }
+  });
+
+  assert.equal(context, null);
 });
 
 test('isMessageInTargetGroup accepts any configured group id or name', () => {

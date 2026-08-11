@@ -66,20 +66,20 @@ function summarizeMessageRouting(record, config) {
 }
 
 function shouldHandleMessage(record, triggerText = '\u05d1\u05d5\u05d8') {
+  if (record?.fromMe && /^\u200f?🤖(?:\s|$)/u.test(String(record?.text || '').trim())) {
+    return {
+      shouldHandle: false,
+      reason: 'bot_self_message',
+      messageText: null
+    };
+  }
+
   const strippedText = stripWakeWord(record?.text || '', triggerText);
   if (strippedText !== null) {
     return {
       shouldHandle: true,
       reason: 'wake_word',
       messageText: strippedText
-    };
-  }
-
-  if (record?.quoted?.fromMe) {
-    return {
-      shouldHandle: true,
-      reason: 'reply_to_bot',
-      messageText: String(record?.text || '').trim()
     };
   }
 
@@ -91,6 +91,10 @@ function shouldHandleMessage(record, triggerText = '\u05d1\u05d5\u05d8') {
 }
 
 function buildAgentReplyContext(stateStore, record) {
+  const quotedText = String(record?.quoted?.text || '').trim();
+  if (!/^\u200f?🤖(?:\s|$)/u.test(quotedText)) {
+    return null;
+  }
   const resolved = resolveActiveResultContext(stateStore, record);
   if (!resolved.context) return null;
   return {

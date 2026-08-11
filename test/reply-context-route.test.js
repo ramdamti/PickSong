@@ -76,7 +76,7 @@ test('handleAgentMessage accepts stored reply context even when quoted.fromMe is
     },
     record: {
       text: 'מתי ניגנו את 1',
-      quoted: { id: 'wamid-bot-list', fromMe: false },
+      quoted: { id: 'wamid-bot-list', fromMe: false, text: '\u200f🤖 1. Zombie - The Cranberries' },
       chatId: 'chat-1'
     },
     interpretMessageFn: async () => {
