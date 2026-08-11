@@ -901,6 +901,31 @@ function normalizeAgentAction(action, { messageText, replyContext }) {
     return normalizeUpdateSongAction(action, messageText, replyContext);
   }
 
+  if (action.action === 'add_song') {
+    const inferredAddSong = inferAddSongPayload(messageText);
+    if (!inferredAddSong) {
+      return action;
+    }
+
+    const song = action.song && typeof action.song === 'object' && !Array.isArray(action.song)
+      ? { ...action.song }
+      : {};
+
+    return {
+      ...action,
+      song: {
+        ...inferredAddSong,
+        ...song,
+        song_title: typeof song.song_title === 'string' && song.song_title.trim()
+          ? song.song_title.trim()
+          : inferredAddSong.song_title,
+        artist: typeof song.artist === 'string' && song.artist.trim()
+          ? song.artist.trim()
+          : inferredAddSong.artist
+      }
+    };
+  }
+
   if (action.action === 'clarify') {
     const inferredAddSong = inferAddSongPayload(messageText);
     if (inferredAddSong) {
