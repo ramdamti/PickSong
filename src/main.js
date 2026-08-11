@@ -257,6 +257,12 @@ function isChordsReplyRequest(messageText) {
   return /(?:^|[\s,.:!?-])(אקורדים|אקורד|chords?)(?:$|[\s,.:!?-])/iu.test(normalized);
 }
 
+function isSongInfoRequest(messageText) {
+  const normalized = String(messageText || '').trim();
+  if (!normalized) return false;
+  return /(?:מידע|פרטים|תן מידע|תביא מידע|ספר לי על|מה אתה יודע על|מתי ניגנו|מתי ניגנתם|info|details)/iu.test(normalized);
+}
+
 function parseSongIdentityText(text) {
   const source = String(text || '').trim();
   if (!source) return null;
@@ -832,11 +838,29 @@ async function handleAgentMessage({
     });
   }
 
+  const quotedSongIdentity = parseSongIdentityText(record?.quoted?.text || record?.quotedText || '');
+  if (quotedSongIdentity && isSongInfoRequest(messageText)) {
+    await executeAgentAction({
+      action: {
+        action: 'get_song_info',
+        song_title: quotedSongIdentity.song_title,
+        artist: quotedSongIdentity.artist
+      },
+      stateStore,
+      chat,
+      record,
+      messageText,
+      replyContext
+    });
+    return true;
+  }
+
   try {
+    const quotedText = record?.quoted?.text || record?.quotedText || '';
     const agentMessageText = buildAgentMessageText(
       messageText,
       recentMessages,
-      record?.quoted?.text || record?.quotedText || ''
+      quotedText
     );
     const action = await interpretMessageFn({
       provider: config.llmProvider,
@@ -844,6 +868,7 @@ async function handleAgentMessage({
       apiKey: config.llmApiKey,
       model: config.llmModel,
       messageText: agentMessageText,
+      quotedText,
       replyContext,
       recentMessages,
       currentDate: CURRENT_DATE

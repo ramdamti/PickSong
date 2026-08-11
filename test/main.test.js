@@ -142,6 +142,7 @@ test('handleAgentMessage performs one agent call for a normal search request', a
   let agentCalls = 0;
   const sentMessages = [];
   let capturedRecentMessages = null;
+  let capturedQuotedText = null;
   const stateStore = {
     getResultMessage() {
       return null;
@@ -225,6 +226,7 @@ test('handleAgentMessage performs one agent call for a normal search request', a
     interpretMessageFn: async (params) => {
       agentCalls += 1;
       capturedRecentMessages = params?.recentMessages || null;
+      capturedQuotedText = params?.quotedText ?? null;
       return {
         action: 'search_songs',
         query: {
@@ -244,6 +246,69 @@ test('handleAgentMessage performs one agent call for a normal search request', a
     { text: 'לא בלדה', from_me: false, sender: 'Member B' },
     { text: 'עדיף באנגלית', from_me: false, sender: 'Member C' }
   ]);
+  assert.equal(capturedQuotedText, '');
+  assert.equal(sentMessages.length, 1);
+});
+
+test('handleAgentMessage forwards replied text to the agent for general context', async () => {
+  let capturedQuotedText = null;
+  const sentMessages = [];
+  const stateStore = {
+    getResultMessage() {
+      return null;
+    },
+    getLastResults() {
+      return null;
+    },
+    getSongs() {
+      return [];
+    },
+    setLastResults() {
+      return true;
+    },
+    storeResultMessage() {
+      return true;
+    },
+    async queueSave() {}
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+      return { id: { _serialized: 'wamid-quoted-1' } };
+    }
+  };
+
+  const handled = await handleAgentMessage({
+    chat,
+    stateStore,
+    config: {
+      triggerText: '\u05d1\u05d5\u05d8',
+      llmProvider: 'groq',
+      llmBaseUrl: 'https://example.com',
+      llmApiKey: 'test',
+      llmModel: 'test-model'
+    },
+    record: {
+      text: '\u05d1\u05d5\u05d8 \u05ea\u05df \u05dc\u05d9 \u05de\u05e9\u05d4\u05d5 \u05d1\u05e1\u05d2\u05e0\u05d5\u05df \u05d6\u05d4',
+      quoted: { fromMe: false, text: 'Wish You Were Here - Pink Floyd' },
+      chatId: 'chat-1'
+    },
+    interpretMessageFn: async (params) => {
+      capturedQuotedText = params?.quotedText ?? null;
+      return {
+        action: 'search_songs',
+        query: {
+          requirements: {},
+          preferences: {},
+          exclusions: {},
+          limit: 5
+        }
+      };
+    }
+  });
+
+  assert.equal(handled, true);
+  assert.equal(capturedQuotedText, 'Wish You Were Here - Pink Floyd');
   assert.equal(sentMessages.length, 1);
 });
 
@@ -385,6 +450,96 @@ test('handleAgentMessage rewrites plain add requests using the replied song mess
   assert.equal(stateStore.song.song_title, 'Wish You Were Here');
   assert.equal(stateStore.song.artist, 'Pink Floyd');
   assert.equal(sentMessages.length, 1);
+});
+
+test('handleAgentMessage resolves replied song identity for info requests without calling the agent', async () => {
+  let agentCalls = 0;
+  const sentMessages = [];
+  const song = {
+    song_id: 'song_info_1',
+    song_title: 'Wish You Were Here',
+    artist: 'Pink Floyd',
+    genres: ['rock'],
+    difficulty: 'medium',
+    feel: 'calm',
+    ai_metadata: {
+      singer_fit: 'great',
+      original_vocal: 'male',
+      vocal_range: 'medium',
+      vocal_style: ['rock'],
+      vocal_energy: 'medium',
+      band_energy: 'medium',
+      crowd_friendly: true,
+      groove_level: 'medium',
+      guitar_difficulty: 'medium',
+      bass_difficulty: 'low',
+      drums_difficulty: 'low',
+      keys_role: 'optional',
+      keys_type: [],
+      keys_difficulty: 'low',
+      bass_interest: 'medium'
+    },
+    band_status: {
+      fit: 'unknown',
+      issues: [],
+      notes: '',
+      attempts: 0,
+      last_reviewed: null,
+      last_rehearsed: null,
+      last_played: null
+    }
+  };
+  const stateStore = {
+    getSongs() {
+      return [song];
+    },
+    getSongById(songId) {
+      return songId === 'song_info_1' ? song : null;
+    },
+    findSongsByNormalizedName(title, artist) {
+      return String(title).toLowerCase().includes('wish you where here') && String(artist).toLowerCase().includes('pink floyd')
+        ? [song]
+        : [];
+    },
+    getResultMessage() {
+      return null;
+    },
+    getLastResults() {
+      return null;
+    }
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+      return { id: { _serialized: 'wamid-info-1' } };
+    }
+  };
+
+  const handled = await handleAgentMessage({
+    chat,
+    stateStore,
+    config: {
+      triggerText: '\u05d1\u05d5\u05d8',
+      llmProvider: 'groq',
+      llmBaseUrl: 'https://example.com',
+      llmApiKey: 'test',
+      llmModel: 'test-model'
+    },
+    record: {
+      text: '\u05d1\u05d5\u05d8 \u05ea\u05df \u05de\u05d9\u05d3\u05e2 \u05e2\u05dc \u05d4\u05e9\u05d9\u05e8',
+      quoted: { fromMe: false, text: 'wish you where here - Pink Floyd' },
+      chatId: 'chat-1'
+    },
+    interpretMessageFn: async () => {
+      agentCalls += 1;
+      return { action: 'clarify', question: 'unused' };
+    }
+  });
+
+  assert.equal(handled, true);
+  assert.equal(agentCalls, 0);
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /Wish You Were Here - Pink Floyd/);
 });
 
 test('handleAgentMessage returns reply-context songs with chords without calling the agent', async () => {

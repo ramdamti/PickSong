@@ -17,6 +17,7 @@ test('SYSTEM_PROMPT stays compact and stable', () => {
 test('buildAgentPrompt includes reply context without full database payloads', () => {
   const prompt = buildAgentPrompt({
     messageText: '\u05ea\u05d1\u05d9\u05d0 \u05e2\u05d5\u05d3 \u05db\u05de\u05d5 3',
+    quotedText: 'Yesterday - The Beatles',
     recentMessages: [
       { text: '\u05de\u05e9\u05d4\u05d5 \u05e7\u05e6\u05d1\u05d9', from_me: false, sender: 'Member A' },
       { text: '\u05dc\u05d0 \u05de\u05d8\u05d0\u05dc', from_me: false, sender: 'Member B' }
@@ -33,6 +34,8 @@ test('buildAgentPrompt includes reply context without full database payloads', (
   assert.match(prompt, /groove_level/);
   assert.match(prompt, /"index":3/);
   assert.match(prompt, /"song_id":"song_a"/);
+  assert.match(prompt, /quoted_message/);
+  assert.match(prompt, /Yesterday - The Beatles/);
   assert.match(prompt, /recent_messages/);
   assert.match(prompt, /משהו קצבי/);
   assert.match(SYSTEM_PROMPT, /get_band_failure_reasons/);

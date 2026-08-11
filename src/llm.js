@@ -6,6 +6,7 @@ const SYSTEM_PROMPT = [
   'Return exactly one JSON object. No prose. No markdown. No explanations.',
   'The application executes actions locally and deterministically. Never invent a song_id.',
   'Translate the user request into the closest supported query parameters instead of asking unnecessary questions.',
+  'When quoted_message is present, treat it as raw replied context that may identify the song, artist, or the subject of follow-up questions.',
   'When reply_context is provided and the user refers to previous results, use result_index values from that context.',
   'Treat performer-fit phrases as direct search intent, not ambiguity.',
   'Examples of performer-fit language: מתאים לזמר, מתאים לזמרת, מתאים לזמר שלנו, מתאים לקול שלנו, שהסולן יוכל לשיר, שהסולנית תוכל לשיר, מתאים לגיטריסט, מתאים לבסיסט, מתאים למתופף, מתאים לקלידים.',
@@ -169,11 +170,12 @@ function extractJsonBlock(text) {
   return null;
 }
 
-function buildAgentPrompt({ messageText, replyContext, recentMessages, currentDate }) {
+function buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate }) {
   return JSON.stringify({
     supported_search_fields: SUPPORTED_SEARCH_FIELDS,
     current_date: currentDate,
     user_message: messageText,
+    quoted_message: quotedText ? String(quotedText).trim() : null,
     recent_messages: Array.isArray(recentMessages) ? recentMessages : [],
     reply_context: replyContext || null
   });
@@ -1093,6 +1095,7 @@ async function interpretMessage({
   apiKey,
   model,
   messageText,
+  quotedText,
   replyContext,
   recentMessages,
   currentDate,
@@ -1112,7 +1115,7 @@ async function interpretMessage({
     throw new Error('LLM base URL is required');
   }
 
-  const prompt = buildAgentPrompt({ messageText, replyContext, recentMessages, currentDate });
+  const prompt = buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate });
 
   return runWithAgentConcurrencyLimit(async () => {
     let attempt = 0;
