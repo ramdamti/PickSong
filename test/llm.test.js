@@ -142,6 +142,82 @@ test('interpretMessage infers a single result for singular song phrasing', async
   assert.equal(action.query.limit, 1);
 });
 
+test('interpretMessage accepts update_song corrections by result index for title fixes', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05ea\u05ea\u05e7\u05df \u05d0\u05ea 3 \u05dc-Sultans of Swing',
+    replyContext: {
+      results: [{ index: 3, song_id: 'song_a', title: 'Sultan of swing', artist: 'Dire Straits' }]
+    },
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'update_song',
+                  result_index: 3,
+                  updates: {
+                    song_title: 'Sultans of Swing'
+                  }
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'update_song');
+  assert.equal(action.result_index, 3);
+  assert.equal(action.updates.song_title, 'Sultans of Swing');
+});
+
+test('interpretMessage accepts update_song corrections by result index for artist fixes', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: '\u05d4\u05d0\u05de\u05df \u05e9\u05dc 2 \u05d4\u05d5\u05d0 The Cranberries',
+    replyContext: {
+      results: [{ index: 2, song_id: 'song_b', title: 'Zombie', artist: 'Cranberries' }]
+    },
+    currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'update_song',
+                  result_index: 2,
+                  updates: {
+                    artist: 'The Cranberries'
+                  }
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'update_song');
+  assert.equal(action.result_index, 2);
+  assert.equal(action.updates.artist, 'The Cranberries');
+});
+
 test('interpretMessage flags fresh follow-up searches to avoid previous results', async () => {
   const action = await interpretMessage({
     provider: 'groq',
