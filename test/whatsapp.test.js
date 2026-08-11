@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { messageToRecord } = require('../src/whatsapp');
+const { messageToRecord, readQuotedMessage } = require('../src/whatsapp');
 
 test('messageToRecord prefers the group conversation id for incoming group messages', () => {
   const record = messageToRecord({
@@ -41,4 +41,27 @@ test('messageToRecord still uses the destination chat for outgoing messages', ()
   });
 
   assert.equal(record.chatId, '120363420724758799@g.us');
+});
+
+test('readQuotedMessage falls back to raw quoted data for outgoing reply messages', async () => {
+  const quoted = await readQuotedMessage({
+    hasQuotedMsg: true,
+    _data: {
+      quotedStanzaID: 'wamid.bot-list',
+      quotedParticipant: '61143188005088@lid',
+      quotedMsg: {
+        body: '\u200f🤖 easy - Faith No More'
+      }
+    },
+    async getQuotedMessage() {
+      throw new Error('quoted fetch unavailable');
+    }
+  });
+
+  assert.deepEqual(quoted, {
+    id: 'wamid.bot-list',
+    text: '\u200f🤖 easy - Faith No More',
+    fromMe: null,
+    author: '61143188005088@lid'
+  });
 });

@@ -140,16 +140,53 @@ function messageToRecord(message) {
 
 async function readQuotedMessage(message) {
   if (!message.hasQuotedMsg) return null;
+
+  const fallbackQuoted = (() => {
+    const raw = message?._data?.quotedMsg || message?._data?.quotedMessage || null;
+    const rawId =
+      raw?.id?._serialized ||
+      raw?.id?.id ||
+      message?._data?.quotedStanzaID ||
+      message?._data?.quotedMsgId ||
+      '';
+    const rawText =
+      raw?.body ||
+      raw?.caption ||
+      message?._data?.quotedMsg?.body ||
+      message?._data?.quotedMsg?.caption ||
+      null;
+    const rawAuthor =
+      raw?.author ||
+      raw?.from ||
+      message?._data?.quotedParticipant ||
+      null;
+
+    if (!rawId && !rawText && !rawAuthor) {
+      return null;
+    }
+
+    return {
+      id: String(rawId || '').trim(),
+      text: rawText ? String(rawText).trim() : null,
+      fromMe: raw?.fromMe === undefined ? null : Boolean(raw.fromMe),
+      author: rawAuthor ? String(rawAuthor).trim() : null
+    };
+  })();
+
   try {
     const quoted = await message.getQuotedMessage();
     return {
-      id: quoted?.id?._serialized || quoted?.id?.id || '',
-      text: quoted?.body ? String(quoted.body).trim() : null,
-      fromMe: quoted?.fromMe === undefined ? null : Boolean(quoted.fromMe),
-      author: quoted?.author || quoted?.from || null
+      id: quoted?.id?._serialized || quoted?.id?.id || fallbackQuoted?.id || '',
+      text: quoted?.body
+        ? String(quoted.body).trim()
+        : quoted?.caption
+          ? String(quoted.caption).trim()
+          : fallbackQuoted?.text || null,
+      fromMe: quoted?.fromMe === undefined ? fallbackQuoted?.fromMe ?? null : Boolean(quoted.fromMe),
+      author: quoted?.author || quoted?.from || fallbackQuoted?.author || null
     };
   } catch (error) {
-    return null;
+    return fallbackQuoted;
   }
 }
 
