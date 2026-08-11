@@ -193,7 +193,8 @@ Notes:
 - The workflow runs on a self-hosted GitHub Actions runner on the Oracle VM.
 - Checkout uses `clean: false` so untracked files such as `.env` are not removed during deploy.
 - It installs production dependencies locally with `npm install --omit=dev`.
-- It deploys with `systemctl --user stop picksong`, waits for the WhatsApp Chromium `SingletonLock` to clear, and force-releases the lock holder if needed before starting the service again.
+- It deploys with `systemctl --user daemon-reload` followed by `systemctl --user restart picksong`.
+- Chromium/session cleanup should live in the `picksong.service` unit via `ExecStartPre` / `ExecStopPost`, not in the GitHub Actions workflow.
 
 Recommended for persistence outside the workspace:
 
