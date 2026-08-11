@@ -17,6 +17,10 @@ test('SYSTEM_PROMPT stays compact and stable', () => {
 test('buildAgentPrompt includes reply context without full database payloads', () => {
   const prompt = buildAgentPrompt({
     messageText: '\u05ea\u05d1\u05d9\u05d0 \u05e2\u05d5\u05d3 \u05db\u05de\u05d5 3',
+    recentMessages: [
+      { text: '\u05de\u05e9\u05d4\u05d5 \u05e7\u05e6\u05d1\u05d9', from_me: false, sender: 'Member A' },
+      { text: '\u05dc\u05d0 \u05de\u05d8\u05d0\u05dc', from_me: false, sender: 'Member B' }
+    ],
     replyContext: {
       results: [{ index: 3, song_id: 'song_a', title: 'Zombie', artist: 'The Cranberries' }]
     },
@@ -29,6 +33,8 @@ test('buildAgentPrompt includes reply context without full database payloads', (
   assert.match(prompt, /groove_level/);
   assert.match(prompt, /"index":3/);
   assert.match(prompt, /"song_id":"song_a"/);
+  assert.match(prompt, /recent_messages/);
+  assert.match(prompt, /משהו קצבי/);
   assert.match(SYSTEM_PROMPT, /get_band_failure_reasons/);
   assert.match(SYSTEM_PROMPT, /explain_song_rejection/);
   assert.match(SYSTEM_PROMPT, /update_song/);
@@ -45,6 +51,7 @@ test('interpretMessage validates the structured response from the provider', asy
     model: 'test-model',
     messageText: '\u05ea\u05df 5 \u05e9\u05d9\u05e8\u05d9 \u05e8\u05d5\u05e7',
     replyContext: null,
+    recentMessages: [],
     currentDate: '2026-08-08',
     requestFn: async () => ({
       ok: true,
@@ -82,6 +89,7 @@ test('interpretMessage infers requested song count from Hebrew quantity phrases'
     model: 'test-model',
     messageText: '\u05ea\u05d1\u05d9\u05d0 \u05e9\u05dc\u05d5\u05e9\u05d4 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05d2\u05e0\u05d9\u05d1\u05d9\u05dd',
     replyContext: null,
+    recentMessages: [],
     currentDate: '2026-08-08',
     requestFn: async () => ({
       ok: true,
@@ -116,6 +124,7 @@ test('interpretMessage infers a single result for singular song phrasing', async
     model: 'test-model',
     messageText: '\u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8 \u05e9\u05de\u05ea\u05d0\u05d9\u05dd \u05dc\u05d6\u05de\u05e8\u05ea',
     replyContext: null,
+    recentMessages: [],
     currentDate: '2026-08-08',
     requestFn: async () => ({
       ok: true,

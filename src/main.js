@@ -7,7 +7,7 @@ const {
   findSongIdsByIndexes
 } = require('./result-context');
 const { searchSongs, countHardFilterMatches } = require('./song-search');
-const { formatSongsReply } = require('./chords');
+const { formatSongsReply, prepareSongsForReply } = require('./chords');
 const { ALLOWED_UPDATE_FIELDS } = require('./schemas');
 
 const CURRENT_DATE = '2026-08-08';
@@ -249,6 +249,64 @@ function shouldBlockGenericSearchFallback(action, { messageText, replyContext })
   }
 
   return looksLikeBareSpecificHint(messageText);
+}
+
+function isChordsReplyRequest(messageText) {
+  const normalized = String(messageText || '').trim();
+  if (!normalized) return false;
+  return /(?:^|[\s,.:!?-])(אקורדים|אקורד|chords?)(?:$|[\s,.:!?-])/iu.test(normalized);
+}
+
+function buildRecentMessageContext(records, limit = 3) {
+  const items = Array.isArray(records) ? records : [];
+  return items
+    .slice(-limit)
+    .map((record) => ({
+      text: String(record?.text || '').trim(),
+      from_me: Boolean(record?.fromMe),
+      sender: String(record?.sender || record?.from || '').trim()
+    }))
+    .filter((entry) => entry.text);
+}
+
+async function sendReplyContextChords({
+  stateStore,
+  chat,
+  record,
+  replyContext,
+  discoverChords,
+  prepareSongsForReplyFn = prepareSongsForReply
+}) {
+  const contextResults = Array.isArray(replyContext?.results) ? replyContext.results : [];
+  const songs = contextResults
+    .map((entry) => entry?.song_id ? stateStore.getSongById(entry.song_id) : null)
+    .filter(Boolean);
+
+  if (!songs.length) {
+    await sendBotMessage(chat, 'לא מצאתי לאיזה שירים להביא אקורדים.');
+    return true;
+  }
+
+  const preparedSongs = discoverChords
+    ? await prepareSongsForReplyFn(songs, {})
+    : songs.map((song) => ({ ...song }));
+
+  let hasUpdates = false;
+  if (typeof stateStore.setSongChordsUrl === 'function') {
+    for (const song of preparedSongs) {
+      const chordsUrl = String(song?.chords_url || '').trim();
+      if (!chordsUrl) continue;
+      if (stateStore.setSongChordsUrl(song.message_id, chordsUrl)) {
+        hasUpdates = true;
+      }
+    }
+  }
+  if (hasUpdates) {
+    await stateStore.queueSave();
+  }
+
+  await sendBotMessage(chat, formatSongsReply(preparedSongs, { includeChords: true }));
+  return true;
 }
 
 function resolveSongFromAction(stateStore, action, activeContext) {
@@ -617,7 +675,15 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
   throw new Error(`Unhandled agent action: ${action.action}`);
 }
 
-async function handleAgentMessage({ chat, stateStore, config, record, interpretMessageFn = interpretMessage }) {
+async function handleAgentMessage({
+  chat,
+  stateStore,
+  config,
+  record,
+  recentMessages = [],
+  interpretMessageFn = interpretMessage,
+  prepareSongsForReplyFn = prepareSongsForReply
+}) {
   const handling = shouldHandleMessage(record, config.triggerText);
   const replyContext = buildAgentReplyContext(stateStore, record);
   if (!handling.shouldHandle && !replyContext) return false;
@@ -630,6 +696,17 @@ async function handleAgentMessage({ chat, stateStore, config, record, interpretM
     return true;
   }
 
+  if (replyContext?.results?.length && isChordsReplyRequest(messageText)) {
+    return sendReplyContextChords({
+      stateStore,
+      chat,
+      record,
+      replyContext,
+      discoverChords: config.discoverChords !== false,
+      prepareSongsForReplyFn
+    });
+  }
+
   try {
     const action = await interpretMessageFn({
       provider: config.llmProvider,
@@ -638,6 +715,7 @@ async function handleAgentMessage({ chat, stateStore, config, record, interpretM
       model: config.llmModel,
       messageText,
       replyContext,
+      recentMessages,
       currentDate: CURRENT_DATE
     });
 
@@ -713,6 +791,7 @@ async function bootstrap() {
   });
 
   const pendingMessages = [];
+  const recentMessagesByChat = new Map();
   let readyToProcess = false;
   const startupTimeoutMs = 60000;
   const processedMessageIds = new Set();
@@ -734,13 +813,38 @@ async function bootstrap() {
     return true;
   }
 
+  function getRecentMessagesForChat(chatId) {
+    const normalizedChatId = String(chatId || '').trim();
+    if (!normalizedChatId) return [];
+    return recentMessagesByChat.get(normalizedChatId) || [];
+  }
+
+  function rememberRecentMessage(record) {
+    const normalizedChatId = String(record?.chatId || '').trim();
+    const text = String(record?.text || '').trim();
+    if (!normalizedChatId || !text) return;
+    if (/^\u200f?🤖(?:\s|$)/u.test(text)) return;
+
+    const existing = recentMessagesByChat.get(normalizedChatId) || [];
+    existing.push({
+      text,
+      fromMe: Boolean(record?.fromMe),
+      sender: String(record?.sender || record?.from || '').trim()
+    });
+    if (existing.length > 3) {
+      existing.splice(0, existing.length - 3);
+    }
+    recentMessagesByChat.set(normalizedChatId, existing);
+  }
+
   async function handleLiveMessage(record) {
     const chat = record.chat;
     if (!isMessageInTargetGroup(record, config, chat)) {
       return;
     }
 
-    await handleAgentMessage({ chat, stateStore, config, record });
+    const recentMessages = buildRecentMessageContext(getRecentMessagesForChat(record.chatId));
+    await handleAgentMessage({ chat, stateStore, config, record, recentMessages });
   }
 
   async function processMessageObject(message, source) {
@@ -799,10 +903,12 @@ async function bootstrap() {
 
     if (!readyToProcess) {
       pendingMessages.push(record);
+      rememberRecentMessage(record);
       return;
     }
 
     await handleLiveMessage(record);
+    rememberRecentMessage(record);
   }
 
   async function finalizeStartup() {
@@ -874,6 +980,8 @@ module.exports = {
   buildAgentReplyContext,
   buildAgentFailureReply,
   buildClarifyReply,
+  buildRecentMessageContext,
+  isChordsReplyRequest,
   handleAgentMessage,
   executeAgentAction
 };

@@ -169,11 +169,12 @@ function extractJsonBlock(text) {
   return null;
 }
 
-function buildAgentPrompt({ messageText, replyContext, currentDate }) {
+function buildAgentPrompt({ messageText, replyContext, recentMessages, currentDate }) {
   return JSON.stringify({
     supported_search_fields: SUPPORTED_SEARCH_FIELDS,
     current_date: currentDate,
     user_message: messageText,
+    recent_messages: Array.isArray(recentMessages) ? recentMessages : [],
     reply_context: replyContext || null
   });
 }
@@ -923,6 +924,7 @@ async function interpretMessage({
   model,
   messageText,
   replyContext,
+  recentMessages,
   currentDate,
   requestFn,
   maxRetries = DEFAULT_MAX_RETRIES
@@ -940,7 +942,7 @@ async function interpretMessage({
     throw new Error('LLM base URL is required');
   }
 
-  const prompt = buildAgentPrompt({ messageText, replyContext, currentDate });
+  const prompt = buildAgentPrompt({ messageText, replyContext, recentMessages, currentDate });
 
   return runWithAgentConcurrencyLimit(async () => {
     let attempt = 0;
