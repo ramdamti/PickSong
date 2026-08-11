@@ -480,7 +480,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
   if (action.action === 'search_songs') {
     const hardMatchCount = countHardFilterMatches(songs, action.query || {});
     console.log(
-      `[search] keys_type_hard=${JSON.stringify(action.query?.requirements?.keys_type_any || [])} keys_type_pref=${JSON.stringify(action.query?.preferences?.keys_type_any || [])} keys_type_excluded=${JSON.stringify(action.query?.exclusions?.keys_type_any || [])} keys_difficulty=${JSON.stringify(action.query?.preferences?.keys_difficulty || action.query?.requirements?.keys_difficulty || null)} hard_matches=${hardMatchCount}`
+      `[search] artist=${JSON.stringify(action.query?.requirements?.artist || null)} language=${JSON.stringify(action.query?.requirements?.language || null)} genres=${JSON.stringify(action.query?.requirements?.genres || [])} keys_type_hard=${JSON.stringify(action.query?.requirements?.keys_type_any || [])} keys_type_pref=${JSON.stringify(action.query?.preferences?.keys_type_any || [])} keys_type_excluded=${JSON.stringify(action.query?.exclusions?.keys_type_any || [])} keys_difficulty=${JSON.stringify(action.query?.preferences?.keys_difficulty || action.query?.requirements?.keys_difficulty || null)} hard_matches=${hardMatchCount}`
     );
     const excludedSongIds =
       action.query?.avoid_previous_results && activeContext.context
