@@ -1,7 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { SYSTEM_PROMPT, buildAgentPrompt, interpretMessage, getAgentUsageStats } = require('../src/llm');
+const {
+  SYSTEM_PROMPT,
+  FALLBACK_SYSTEM_PROMPT,
+  buildAgentPrompt,
+  buildFallbackAgentPrompt,
+  interpretMessage,
+  getAgentUsageStats
+} = require('../src/llm');
 
 test('SYSTEM_PROMPT stays compact and stable', () => {
   assert.ok(SYSTEM_PROMPT.length < 5200);
@@ -44,6 +51,22 @@ test('buildAgentPrompt includes reply context without full database payloads', (
   assert.match(SYSTEM_PROMPT, /remove_song/);
   assert.doesNotMatch(prompt, /"songs":\s*\[/);
   assert.doesNotMatch(prompt, /history/i);
+});
+
+test('buildFallbackAgentPrompt keeps only compact context', () => {
+  const prompt = buildFallbackAgentPrompt({
+    messageText: 'תביא שירים של רוקפור',
+    quotedText: 'מוזיקה ישראלית',
+    replyContext: {
+      results: [{ index: 2, song_id: 'song_b', title: 'חור בלבנה', artist: 'Rockfour' }]
+    },
+    currentDate: '2026-08-11'
+  });
+
+  assert.match(prompt, /quoted_message/);
+  assert.match(prompt, /reply_context/);
+  assert.doesNotMatch(prompt, /supported_search_fields/);
+  assert.doesNotMatch(prompt, /recent_messages/);
 });
 
 test('interpretMessage validates the structured response from the provider', async () => {
@@ -1286,4 +1309,82 @@ test('interpretMessage retries one rate limit response and records usage counter
   assert.ok(stats.dayInputTokens >= 120);
   assert.ok(stats.dayCachedTokens >= 80);
   assert.ok(stats.rateLimitResponses >= 1);
+});
+
+test('interpretMessage retries once with compact prompt after json_validate_failed', async () => {
+  let callCount = 0;
+  const systemPrompts = [];
+  const userPrompts = [];
+
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'תביא שירים של רוקפור',
+    quotedText: '',
+    replyContext: null,
+    recentMessages: [],
+    currentDate: '2026-08-11',
+    requestFn: async (_url, options) => {
+      callCount += 1;
+      const payload = JSON.parse(options.body);
+      systemPrompts.push(payload.messages[0].content);
+      userPrompts.push(payload.messages[1].content);
+
+      if (callCount === 1) {
+        return {
+          ok: false,
+          status: 400,
+          statusText: 'Bad Request',
+          headers: {
+            get() {
+              return null;
+            }
+          },
+          async text() {
+            return JSON.stringify({
+              error: {
+                code: 'json_validate_failed',
+                message: 'Failed to validate JSON.'
+              }
+            });
+          }
+        };
+      }
+
+      return {
+        ok: true,
+        async json() {
+          return {
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    action: 'search_songs',
+                    query: {
+                      requirements: {
+                        artist: 'Rockfour'
+                      },
+                      preferences: {},
+                      exclusions: {},
+                      limit: 5
+                    }
+                  })
+                }
+              }
+            ]
+          };
+        }
+      };
+    }
+  });
+
+  assert.equal(callCount, 2);
+  assert.equal(systemPrompts[0], SYSTEM_PROMPT);
+  assert.equal(systemPrompts[1], FALLBACK_SYSTEM_PROMPT);
+  assert.match(userPrompts[0], /supported_search_fields/);
+  assert.doesNotMatch(userPrompts[1], /supported_search_fields/);
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.requirements.artist, 'רוקפור');
 });

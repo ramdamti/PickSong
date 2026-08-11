@@ -41,6 +41,18 @@ const SYSTEM_PROMPT = [
   'Do not return formatted WhatsApp replies.'
 ].join('\n');
 
+const FALLBACK_SYSTEM_PROMPT = [
+  'You are a JSON-only semantic interpreter for a WhatsApp bot for a band.',
+  'Return exactly one JSON object. No prose. No markdown.',
+  'Never invent a song_id.',
+  'Allowed actions: search_songs, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, clarify.',
+  'Use reply_context result indexes when relevant.',
+  'If the user asks for songs by an artist, preserve the artist strongly.',
+  'If the user asks for a list of songs, use search_songs.',
+  'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
+  'Return only valid JSON.'
+].join('\n');
+
 const SUPPORTED_SEARCH_FIELDS = {
   requirements: ['artist', 'language', 'genres', 'feel', 'difficulty', 'keys_type_any', 'has_keys', 'excludeRejected', 'excludePlayed'],
   preferences: ['genres', 'feel', 'difficulty', 'original_vocal', 'singer_fit', 'vocal_range', 'vocal_energy', 'band_energy', 'groove_level', 'guitar_difficulty', 'bass_difficulty', 'drums_difficulty', 'keys_difficulty', 'keys_role', 'keys_type_any', 'bass_interest', 'crowd_friendly', 'untried'],
@@ -181,6 +193,20 @@ function buildAgentPrompt({ messageText, quotedText, replyContext, recentMessage
   });
 }
 
+function buildFallbackAgentPrompt({ messageText, quotedText, replyContext, currentDate }) {
+  return JSON.stringify({
+    current_date: currentDate,
+    user_message: messageText,
+    quoted_message: quotedText ? String(quotedText).trim() : null,
+    reply_context: replyContext || null
+  });
+}
+
+function isJsonValidateFailedError(error) {
+  const message = String(error?.message || '');
+  return Number(error?.status) === 400 && /json_validate_failed/i.test(message);
+}
+
 function buildRateLimitError(response, bodyText) {
   const retryAfterHeader = response.headers.get('retry-after');
   const retryAfterMs = retryAfterHeader ? Number.parseFloat(retryAfterHeader) * 1000 : null;
@@ -200,6 +226,7 @@ async function callOpenAiCompatibleChat({
   apiKey,
   model,
   prompt,
+  systemPrompt = SYSTEM_PROMPT,
   requestFn = fetch,
   maxCompletionTokens = DEFAULT_MAX_COMPLETION_TOKENS
 }) {
@@ -219,7 +246,7 @@ async function callOpenAiCompatibleChat({
       messages: [
         {
           role: 'system',
-          content: SYSTEM_PROMPT
+          content: systemPrompt
         },
         {
           role: 'user',
@@ -1116,9 +1143,11 @@ async function interpretMessage({
   }
 
   const prompt = buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate });
+  const fallbackPrompt = buildFallbackAgentPrompt({ messageText, quotedText, replyContext, currentDate });
 
   return runWithAgentConcurrencyLimit(async () => {
     let attempt = 0;
+    let usedJsonValidateFallback = false;
     // Retry only before any deterministic mutation happens. The mutation executes after this function returns.
     while (true) {
       try {
@@ -1126,7 +1155,8 @@ async function interpretMessage({
           baseUrl,
           apiKey,
           model,
-          prompt,
+          prompt: usedJsonValidateFallback ? fallbackPrompt : prompt,
+          systemPrompt: usedJsonValidateFallback ? FALLBACK_SYSTEM_PROMPT : SYSTEM_PROMPT,
           requestFn
         });
         const action = validateAgentAction(
@@ -1137,6 +1167,12 @@ async function interpretMessage({
         );
         return action;
       } catch (error) {
+        if (isJsonValidateFailedError(error) && !usedJsonValidateFallback) {
+          usedJsonValidateFallback = true;
+          console.warn('[agent] retrying with compact fallback prompt after json_validate_failed');
+          continue;
+        }
+
         if (!error?.rateLimited || attempt >= maxRetries) {
           throw error;
         }
@@ -1152,10 +1188,12 @@ async function interpretMessage({
 
 module.exports = {
   SYSTEM_PROMPT,
+  FALLBACK_SYSTEM_PROMPT,
   MAX_CONCURRENT_AGENT_CALLS,
   DEFAULT_MAX_COMPLETION_TOKENS,
   extractJsonBlock,
   buildAgentPrompt,
+  buildFallbackAgentPrompt,
   interpretMessage,
   callOpenAiCompatibleChat,
   getAgentUsageStats
