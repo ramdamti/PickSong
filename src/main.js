@@ -257,6 +257,98 @@ function isChordsReplyRequest(messageText) {
   return /(?:^|[\s,.:!?-])(אקורדים|אקורד|chords?)(?:$|[\s,.:!?-])/iu.test(normalized);
 }
 
+function parseSongIdentityText(text) {
+  const source = String(text || '').trim();
+  if (!source) return null;
+
+  const dashSeparatorIndex = source.lastIndexOf(' - ');
+  if (dashSeparatorIndex > 0) {
+    const songTitle = source.slice(0, dashSeparatorIndex).trim();
+    const artist = source.slice(dashSeparatorIndex + 3).trim();
+    if (songTitle && artist) {
+      return { song_title: songTitle, artist, confidence: 0.5 };
+    }
+  }
+
+  const hebrewSeparatorIndex = source.lastIndexOf(' של ');
+  if (hebrewSeparatorIndex > 0) {
+    const songTitle = source.slice(0, hebrewSeparatorIndex).trim();
+    const artist = source.slice(hebrewSeparatorIndex + 4).trim();
+    if (songTitle && artist) {
+      return { song_title: songTitle, artist, confidence: 0.5 };
+    }
+  }
+
+  const englishSplit = source.match(/^(.*?)\s+by\s+(.+)$/i);
+  if (englishSplit) {
+    const songTitle = String(englishSplit[1] || '').trim();
+    const artist = String(englishSplit[2] || '').trim();
+    if (songTitle && artist) {
+      return { song_title: songTitle, artist, confidence: 0.5 };
+    }
+  }
+
+  return null;
+}
+
+function inferDirectAddSongFromMessage(messageText) {
+  const source = String(messageText || '').trim();
+  if (!source) return null;
+
+  const explicitAdd = source.match(/^(?:תוסיף|תוסיפי|להוסיף|הוסף|add)\s+(.+)$/iu);
+  if (!explicitAdd) return null;
+
+  const candidate = String(explicitAdd[1] || '').trim();
+  if (!candidate || /^(?:למאגר|לרשימה|למאגר השירים)$/iu.test(candidate)) {
+    return null;
+  }
+
+  return parseSongIdentityText(candidate);
+}
+
+function isGenericAddToLibraryRequest(messageText) {
+  const source = String(messageText || '').trim();
+  if (!source) return false;
+
+  return /^(?:תוסיף|תוסיפי|להוסיף|הוסף|add)(?:\s+(?:למאגר|לרשימה|למאגר השירים))?\s*$/iu.test(source);
+}
+
+function inferRecentAddSongPayload(messageText, recentMessages) {
+  const direct = inferDirectAddSongFromMessage(messageText);
+  if (direct) {
+    return direct;
+  }
+
+  if (!isGenericAddToLibraryRequest(messageText)) {
+    return null;
+  }
+
+  const items = Array.isArray(recentMessages) ? recentMessages : [];
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const candidate = parseSongIdentityText(items[index]?.text || '');
+    if (candidate) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function buildAgentMessageText(messageText, recentMessages) {
+  const source = String(messageText || '').trim();
+  const directAddSong = inferDirectAddSongFromMessage(source);
+  if (directAddSong) {
+    return source;
+  }
+
+  const inferredAddSong = inferRecentAddSongPayload(source, recentMessages);
+  if (!inferredAddSong) {
+    return source;
+  }
+
+  return `תוסיף ${inferredAddSong.song_title} של ${inferredAddSong.artist}`;
+}
+
 function buildRecentMessageContext(records, limit = 3) {
   const items = Array.isArray(records) ? records : [];
   return items
@@ -399,6 +491,34 @@ function sanitizeSongUpdates(song, updates) {
     ...sanitized,
     normalized_title: sanitized.song_title ? normalizeText(sanitized.song_title) : song.normalized_title,
     normalized_artist: sanitized.artist ? normalizeText(sanitized.artist) : song.normalized_artist
+  };
+}
+
+function buildSongForInsert(rawSong, record) {
+  const song = rawSong && typeof rawSong === 'object' ? rawSong : {};
+  const songTitle = String(song.song_title || '').trim();
+  const artist = song.artist === null || song.artist === undefined ? null : String(song.artist).trim();
+
+  return {
+    ...song,
+    message_id: String(song.message_id || `agent:add:${Date.now()}`).trim(),
+    source_text: String(song.source_text || record?.text || '').trim(),
+    song_title: songTitle,
+    artist,
+    language: song.language ? String(song.language).trim().toLowerCase() : null,
+    chords_url: song.chords_url ? String(song.chords_url).trim() : null,
+    confidence: Number.isFinite(Number(song.confidence)) ? Number(song.confidence) : 0.5,
+    genres: Array.isArray(song.genres)
+      ? Array.from(new Set(song.genres.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)))
+      : [],
+    difficulty: song.difficulty ? String(song.difficulty).trim().toLowerCase() : null,
+    feel: song.feel ? String(song.feel).trim().toLowerCase() : null,
+    used: Boolean(song.used),
+    created_at: song.created_at || new Date().toISOString(),
+    normalized_title: normalizeText(songTitle),
+    normalized_artist: normalizeText(artist),
+    ai_metadata: song.ai_metadata && typeof song.ai_metadata === 'object' ? song.ai_metadata : undefined,
+    band_status: song.band_status && typeof song.band_status === 'object' ? song.band_status : undefined
   };
 }
 
@@ -561,14 +681,8 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
   }
 
   if (action.action === 'add_song') {
-    const inserted = stateStore.addSong({
-      ...action.song,
-      message_id: `agent:add:${Date.now()}`,
-      source_text: record.text,
-      normalized_title: normalizeText(action.song.song_title),
-      normalized_artist: normalizeText(action.song.artist),
-      created_at: new Date().toISOString()
-    });
+    const songToInsert = buildSongForInsert(action.song, record);
+    const inserted = stateStore.addSong(songToInsert);
 
     if (!inserted) {
       await sendBotMessage(chat, '\u05d4\u05e9\u05d9\u05e8 \u05db\u05d1\u05e8 \u05e7\u05d9\u05d9\u05dd.');
@@ -576,7 +690,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
     }
 
     await stateStore.queueSave();
-    await sendBotMessage(chat, `\u05d4\u05d5\u05e1\u05e4\u05ea\u05d9: ${action.song.song_title}${action.song.artist ? ` - ${action.song.artist}` : ''}`);
+    await sendBotMessage(chat, `\u05d4\u05d5\u05e1\u05e4\u05ea\u05d9: ${songToInsert.song_title}${songToInsert.artist ? ` - ${songToInsert.artist}` : ''}`);
     return;
   }
 
@@ -714,23 +828,24 @@ async function handleAgentMessage({
   }
 
   try {
+    const agentMessageText = buildAgentMessageText(messageText, recentMessages);
     const action = await interpretMessageFn({
       provider: config.llmProvider,
       baseUrl: config.llmBaseUrl,
       apiKey: config.llmApiKey,
       model: config.llmModel,
-      messageText,
+      messageText: agentMessageText,
       replyContext,
       recentMessages,
       currentDate: CURRENT_DATE
     });
 
-    if (shouldBlockGenericSearchFallback(action, { messageText, replyContext })) {
+    if (shouldBlockGenericSearchFallback(action, { messageText: agentMessageText, replyContext })) {
       await sendBotMessage(chat, 'איזה שירים אתה רוצה?');
       return true;
     }
 
-    await executeAgentAction({ action, stateStore, chat, record, messageText, replyContext });
+    await executeAgentAction({ action, stateStore, chat, record, messageText: agentMessageText, replyContext });
   } catch (error) {
     console.error('[agent] failed:', error);
     await sendBotMessage(chat, buildAgentFailureReply(error));

@@ -100,6 +100,60 @@ test('handleAgentMessage routes wake-word add_song requests through the agent', 
   assert.deepEqual(sentMessages, [`${BOT_PREFIX}\u05d4\u05d5\u05e1\u05e4\u05ea\u05d9: Zombie - The Cranberries`]);
 });
 
+test('handleAgentMessage accepts sparse add_song payloads for explicit add requests', async () => {
+  const sentMessages = [];
+  const stateStore = {
+    addSong(song) {
+      this.song = song;
+      return true;
+    },
+    async queueSave() {},
+    getSongs() {
+      return [];
+    },
+    getResultMessage() {
+      return null;
+    },
+    getLastResults() {
+      return null;
+    }
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+      return { id: { _serialized: 'wamid-1b' } };
+    }
+  };
+
+  await handleAgentMessage({
+    chat,
+    stateStore,
+    config: {
+      triggerText: '\u05d1\u05d5\u05d8',
+      llmProvider: 'groq',
+      llmBaseUrl: 'https://example.com',
+      llmApiKey: 'test',
+      llmModel: 'test-model'
+    },
+    record: {
+      text: 'בוט תוסיף wish you where here של pink floyd',
+      quoted: { fromMe: false },
+      chatId: 'chat-1'
+    },
+    interpretMessageFn: async () => ({
+      action: 'add_song',
+      song: {
+        song_title: 'wish you where here',
+        artist: 'pink floyd'
+      }
+    })
+  });
+
+  assert.equal(stateStore.song.song_title, 'wish you where here');
+  assert.equal(stateStore.song.artist, 'pink floyd');
+  assert.equal(sentMessages.length, 1);
+});
+
 test('executeAgentAction get_band_failure_reasons summarizes bad songs with reasons', async () => {
   const sentMessages = [];
   const badSong = createSong({

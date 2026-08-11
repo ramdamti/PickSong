@@ -546,6 +546,40 @@ test('interpretMessage preserves canonical English artist mappings for known Heb
   assert.equal(action.query.requirements.artist, 'Pink Floyd');
 });
 
+test('interpretMessage rewrites clarify into add_song for explicit add requests with song and artist', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'תוסיף wish you where here של pink floyd',
+    replyContext: null,
+    recentMessages: [],
+    currentDate: '2026-08-11',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'clarify',
+                  question: 'איזה שירים אתה רוצה?'
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'add_song');
+  assert.equal(action.song.song_title, 'wish you where here');
+  assert.equal(action.song.artist, 'pink floyd');
+});
+
 test('interpretMessage infers Hebrew language constraints from the message text', async () => {
   const action = await interpretMessage({
     provider: 'groq',

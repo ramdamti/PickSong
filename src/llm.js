@@ -503,6 +503,43 @@ function shouldOverrideArtistRequirement({ messageText, inferredArtist, existing
   return true;
 }
 
+function inferAddSongPayload(messageText) {
+  const source = String(messageText || '').trim();
+  if (!source) return null;
+
+  const cleaned = source
+    .replace(/^(?:בוט\s*[:,\-]?\s*)?/iu, '')
+    .trim();
+
+  const addMatch = cleaned.match(/^(?:תוסיף|תוסיפי|להוסיף|add)\s+(.+)$/iu);
+  if (!addMatch) return null;
+
+  const candidate = String(addMatch[1] || '').trim();
+  if (!candidate) return null;
+
+  let songTitle = '';
+  let artist = '';
+  const hebrewSeparator = candidate.lastIndexOf(' של ');
+  if (hebrewSeparator > 0) {
+    songTitle = candidate.slice(0, hebrewSeparator).trim();
+    artist = candidate.slice(hebrewSeparator + ' של '.length).trim();
+  } else {
+    const englishSplit = candidate.match(/^(.*?)\s+by\s+(.+)$/i);
+    if (englishSplit) {
+      songTitle = englishSplit[1].trim();
+      artist = englishSplit[2].trim();
+    }
+  }
+
+  if (!songTitle || !artist) return null;
+
+  return {
+    song_title: songTitle,
+    artist,
+    confidence: 0.5
+  };
+}
+
 function shouldAvoidPreviousResults(messageText, replyContext) {
   if (!replyContext?.results?.length) return false;
   const source = String(messageText || '').trim().toLowerCase();
@@ -862,6 +899,16 @@ function normalizeAgentAction(action, { messageText, replyContext }) {
 
   if (action.action === 'update_song') {
     return normalizeUpdateSongAction(action, messageText, replyContext);
+  }
+
+  if (action.action === 'clarify') {
+    const inferredAddSong = inferAddSongPayload(messageText);
+    if (inferredAddSong) {
+      return {
+        action: 'add_song',
+        song: inferredAddSong
+      };
+    }
   }
 
   if (action.action !== 'search_songs' && action.action !== 'find_similar_songs') {

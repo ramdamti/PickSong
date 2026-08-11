@@ -206,6 +206,30 @@ function validateSong(value, options = {}) {
   };
 }
 
+function validateAddSongPayload(value) {
+  const song = ensureObject(value, 'song');
+  return {
+    ...song,
+    song_id: song.song_id ? String(song.song_id).trim() : null,
+    song_title: ensureString(song.song_title, 'song.song_title'),
+    artist: ensureString(song.artist, 'song.artist'),
+    language: song.language === undefined || song.language === null || song.language === ''
+      ? null
+      : ensureString(song.language, 'song.language').toLowerCase(),
+    chords_url: song.chords_url === undefined || song.chords_url === null || song.chords_url === ''
+      ? null
+      : ensureString(song.chords_url, 'song.chords_url'),
+    confidence: Number.isFinite(Number(song.confidence)) ? Number(song.confidence) : 0.5,
+    genres: Array.isArray(song.genres)
+      ? ensureStringArray(song.genres, 'song.genres').map((item) => item.toLowerCase())
+      : [],
+    difficulty: song.difficulty ? ensureEnum(song.difficulty, DIFFICULTIES, 'song.difficulty') : null,
+    feel: song.feel ? ensureEnum(song.feel, FEELS, 'song.feel') : null,
+    ai_metadata: song.ai_metadata ? validateAiMetadata(song.ai_metadata) : undefined,
+    band_status: song.band_status ? validateBandStatus(song.band_status) : undefined
+  };
+}
+
 function validateSongQuery(value) {
   const query = ensureObject(value, 'query');
   const validated = { ...query };
@@ -248,18 +272,7 @@ function validateAgentAction(value) {
   }
 
   if (name === 'add_song') {
-    validated.song = validateSong({
-      ...action.song,
-      band_status: action.song?.band_status || {
-        fit: 'unknown',
-        issues: [],
-        notes: '',
-        attempts: 0,
-        last_reviewed: null,
-        last_rehearsed: null,
-        last_played: null
-      }
-    }, { requireSongId: false });
+    validated.song = validateAddSongPayload(action.song || {});
     return validated;
   }
 
@@ -351,6 +364,7 @@ module.exports = {
   validateBandStatus,
   validateResultContext,
   validateSong,
+  validateAddSongPayload,
   validateSongQuery,
   validateAgentAction
 };
