@@ -289,6 +289,28 @@ test('searchSongs matches Hebrew spelling variants for artist names', () => {
   assert.deepEqual(results.map((song) => song.song_title), ['שינויים בהרגלי הצריחה']);
 });
 
+test('searchSongs matches a single-token Hebrew artist variant inside a longer stored artist name', () => {
+  const natashaSong = createSong({
+    song_title: '\u05d0\u05dd \u05db\u05d1\u05e8 \u05dc\u05d1\u05d3',
+    artist: '\u05d4\u05d7\u05d1\u05e8\u05d9\u05dd \u05e9\u05dc \u05e0\u05d8\u05e9\u05d4',
+    language: 'he'
+  });
+  const otherSong = createSong({
+    song_title: '\u05d2\u05e9\u05dd',
+    artist: '\u05de\u05d0\u05d9\u05e8 \u05d1\u05e0\u05d0\u05d9',
+    language: 'he'
+  });
+
+  const results = searchSongs([natashaSong, otherSong], {
+    requirements: { artist: '\u05e0\u05d8\u05d0\u05e9\u05d4' },
+    preferences: {},
+    exclusions: {},
+    limit: 5
+  });
+
+  assert.deepEqual(results.map((song) => song.song_title), ['\u05d0\u05dd \u05db\u05d1\u05e8 \u05dc\u05d1\u05d3']);
+});
+
 test('searchSongs matches partial Hebrew artist requests against multi-word and compound artist names', () => {
   const fortischarofSong = createSong({
     song_title: 'ניצוצות',

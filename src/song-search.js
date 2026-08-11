@@ -16,9 +16,9 @@ function normalizeScalar(value) {
 function normalizeArtistFuzzy(value) {
   return normalizeScalar(value)
     .replace(/[״"'`´׳.,/\\()-]+/g, ' ')
-    .replace(/\bו\b/g, ' ')
+    .replace(/\b\u05D5\b/g, ' ')
     .replace(/\s+/g, ' ')
-    .replace(/אשה\b/g, 'שה')
+    .replace(/\u05D0\u05E9\u05D4$/u, '\u05E9\u05D4')
     .trim();
 }
 
@@ -93,6 +93,20 @@ function artistMatches(songArtist, requestedArtist, song = null) {
     songValue === requestedValue ||
     songValue.includes(requestedValue) ||
     requestedValue.includes(songValue)
+  ) {
+    return true;
+  }
+
+  const fuzzySongValue = normalizeArtistFuzzy(songArtist);
+  const fuzzyRequestedValue = normalizeArtistFuzzy(requestedArtist);
+  if (
+    fuzzySongValue &&
+    fuzzyRequestedValue &&
+    (
+      fuzzySongValue === fuzzyRequestedValue ||
+      fuzzySongValue.includes(fuzzyRequestedValue) ||
+      fuzzyRequestedValue.includes(fuzzySongValue)
+    )
   ) {
     return true;
   }

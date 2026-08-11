@@ -504,7 +504,13 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
               : afterPreviousFilter;
           })()
         : afterPreviousFilter;
-    const matches = searchSongs(candidateSongs, action.query || {});
+    let matches = searchSongs(candidateSongs, action.query || {});
+    if (matches.length === 0 && hardMatchCount > 0) {
+      matches = searchSongs(afterPreviousFilter, action.query || {});
+    }
+    if (matches.length === 0 && hardMatchCount > 0 && afterPreviousFilter !== songs) {
+      matches = searchSongs(songs, action.query || {});
+    }
     await sendSongsReply({ chat, stateStore, chatId: record.chatId, songs: matches });
     return;
   }

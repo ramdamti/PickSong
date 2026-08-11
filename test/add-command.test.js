@@ -256,6 +256,61 @@ test('executeAgentAction search_songs rotates away from recently recommended son
   assert.match(sentMessages[0], /1979|The One I Love/);
 });
 
+test('executeAgentAction search_songs falls back to broader candidates when filtered candidates return no songs', async () => {
+  const sentMessages = [];
+  const fortischarofSong = createSong({ song_id: 'song_a', song_title: 'ניצוצות', artist: 'פורטיסחרוף', language: 'he' });
+  const fortisSong = createSong({ song_id: 'song_b', song_title: 'אמריקה', artist: 'רמי פורטיס', language: 'he' });
+  const stateStore = {
+    getSongs() {
+      return [fortischarofSong, fortisSong];
+    },
+    getRecentRecommendations() {
+      return ['song_a', 'song_b'];
+    },
+    getResultMessage() {
+      return null;
+    },
+    getLastResults() {
+      return null;
+    },
+    setLastResults() {
+      return true;
+    },
+    storeResultMessage() {
+      return true;
+    },
+    recordRecommendations() {
+      return true;
+    },
+    async queueSave() {}
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+      return { id: { _serialized: 'wamid-3b' } };
+    }
+  };
+
+  await executeAgentAction({
+    action: {
+      action: 'search_songs',
+      query: {
+        requirements: { artist: 'פורטיס' },
+        limit: 1
+      }
+    },
+    stateStore,
+    chat,
+    record: {
+      chatId: 'chat-1',
+      quoted: { id: '' }
+    }
+  });
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /פורטיס|ניצוצות|אמריקה/);
+});
+
 test('executeAgentAction updates feedback by result index using stored context', async () => {
   const sentMessages = [];
   let saved = false;
