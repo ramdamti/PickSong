@@ -817,16 +817,22 @@ async function bootstrap() {
     console.log('[whatsapp] watcher is live');
   }
 
-  const handleIncomingMessage = async (message) => {
+  const handleIncomingMessage = async (message, source) => {
     try {
-      await processMessageObject(message, 'event');
+      await processMessageObject(message, source);
     } catch (error) {
       console.error('[message] failed:', error);
     }
   };
 
-  client.on('message_create', handleIncomingMessage);
-  client.on('message', handleIncomingMessage);
+  client.on('message_create', (message) => {
+    if (!message?.fromMe) return;
+    void handleIncomingMessage(message, 'message_create');
+  });
+  client.on('message', (message) => {
+    if (message?.fromMe) return;
+    void handleIncomingMessage(message, 'message');
+  });
   console.log('[whatsapp] starting client');
   const readyPromise = waitForReady(client);
   readyPromise.then(() => {
