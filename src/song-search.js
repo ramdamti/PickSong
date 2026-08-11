@@ -13,6 +13,42 @@ function normalizeScalar(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function normalizeArtistFuzzy(value) {
+  return normalizeScalar(value)
+    .replace(/[״"'`´׳.,/\\()-]+/g, ' ')
+    .replace(/\bו\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/אשה\b/g, 'שה')
+    .trim();
+}
+
+function tokenizeArtistFuzzy(value) {
+  return normalizeArtistFuzzy(value)
+    .split(' ')
+    .filter(Boolean);
+}
+
+function artistTokenOverlap(songArtist, requestedArtist) {
+  const songTokens = tokenizeArtistFuzzy(songArtist);
+  const requestedTokens = tokenizeArtistFuzzy(requestedArtist);
+  if (!songTokens.length || !requestedTokens.length) return 0;
+
+  let matches = 0;
+  for (const requestedToken of requestedTokens) {
+    if (
+      songTokens.some((songToken) =>
+        songToken === requestedToken ||
+        songToken.includes(requestedToken) ||
+        requestedToken.includes(songToken)
+      )
+    ) {
+      matches += 1;
+    }
+  }
+
+  return matches / requestedTokens.length;
+}
+
 const ARTIST_ALIAS_MAP = new Map([
   ['פינק פלויד', 'pink floyd'],
   ['פינקפלויד', 'pink floyd'],
@@ -63,6 +99,10 @@ function artistMatches(songArtist, requestedArtist, song = null) {
 
   const requestedScript = detectScriptLanguage(requestedArtist);
   if (requestedScript === 'he') {
+    if (artistTokenOverlap(songArtist, requestedArtist) >= 0.6) {
+      return true;
+    }
+
     const sourceText = normalizeScalar(song?.source_text || song?.sourceText || '');
     if (sourceText && sourceText.includes(normalizeScalar(requestedArtist))) {
       return true;

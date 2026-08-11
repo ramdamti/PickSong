@@ -267,6 +267,58 @@ test('searchSongs can match a Hebrew artist request from catalog source_text eve
   assert.deepEqual(results.map((song) => song.song_title), ['Some Song']);
 });
 
+test('searchSongs matches Hebrew spelling variants for artist names', () => {
+  const natashaSong = createSong({
+    song_title: 'שינויים בהרגלי הצריחה',
+    artist: 'החברים של נטשה',
+    language: 'he'
+  });
+  const otherSong = createSong({
+    song_title: 'גשם',
+    artist: 'מאיר בנאי',
+    language: 'he'
+  });
+
+  const results = searchSongs([natashaSong, otherSong], {
+    requirements: { artist: 'החברים של נטאשה' },
+    preferences: {},
+    exclusions: {},
+    limit: 5
+  });
+
+  assert.deepEqual(results.map((song) => song.song_title), ['שינויים בהרגלי הצריחה']);
+});
+
+test('searchSongs matches partial Hebrew artist requests against multi-word and compound artist names', () => {
+  const fortischarofSong = createSong({
+    song_title: 'ניצוצות',
+    artist: 'פורטיסחרוף',
+    language: 'he'
+  });
+  const fortisSong = createSong({
+    song_title: 'אמריקה',
+    artist: 'רמי פורטיס',
+    language: 'he'
+  });
+  const otherSong = createSong({
+    song_title: 'גשם',
+    artist: 'מאיר בנאי',
+    language: 'he'
+  });
+
+  const results = searchSongs([fortischarofSong, fortisSong, otherSong], {
+    requirements: { artist: 'פורטיס' },
+    preferences: {},
+    exclusions: {},
+    limit: 5
+  });
+
+  assert.deepEqual(
+    results.map((song) => song.song_title).sort((left, right) => left.localeCompare(right)),
+    ['אמריקה', 'ניצוצות'].sort((left, right) => left.localeCompare(right))
+  );
+});
+
 test('searchSongs randomizes equal-score songs instead of returning a fixed alphabetical order', () => {
   const songs = [
     createSong({ song_title: 'Alpha' }),
