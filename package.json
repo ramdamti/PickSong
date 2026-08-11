@@ -5,7 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/main.js",
-    "test": "node test/chords.test.js && node test/config.test.js && node test/llm.test.js && node test/schemas.test.js && node test/result-context.test.js && node test/state.test.js && node test/song-search.test.js && node test/main.test.js && node test/add-command.test.js && node test/whatsapp.test.js"
+    "test": "node test/chords.test.js && node test/config.test.js && node test/llm.test.js && node test/schemas.test.js && node test/result-context.test.js && node test/state.test.js && node test/song-search.test.js && node test/main.test.js && node test/add-command.test.js && node test/reply-context-route.test.js && node test/whatsapp.test.js"
   },
   "dependencies": {
     "qrcode-terminal": "^0.12.0",

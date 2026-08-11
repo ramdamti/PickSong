@@ -615,10 +615,12 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
 
 async function handleAgentMessage({ chat, stateStore, config, record, interpretMessageFn = interpretMessage }) {
   const handling = shouldHandleMessage(record, config.triggerText);
-  if (!handling.shouldHandle) return false;
-
   const replyContext = buildAgentReplyContext(stateStore, record);
-  const messageText = handling.messageText;
+  if (!handling.shouldHandle && !replyContext) return false;
+
+  const messageText = handling.shouldHandle
+    ? handling.messageText
+    : String(record?.text || '').trim();
   if (!messageText) {
     await sendBotMessage(chat, '\u05de\u05d4 \u05dc\u05d7\u05e4\u05e9?');
     return true;
