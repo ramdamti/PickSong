@@ -54,7 +54,7 @@ const SUPPORTED_SEARCH_FIELDS = {
 
 const MAX_CONCURRENT_AGENT_CALLS = 2;
 const DEFAULT_MAX_COMPLETION_TOKENS = 800;
-const DEFAULT_MAX_RETRIES = 1;
+const DEFAULT_MAX_RETRIES = 0;
 
 let activeAgentCalls = 0;
 const pendingAgentCalls = [];

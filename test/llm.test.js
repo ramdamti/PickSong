@@ -924,6 +924,7 @@ test('interpretMessage retries one rate limit response and records usage counter
     messageText: '\u05ea\u05df \u05dc\u05d9 \u05de\u05e9\u05d4\u05d5 \u05e7\u05e6\u05d1\u05d9',
     replyContext: null,
     currentDate: '2026-08-08',
+    maxRetries: 1,
     requestFn: async () => {
       callCount += 1;
       if (callCount === 1) {
