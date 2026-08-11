@@ -66,6 +66,7 @@ function summarizeMessageRouting(record, config) {
 }
 
 function shouldHandleMessage(record, triggerText = '\u05d1\u05d5\u05d8') {
+  const quotedText = String(record?.quoted?.text || record?.quotedText || '').trim();
   if (record?.fromMe && /^\u200f?🤖(?:\s|$)/u.test(String(record?.text || '').trim())) {
     return {
       shouldHandle: false,
@@ -80,6 +81,15 @@ function shouldHandleMessage(record, triggerText = '\u05d1\u05d5\u05d8') {
       shouldHandle: true,
       reason: 'wake_word',
       messageText: strippedText
+    };
+  }
+
+  const messageText = String(record?.text || '').trim();
+  if (/^\u200f?🤖(?:\s|$)/u.test(quotedText) && messageText) {
+    return {
+      shouldHandle: true,
+      reason: 'reply',
+      messageText
     };
   }
 

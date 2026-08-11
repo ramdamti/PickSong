@@ -48,6 +48,31 @@ test('shouldHandleMessage accepts direct bot requests and ignores raw reply mark
     shouldHandleMessage({ text: '\u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7', quoted: { fromMe: false } }, '\u05d1\u05d5\u05d8').shouldHandle,
     false
   );
+
+  assert.deepEqual(
+    shouldHandleMessage(
+      {
+        text: '\u05ea\u05df \u05de\u05d9\u05d3\u05e2 \u05e2\u05dc \u05d4\u05e9\u05d9\u05e8 \u05d4\u05d6\u05d4',
+        quoted: { fromMe: false, text: '\u200f🤖 wish you where here - Pink Floyd' }
+      },
+      '\u05d1\u05d5\u05d8'
+    ),
+    {
+      shouldHandle: true,
+      reason: 'reply',
+      messageText: '\u05ea\u05df \u05de\u05d9\u05d3\u05e2 \u05e2\u05dc \u05d4\u05e9\u05d9\u05e8 \u05d4\u05d6\u05d4'
+    }
+  );
+  assert.equal(
+    shouldHandleMessage(
+      {
+        text: '\u05ea\u05d5\u05e1\u05d9\u05e3',
+        quoted: { fromMe: false, text: 'wish you where here - Pink Floyd' }
+      },
+      '\u05d1\u05d5\u05d8'
+    ).shouldHandle,
+    false
+  );
 });
 
 test('buildAgentReplyContext returns stored numbered results only', () => {
