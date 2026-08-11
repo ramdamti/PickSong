@@ -465,6 +465,7 @@ function inferRequestedArtist(messageText) {
   if (!source) return null;
 
   const patterns = [
+    /^של\s+(.+)$/iu,
     /(?:^|\s)שירים?\s+של\s+(.+)$/iu,
     /(?:^|\s)תביא\s+שירים?\s+של\s+(.+)$/iu,
     /(?:^|\s)songs?\s+by\s+(.+)$/i,
@@ -759,6 +760,76 @@ function normalizeFeedbackUpdates(action, messageText) {
   }));
 }
 
+function inferCorrectionUpdates(messageText, replyContext) {
+  const source = String(messageText || '').trim();
+  if (!source) return {};
+
+  let corrected = source
+    .replace(/^(?:בוט\s*[:,\-]?\s*)?/iu, '')
+    .replace(/^(?:תתקן|תקן|תעדכן|עדכן|שנה)\s+(?:את\s+)?\d+\s+(?:ל|ל-)\s*/iu, '')
+    .replace(/^(?:האמן\s+של\s+\d+\s+הוא)\s+/iu, '')
+    .trim();
+
+  if (!corrected) return {};
+
+  const resultIndexes = inferResultIndexesFromMessage(messageText);
+  const referenceEntry =
+    resultIndexes.length > 0 && Array.isArray(replyContext?.results)
+      ? replyContext.results.find((entry) => entry?.index === resultIndexes[0])
+      : null;
+
+  if (/^(?:the|a|an)\s+/i.test(corrected) && !/\s+של\s+/u.test(corrected)) {
+    return { artist: corrected };
+  }
+
+  const artistSeparator = ' של ';
+  const lastArtistSeparatorIndex = corrected.lastIndexOf(artistSeparator);
+  if (lastArtistSeparatorIndex > 0) {
+    return {
+      song_title: corrected.slice(0, lastArtistSeparatorIndex).trim(),
+      artist: corrected.slice(lastArtistSeparatorIndex + artistSeparator.length).trim()
+    };
+  }
+
+  if (referenceEntry?.artist && referenceEntry?.title) {
+    const normalizedCorrected = corrected.toLowerCase();
+    const normalizedArtist = String(referenceEntry.artist || '').trim().toLowerCase();
+    const normalizedTitle = String(referenceEntry.title || '').trim().toLowerCase();
+    if (normalizedArtist && normalizedCorrected === normalizedArtist) {
+      return { artist: corrected };
+    }
+    if (!normalizedArtist || normalizedCorrected !== normalizedTitle) {
+      return { song_title: corrected };
+    }
+  }
+
+  return { song_title: corrected };
+}
+
+function normalizeUpdateSongAction(action, messageText, replyContext) {
+  const normalized = { ...action };
+  const updates =
+    action.updates && typeof action.updates === 'object' && !Array.isArray(action.updates)
+      ? { ...action.updates }
+      : {};
+
+  if (updates.song_title || updates.artist || updates.language || updates.genres || updates.difficulty || updates.feel || 'chords_url' in updates) {
+    normalized.updates = updates;
+    return normalized;
+  }
+
+  if (typeof action.song_title === 'string' && action.song_title.trim() && !updates.song_title) {
+    updates.song_title = action.song_title.trim();
+  }
+  if (typeof action.artist === 'string' && action.artist.trim() && !updates.artist) {
+    updates.artist = action.artist.trim();
+  }
+
+  Object.assign(updates, inferCorrectionUpdates(messageText, replyContext), updates);
+  normalized.updates = updates;
+  return normalized;
+}
+
 function normalizeAgentAction(action, { messageText, replyContext }) {
   if (!action || typeof action !== 'object') return action;
   if (action.action === 'update_song_feedback') {
@@ -766,6 +837,10 @@ function normalizeAgentAction(action, { messageText, replyContext }) {
       ...action,
       updates: normalizeFeedbackUpdates(action, messageText)
     };
+  }
+
+  if (action.action === 'update_song') {
+    return normalizeUpdateSongAction(action, messageText, replyContext);
   }
 
   if (action.action !== 'search_songs' && action.action !== 'find_similar_songs') {

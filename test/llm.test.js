@@ -227,6 +227,82 @@ test('interpretMessage accepts update_song corrections by result index for artis
   assert.equal(action.updates.artist, 'The Cranberries');
 });
 
+test('interpretMessage repairs malformed update_song updates using the correction text', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'תקן את 4 ל רד מעל מסך הטלויזיה שלי של פורטיס',
+    replyContext: {
+      results: [{ index: 4, song_id: 'song_d', title: 'רד מעל הטלויזיה שלי', artist: 'פורטיסחרוף' }]
+    },
+    recentMessages: [],
+    currentDate: '2026-08-11',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'update_song',
+                  result_index: 4,
+                  updates: []
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'update_song');
+  assert.equal(action.result_index, 4);
+  assert.equal(action.updates.song_title, 'רד מעל מסך הטלויזיה שלי');
+  assert.equal(action.updates.artist, 'פורטיס');
+});
+
+test('interpretMessage uses the last "של" as the artist separator in update_song corrections', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'תקן את 2 ל שיר של יום חולין של מאיר אריאל',
+    replyContext: {
+      results: [{ index: 2, song_id: 'song_b', title: 'שיר', artist: 'אמן שגוי' }]
+    },
+    recentMessages: [],
+    currentDate: '2026-08-11',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'update_song',
+                  result_index: 2,
+                  updates: []
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'update_song');
+  assert.equal(action.result_index, 2);
+  assert.equal(action.updates.song_title, 'שיר של יום חולין');
+  assert.equal(action.updates.artist, 'מאיר אריאל');
+});
+
 test('interpretMessage flags fresh follow-up searches to avoid previous results', async () => {
   const action = await interpretMessage({
     provider: 'groq',
@@ -324,6 +400,39 @@ test('interpretMessage canonicalizes common Hebrew artist names into English art
 
   assert.equal(action.action, 'search_songs');
   assert.equal(action.query.requirements.artist, 'Pink Floyd');
+});
+
+test('interpretMessage infers artist constraints from bare "של <artist>" phrasing', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'של החברים של נטאשה',
+    replyContext: null,
+    recentMessages: [],
+    currentDate: '2026-08-11',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {}
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.requirements.artist, 'החברים של נטאשה');
 });
 
 test('interpretMessage infers Hebrew language constraints from the message text', async () => {
