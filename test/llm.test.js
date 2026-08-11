@@ -27,8 +27,8 @@ test('buildAgentPrompt includes reply context without full database payloads', (
   assert.match(prompt, /supported_search_fields/);
   assert.match(prompt, /bass_interest/);
   assert.match(prompt, /groove_level/);
-  assert.match(prompt, /"index": 3/);
-  assert.match(prompt, /"song_id": "song_a"/);
+  assert.match(prompt, /"index":3/);
+  assert.match(prompt, /"song_id":"song_a"/);
   assert.match(SYSTEM_PROMPT, /get_band_failure_reasons/);
   assert.match(SYSTEM_PROMPT, /explain_song_rejection/);
   assert.match(SYSTEM_PROMPT, /update_song/);

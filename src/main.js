@@ -825,7 +825,6 @@ async function bootstrap() {
     }
   };
 
-  client.on('message_create', handleIncomingMessage);
   client.on('message', handleIncomingMessage);
   console.log('[whatsapp] starting client');
   const readyPromise = waitForReady(client);

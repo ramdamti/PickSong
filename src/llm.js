@@ -4,16 +4,12 @@ const SYSTEM_PROMPT = [
   'You are a JSON-only semantic interpreter for a WhatsApp bot for a band.',
   'Users usually write in Hebrew.',
   'Return exactly one JSON object. No prose. No markdown. No explanations.',
-  'The application executes actions locally and deterministically.',
-  'Never invent a song_id.',
+  'The application executes actions locally and deterministically. Never invent a song_id.',
   'Translate the user request into the closest supported query parameters instead of asking unnecessary questions.',
-  'Prefer agent reasoning over generic fallback behavior: infer intent from the text and map it into the schema.',
   'When reply_context is provided and the user refers to previous results, use result_index values from that context.',
   'Treat performer-fit phrases as direct search intent, not ambiguity.',
   'Examples of performer-fit language: מתאים לזמר, מתאים לזמרת, מתאים לזמר שלנו, מתאים לקול שלנו, שהסולן יוכל לשיר, שהסולנית תוכל לשיר, מתאים לגיטריסט, מתאים לבסיסט, מתאים למתופף, מתאים לקלידים.',
-  'Map those phrases into compact search query preferences or requirements when possible.',
-  'Use the provided supported_search_fields guide as the source of truth for which query fields exist.',
-  'If the user asks for something that has no exact field, map it to the nearest supported field instead of ignoring it.',
+  'Use supported_search_fields as the source of truth. If there is no exact field, map to the nearest supported field.',
   'Examples: cool bass or interesting bass -> preferences.bass_interest=high; groove or groovy -> preferences.groove_level=high; hard guitar solo -> preferences.guitar_difficulty=high; important keys -> preferences.keys_role=important; energetic -> preferences.band_energy=high; crowd friendly -> preferences.crowd_friendly=true; new to us -> preferences.untried=true.',
   'Keyboard instrument type must be represented structurally, not vaguely. Use keys_type_any for exact keyboard instrument constraints such as piano, electric_piano, organ, synth, clavinet, mellotron, or other.',
   'Do not treat piano as the same thing as synth, organ, or electric_piano unless the user was vague and you intentionally choose a soft preference.',
@@ -30,6 +26,8 @@ const SYSTEM_PROMPT = [
   'For correction requests like "תתקן את שם השיר", "האמן הנכון הוא ...", "תעדכן את 3 ל-...", or "שיר 2 הוא של ...", prefer update_song.',
   'When correcting a song from reply_context, prefer result_index and place the corrected identity in updates.song_title and/or updates.artist.',
   'When the request includes a clear target song and corrected values, do not use clarify unless the target itself is ambiguous.',
+  'Hebrew examples: "מתי ניגנו את 1" -> get_song_info with result_index=1. "תעדכן את 3 ל-רד מעל הטלוויזיה שלי של פורטיס" -> update_song with result_index=3 and corrected song_title/artist. "תביא 4 שירי רוק קלים" -> search_songs with limit=4, rock genre, and low difficulty.',
+  'Examples are illustrative, not exhaustive. Prefer the best context-based interpretation even when the wording differs from the examples.',
   'Prefer taking a reasonable search interpretation over asking a clarification question.',
   'For vague recommendation requests, default to search_songs with broad query semantics.',
   'Use clarify only when execution would be unsafe or impossible without missing identity: for example ambiguous remove/update target, missing song identity for destructive actions, or missing reference for result-index feedback.',
@@ -43,39 +41,14 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 const SUPPORTED_SEARCH_FIELDS = {
-  requirements: {
-    artist: 'Exact artist or band constraint. Prefer canonical English names when known.',
-    language: 'Song language code such as he or en.',
-    genres: 'Required genres such as rock, blues, funk, jazz, metal, pop, ballad.',
-    feel: 'Required overall feel such as upbeat, calm, ballad.',
-    difficulty: 'Required overall song difficulty: low, medium, high.',
-    keys_type_any: 'Required keyboard instrument types. Match if the song contains at least one of the listed values.',
-    has_keys: 'Require a meaningful keyboard part with a non-empty keys_type array.',
-    excludeRejected: 'Exclude songs with known bad band fit.',
-    excludePlayed: 'Exclude songs already marked as played.'
-  },
-  preferences: {
-    genres: 'Preferred genres when not a hard requirement.',
-    feel: 'Preferred feel when not a hard requirement.',
-    difficulty: 'Preferred overall difficulty: low, medium, high.',
-    original_vocal: 'Preferred original vocal profile such as male or female.',
-    singer_fit: 'How well the song should suit the singer, for example great.',
-    vocal_range: 'Preferred vocal range.',
-    vocal_energy: 'Preferred vocal energy.',
-    band_energy: 'Preferred band energy, useful for energetic or calm requests.',
-    groove_level: 'Preferred groove level, useful for groove or groovy requests.',
-    guitar_difficulty: 'Preferred guitar difficulty, useful for guitar-heavy or hard guitar requests.',
-    bass_difficulty: 'Preferred bass difficulty.',
-    drums_difficulty: 'Preferred drums difficulty.',
-    keys_difficulty: 'Preferred keys difficulty.',
-    keys_role: 'How important keys are in the arrangement, such as important or optional.',
-    keys_type_any: 'Preferred keyboard instrument types such as piano, electric_piano, organ, synth, clavinet, mellotron, other.',
-    bass_interest: 'How interesting or prominent the bass part should be.',
-    crowd_friendly: 'Whether the song should be crowd friendly.',
-    untried: 'Prefer songs the band has not tried yet.'
-  },
-  exclusions: {
-    keys_type_any: 'Keyboard instrument types that must not appear in the song.'
+  requirements: ['artist', 'language', 'genres', 'feel', 'difficulty', 'keys_type_any', 'has_keys', 'excludeRejected', 'excludePlayed'],
+  preferences: ['genres', 'feel', 'difficulty', 'original_vocal', 'singer_fit', 'vocal_range', 'vocal_energy', 'band_energy', 'groove_level', 'guitar_difficulty', 'bass_difficulty', 'drums_difficulty', 'keys_difficulty', 'keys_role', 'keys_type_any', 'bass_interest', 'crowd_friendly', 'untried'],
+  exclusions: ['keys_type_any'],
+  enums: {
+    language: ['he', 'en'],
+    difficulty: ['low', 'medium', 'high'],
+    feel: ['upbeat', 'calm', 'ballad'],
+    keys_type_any: ['piano', 'electric_piano', 'organ', 'synth', 'clavinet', 'mellotron', 'other']
   }
 };
 
@@ -197,16 +170,12 @@ function extractJsonBlock(text) {
 }
 
 function buildAgentPrompt({ messageText, replyContext, currentDate }) {
-  return JSON.stringify(
-    {
-      current_date: currentDate,
-      user_message: messageText,
-      reply_context: replyContext || null,
-      supported_search_fields: SUPPORTED_SEARCH_FIELDS
-    },
-    null,
-    2
-  );
+  return JSON.stringify({
+    supported_search_fields: SUPPORTED_SEARCH_FIELDS,
+    current_date: currentDate,
+    user_message: messageText,
+    reply_context: replyContext || null
+  });
 }
 
 function buildRateLimitError(response, bodyText) {
