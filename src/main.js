@@ -14,18 +14,19 @@ const CURRENT_DATE = '2026-08-08';
 const MUTABLE_SONG_FIELDS = new Set(ALLOWED_UPDATE_FIELDS);
 const BOT_PREFIX = '\u200F🤖 ';
 const DEFAULT_REHEARSAL_DURATION_MINUTES = 180;
-const REHEARSAL_BREAK_MINUTES = 10;
+const REHEARSAL_BREAK_MINUTES = 12;
 const DEFAULT_SONG_DURATION_SECONDS = 4 * 60;
-const SONG_TRANSITION_SECONDS = 60;
+const SONG_TRANSITION_SECONDS = 90;
+const SONG_REHEARSAL_DISCUSSION_SECONDS = 180;
 const JAM_BUFFER_BY_FEEL_SECONDS = {
-  upbeat: 90,
-  calm: 45,
-  ballad: 60
+  upbeat: 120,
+  calm: 75,
+  ballad: 90
 };
 const MISTAKE_BUFFER_BY_DIFFICULTY_SECONDS = {
-  low: 45,
-  medium: 75,
-  high: 120
+  low: 75,
+  medium: 120,
+  high: 180
 };
 const FIT_LABELS = {
   unknown: '\u05dc\u05d0 \u05d9\u05d3\u05d5\u05e2',
@@ -708,6 +709,23 @@ function formatSlotDuration(seconds) {
   return `${minutes} דק'`;
 }
 
+function formatSongDuration(seconds) {
+  const totalSeconds = Math.max(0, Number.parseInt(seconds, 10) || 0);
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainder = totalSeconds % 60;
+  if (minutes <= 0) {
+    return `${remainder} שנ'`;
+  }
+  return `${minutes}:${String(remainder).padStart(2, '0')}`;
+}
+
+function forceRtlLines(text) {
+  return String(text || '')
+    .split('\n')
+    .map((line) => (line ? `\u200F${line}` : line))
+    .join('\n');
+}
+
 function getSongDurationSeconds(song) {
   const parsed = Number.parseInt(song?.duration_seconds, 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_SONG_DURATION_SECONDS;
@@ -776,6 +794,7 @@ function estimateRehearsalSongSlotSeconds(song) {
   return getSongDurationSeconds(song)
     + (JAM_BUFFER_BY_FEEL_SECONDS[feel] || 60)
     + (MISTAKE_BUFFER_BY_DIFFICULTY_SECONDS[difficulty] || 75)
+    + SONG_REHEARSAL_DISCUSSION_SECONDS
     + SONG_TRANSITION_SECONDS;
 }
 
@@ -814,9 +833,6 @@ function scoreRehearsalCoherence(candidate, selectedSongs, anchorSong) {
   if (normalizedScalar(candidate?.difficulty) && normalizedScalar(candidate?.difficulty) === normalizedScalar(anchorSong?.difficulty)) {
     score += 3;
   }
-  if (normalizedScalar(candidate?.language) && normalizedScalar(candidate?.language) === normalizedScalar(anchorSong?.language)) {
-    score += 2;
-  }
   if (normalizedScalar(candidate?.ai_metadata?.band_energy) && normalizedScalar(candidate?.ai_metadata?.band_energy) === normalizedScalar(anchorSong?.ai_metadata?.band_energy)) {
     score += 3;
   }
@@ -832,6 +848,11 @@ function scoreRehearsalCoherence(candidate, selectedSongs, anchorSong) {
   const sameFeelCount = selectedSongs.filter((song) => normalizedScalar(song?.feel) === normalizedScalar(candidate?.feel)).length;
   if (sameFeelCount >= 2) {
     score -= 4 + sameFeelCount;
+  }
+
+  const sameLanguageCount = selectedSongs.filter((song) => normalizedScalar(song?.language) === normalizedScalar(candidate?.language)).length;
+  if (sameLanguageCount >= 3) {
+    score -= 3 + sameLanguageCount;
   }
 
   const sameDifficultyCount = selectedSongs.filter((song) => normalizedScalar(song?.difficulty) === normalizedScalar(candidate?.difficulty)).length;
@@ -988,10 +1009,14 @@ function formatRehearsalPlanReply(plan) {
       continue;
     }
     songIndex += 1;
-    lines.push(`${songIndex}. ${item.song.song_title}${item.song.artist ? ` - ${item.song.artist}` : ''} | כ-${formatSlotDuration(item.slotSeconds)}`);
+    lines.push(
+      `${songIndex}. ${item.song.song_title}${item.song.artist ? ` - ${item.song.artist}` : ''}${
+        item.song.duration_seconds ? ` | שיר ${formatSongDuration(item.song.duration_seconds)}` : ''
+      }`
+    );
   }
 
-  return lines.join('\n');
+  return forceRtlLines(lines.join('\n'));
 }
 
 async function sendRehearsalPlanReply({ chat, stateStore, chatId, plan, query = null }) {

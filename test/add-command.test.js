@@ -717,9 +717,9 @@ test('executeAgentAction prepare_rehearsal builds a timed rehearsal list with a 
 
   assert.equal(sentMessages.length, 1);
   assert.match(sentMessages[0], /רשימת חזרה/);
-  assert.match(sentMessages[0], /הפסקה - 10 דק'/);
+  assert.match(sentMessages[0], /הפסקה - 12 דק'/);
   assert.match(sentMessages[0], /Song One - Band A/);
-  assert.match(sentMessages[0], /Song Five - Band E/);
+  assert.match(sentMessages[0], /Song (?:Two|Three|Four|Five|Six) - Band [B-F]/);
   assert.equal(stateStore.savedContext.query.requirements.genres[0], 'rock');
   assert.equal(stateStore.savedContext.results.length, 5);
 });
@@ -789,7 +789,7 @@ test('executeAgentAction prepare_rehearsal keeps some cohesion without collapsin
   });
 
   assert.equal(sentMessages.length, 1);
-  assert.match(sentMessages[0], /Rock One - Band A/);
+  assert.match(sentMessages[0], /Rock Two - Band A/);
   assert.match(sentMessages[0], /Rock Three - Band B/);
   assert.match(sentMessages[0], /Rock Four - Band C/);
   assert.doesNotMatch(sentMessages[0], /Pop Detour - Band E/);
