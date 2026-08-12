@@ -11,7 +11,7 @@ const {
 } = require('../src/llm');
 
 test('SYSTEM_PROMPT stays compact and stable', () => {
-  assert.ok(SYSTEM_PROMPT.length < 5200);
+  assert.ok(SYSTEM_PROMPT.length < 5300);
   assert.doesNotMatch(SYSTEM_PROMPT, /state\.json|songs\[|migration/i);
   assert.match(SYSTEM_PROMPT, /מתאים לזמר/);
   assert.match(SYSTEM_PROMPT, /מתאים לגיטריסט/);
@@ -175,6 +175,80 @@ test('interpretMessage infers a single result for singular song phrasing', async
 
   assert.equal(action.action, 'search_songs');
   assert.equal(action.query.limit, 1);
+});
+
+test('interpretMessage rewrites rehearsal planning clarifications into prepare_rehearsal with default duration', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'בוט תכין רשימת שירים לחזרה הבאה',
+    replyContext: null,
+    recentMessages: [],
+    currentDate: '2026-08-12',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'clarify',
+                  question: 'איזה שירים אתה רוצה?'
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'prepare_rehearsal');
+  assert.equal(action.duration_minutes, 180);
+});
+
+test('interpretMessage rewrites rehearsal search requests into prepare_rehearsal with explicit duration and query', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'בוט תכין רשימת שירים לחזרה הקרובה של 4 שעות בסגנון רוק שכיף לנגן',
+    replyContext: null,
+    recentMessages: [],
+    currentDate: '2026-08-12',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: 'search_songs',
+                  query: {
+                    requirements: {
+                      genres: ['rock']
+                    },
+                    preferences: {
+                      band_energy: 'high'
+                    }
+                  }
+                })
+              }
+            }
+          ]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'prepare_rehearsal');
+  assert.equal(action.duration_minutes, 240);
+  assert.deepEqual(action.query.requirements.genres, ['rock']);
 });
 
 test('interpretMessage accepts update_song corrections by result index for title fixes', async () => {

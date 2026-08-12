@@ -79,6 +79,11 @@ function normalizeFeel(value) {
   return ALLOWED_FEELS.has(normalized) ? normalized : null;
 }
 
+function normalizeDurationSeconds(value) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function createDefaultAiMetadata() {
   return {
     original_vocal: 'unknown',
@@ -195,6 +200,7 @@ function normalizeSong(rawSong) {
     genres: normalizeGenres(song.genres),
     difficulty: normalizeDifficulty(song.difficulty),
     feel: normalizeFeel(song.feel),
+    duration_seconds: normalizeDurationSeconds(song.duration_seconds),
     used: Boolean(song.used),
     created_at: song.created_at || new Date().toISOString(),
     normalized_title: normalizedTitle,
@@ -344,6 +350,12 @@ function validateCanonicalState(state, filePath = 'state.json') {
     }
     if (!ALLOWED_FEELS.has(String(song.feel || '').trim().toLowerCase())) {
       problems.push(`${prefix}.feel must be upbeat, calm, or ballad`);
+    }
+    if (song.duration_seconds !== null && song.duration_seconds !== undefined) {
+      const parsedDuration = Number.parseInt(song.duration_seconds, 10);
+      if (!Number.isInteger(parsedDuration) || parsedDuration <= 0) {
+        problems.push(`${prefix}.duration_seconds must be a positive integer when provided`);
+      }
     }
     if (!song.ai_metadata || typeof song.ai_metadata !== 'object') {
       problems.push(`${prefix}.ai_metadata is required`);

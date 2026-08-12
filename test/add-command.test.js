@@ -154,6 +154,127 @@ test('handleAgentMessage accepts sparse add_song payloads for explicit add reque
   assert.equal(sentMessages.length, 1);
 });
 
+test('handleAgentMessage resolves explicit song-info requests without sending them to the agent', async () => {
+  const sentMessages = [];
+  const song = createSong({
+    song_title: 'High Hopes',
+    artist: 'Pink Floyd',
+    normalized_title: 'high hopes',
+    normalized_artist: 'pink floyd'
+  });
+  const stateStore = {
+    getSongs() {
+      return [song];
+    },
+    findSongsByNormalizedName(songTitle, artist) {
+      if (songTitle === 'High Hopes' && artist === 'Pink Floyd') {
+        return [song];
+      }
+      return [];
+    },
+    getResultMessage() {
+      return null;
+    },
+    getLastResults() {
+      return null;
+    }
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+      return { id: { _serialized: 'wamid-info-1' } };
+    }
+  };
+
+  await handleAgentMessage({
+    chat,
+    stateStore,
+    config: {
+      triggerText: 'בוט',
+      llmProvider: 'groq',
+      llmBaseUrl: 'https://example.com',
+      llmApiKey: 'test',
+      llmModel: 'test-model'
+    },
+    record: {
+      text: 'בוט תן פרטים על High Hopes - Pink Floyd',
+      quoted: { fromMe: false },
+      chatId: 'chat-1'
+    },
+    interpretMessageFn: async () => {
+      throw new Error('LLM should not be called for explicit song info');
+    }
+  });
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /High Hopes/);
+  assert.match(sentMessages[0], /Pink Floyd/);
+});
+
+test('handleAgentMessage resolves song-info reply requests from a bot-formatted quoted song', async () => {
+  const sentMessages = [];
+  const song = createSong({
+    song_id: 'song_a',
+    song_title: 'Paranoid',
+    artist: 'Grand Funk Railroad',
+    normalized_title: 'paranoid',
+    normalized_artist: 'grand funk railroad'
+  });
+  const stateStore = {
+    getSongs() {
+      return [song];
+    },
+    getSongById(songId) {
+      return songId === 'song_a' ? song : null;
+    },
+    getResultMessage() {
+      return null;
+    },
+    getLastResults(chatId) {
+      if (chatId !== 'chat-1') return null;
+      return {
+        results: [
+          { index: 1, song_id: 'song_a', title: 'Paranoid', artist: 'Grand Funk Railroad' }
+        ]
+      };
+    }
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+      return { id: { _serialized: 'wamid-info-2' } };
+    }
+  };
+
+  await handleAgentMessage({
+    chat,
+    stateStore,
+    config: {
+      triggerText: 'בוט',
+      llmProvider: 'groq',
+      llmBaseUrl: 'https://example.com',
+      llmApiKey: 'test',
+      llmModel: 'test-model'
+    },
+    record: {
+      text: 'תני מידע על השיר הזה',
+      quoted: {
+        text: '‏🤖 הבאתי:\nparanoid - Grand Funk Railroad'
+      },
+      quotedText: '‏🤖 הבאתי:\nparanoid - Grand Funk Railroad',
+      quotedId: 'wamid-bot-song-1',
+      chatId: 'chat-1'
+    },
+    interpretMessageFn: async () => {
+      throw new Error('LLM should not be called for quoted song info');
+    }
+  });
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /Paranoid/);
+  assert.match(sentMessages[0], /Grand Funk Railroad/);
+});
+
 test('executeAgentAction get_band_failure_reasons summarizes bad songs with reasons', async () => {
   const sentMessages = [];
   const badSong = createSong({
@@ -443,6 +564,236 @@ test('executeAgentAction search_songs replaces only requested result indexes in 
   assert.doesNotMatch(sentMessages[0], /Alive/);
   assert.equal(stateStore.savedContext.query.requirements.genres[0], 'rock');
   assert.equal(stateStore.savedContext.results.length, 3);
+});
+
+test('executeAgentAction search_songs backfills missing replacements with random alternatives', async () => {
+  const sentMessages = [];
+  const firstSong = createSong({ song_id: 'song_a', song_title: 'Zombie', artist: 'The Cranberries' });
+  const secondSong = createSong({ song_id: 'song_b', song_title: 'Dreams', artist: 'The Cranberries' });
+  const thirdSong = createSong({ song_id: 'song_c', song_title: 'Alive', artist: 'Pearl Jam' });
+  const replacementOne = createSong({ song_id: 'song_d', song_title: '1979', artist: 'The Smashing Pumpkins' });
+  const fallbackRandom = createSong({
+    song_id: 'song_e',
+    song_title: 'Blue in Green',
+    artist: 'Miles Davis',
+    genres: ['jazz'],
+    normalized_title: 'blue in green',
+    normalized_artist: 'miles davis'
+  });
+  const allSongs = [firstSong, secondSong, thirdSong, replacementOne, fallbackRandom];
+  const stateStore = {
+    getSongs() {
+      return allSongs;
+    },
+    getSongById(songId) {
+      return allSongs.find((song) => song.song_id === songId) || null;
+    },
+    getRecentRecommendations() {
+      return [];
+    },
+    getResultMessage() {
+      return null;
+    },
+    getLastResults(chatId) {
+      if (chatId !== 'chat-1') return null;
+      return {
+        query: {
+          requirements: { genres: ['rock'] },
+          limit: 3
+        },
+        results: [
+          { index: 1, song_id: 'song_a', title: 'Zombie', artist: 'The Cranberries' },
+          { index: 2, song_id: 'song_b', title: 'Dreams', artist: 'The Cranberries' },
+          { index: 3, song_id: 'song_c', title: 'Alive', artist: 'Pearl Jam' }
+        ]
+      };
+    },
+    setLastResults(_chatId, context) {
+      this.savedContext = context;
+      return true;
+    },
+    storeResultMessage() {
+      return true;
+    },
+    recordRecommendations() {
+      return true;
+    },
+    async queueSave() {}
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+      return { id: { _serialized: 'wamid-replace-2' } };
+    }
+  };
+
+  await executeAgentAction({
+    action: {
+      action: 'search_songs',
+      query: {
+        replace_result_indexes: [2, 3],
+        avoid_previous_results: true
+      }
+    },
+    stateStore,
+    chat,
+    record: {
+      chatId: 'chat-1',
+      quoted: { id: '' }
+    }
+  });
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /Zombie/);
+  assert.match(sentMessages[0], /1979/);
+  assert.match(sentMessages[0], /Blue in Green/);
+  assert.doesNotMatch(sentMessages[0], /Dreams/);
+  assert.doesNotMatch(sentMessages[0], /Alive/);
+  assert.equal(stateStore.savedContext.results.length, 3);
+});
+
+test('executeAgentAction prepare_rehearsal builds a timed rehearsal list with a break', async () => {
+  const sentMessages = [];
+  const rehearsalSongs = [
+    createSong({ song_id: 'song_r1', song_title: 'Song One', artist: 'Band A', genres: ['rock'], duration_seconds: 1500 }),
+    createSong({ song_id: 'song_r2', song_title: 'Song Two', artist: 'Band B', genres: ['rock'], duration_seconds: 1500 }),
+    createSong({ song_id: 'song_r3', song_title: 'Song Three', artist: 'Band C', genres: ['rock'], duration_seconds: 1500 }),
+    createSong({ song_id: 'song_r4', song_title: 'Song Four', artist: 'Band D', genres: ['rock'], duration_seconds: 1500 }),
+    createSong({ song_id: 'song_r5', song_title: 'Song Five', artist: 'Band E', genres: ['rock'], duration_seconds: 1500 }),
+    createSong({ song_id: 'song_r6', song_title: 'Song Six', artist: 'Band F', genres: ['rock'], duration_seconds: 1500 })
+  ];
+  const stateStore = {
+    getSongs() {
+      return rehearsalSongs;
+    },
+    getSongById(songId) {
+      return rehearsalSongs.find((song) => song.song_id === songId) || null;
+    },
+    getRecentRecommendations() {
+      return [];
+    },
+    getResultMessage() {
+      return null;
+    },
+    getLastResults() {
+      return null;
+    },
+    setLastResults(_chatId, context) {
+      this.savedContext = context;
+      return true;
+    },
+    storeResultMessage() {
+      return true;
+    },
+    recordRecommendations() {
+      return true;
+    },
+    async queueSave() {}
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+      return { id: { _serialized: 'wamid-rehearsal-1' } };
+    }
+  };
+
+  await executeAgentAction({
+    action: {
+      action: 'prepare_rehearsal',
+      duration_minutes: 180,
+      query: {
+        requirements: {
+          genres: ['rock']
+        }
+      }
+    },
+    stateStore,
+    chat,
+    record: {
+      chatId: 'chat-1',
+      quoted: { id: '' }
+    }
+  });
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /רשימת חזרה/);
+  assert.match(sentMessages[0], /הפסקה - 10 דק'/);
+  assert.match(sentMessages[0], /Song One - Band A/);
+  assert.match(sentMessages[0], /Song Five - Band E/);
+  assert.equal(stateStore.savedContext.query.requirements.genres[0], 'rock');
+  assert.equal(stateStore.savedContext.results.length, 5);
+});
+
+test('executeAgentAction prepare_rehearsal keeps some cohesion without collapsing to one artist', async () => {
+  const sentMessages = [];
+  const rehearsalSongs = [
+    createSong({ song_id: 'song_c1', song_title: 'Rock One', artist: 'Band A', genres: ['rock', 'alternative rock'], feel: 'upbeat', duration_seconds: 900 }),
+    createSong({ song_id: 'song_c2', song_title: 'Rock Two', artist: 'Band A', genres: ['rock', 'alternative rock'], feel: 'upbeat', duration_seconds: 900 }),
+    createSong({ song_id: 'song_c3', song_title: 'Rock Three', artist: 'Band B', genres: ['rock', 'alternative rock'], feel: 'upbeat', duration_seconds: 900 }),
+    createSong({ song_id: 'song_c4', song_title: 'Rock Four', artist: 'Band C', genres: ['rock', 'hard rock'], feel: 'upbeat', duration_seconds: 900 }),
+    createSong({ song_id: 'song_c5', song_title: 'Rock Ballad', artist: 'Band D', genres: ['rock', 'soft rock'], feel: 'ballad', duration_seconds: 900 }),
+    createSong({ song_id: 'song_c6', song_title: 'Pop Detour', artist: 'Band E', genres: ['pop'], feel: 'calm', duration_seconds: 900 })
+  ];
+  const stateStore = {
+    getSongs() {
+      return rehearsalSongs;
+    },
+    getSongById(songId) {
+      return rehearsalSongs.find((song) => song.song_id === songId) || null;
+    },
+    getRecentRecommendations() {
+      return [];
+    },
+    getResultMessage() {
+      return null;
+    },
+    getLastResults() {
+      return null;
+    },
+    setLastResults(_chatId, context) {
+      this.savedContext = context;
+      return true;
+    },
+    storeResultMessage() {
+      return true;
+    },
+    recordRecommendations() {
+      return true;
+    },
+    async queueSave() {}
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+      return { id: { _serialized: 'wamid-rehearsal-2' } };
+    }
+  };
+
+  await executeAgentAction({
+    action: {
+      action: 'prepare_rehearsal',
+      duration_minutes: 120,
+      query: {
+        requirements: {
+          genres: ['rock']
+        }
+      }
+    },
+    stateStore,
+    chat,
+    record: {
+      chatId: 'chat-1',
+      quoted: { id: '' }
+    },
+    messageText: 'תכין רשימת שירים לחזרה של שעתיים עם שירי רוק שכיף לנגן ושיש קשר ביניהם'
+  });
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /Rock One - Band A/);
+  assert.match(sentMessages[0], /Rock Three - Band B/);
+  assert.match(sentMessages[0], /Rock Four - Band C/);
+  assert.doesNotMatch(sentMessages[0], /Pop Detour - Band E/);
+  assert.ok(stateStore.savedContext.results.length >= 3);
 });
 
 test('executeAgentAction updates feedback by result index using stored context', async () => {

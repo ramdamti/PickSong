@@ -1,5 +1,6 @@
 const ACTION_NAMES = new Set([
   'search_songs',
+  'prepare_rehearsal',
   'add_song',
   'update_song',
   'remove_song',
@@ -57,6 +58,7 @@ const ALLOWED_UPDATE_FIELDS = new Set([
   'genres',
   'difficulty',
   'feel',
+  'duration_seconds',
   'chords_url',
   'ai_metadata',
   'band_status'
@@ -100,6 +102,17 @@ function ensureEnumArray(value, allowedValues, label) {
     throw new Error(`${label} must be an array`);
   }
   return Array.from(new Set(value.map((item) => ensureEnum(item, allowedValues, label)).filter(Boolean)));
+}
+
+function ensurePositiveInteger(value, label, { allowNull = false } = {}) {
+  if ((value === null || value === undefined || value === '') && allowNull) {
+    return null;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  return parsed;
 }
 
 function validateAiMetadata(value) {
@@ -207,6 +220,7 @@ function validateSong(value, options = {}) {
     genres: ensureStringArray(song.genres, 'song.genres').map((item) => item.toLowerCase()),
     difficulty: ensureEnum(song.difficulty, DIFFICULTIES, 'song.difficulty'),
     feel: ensureEnum(song.feel, FEELS, 'song.feel'),
+    duration_seconds: ensurePositiveInteger(song.duration_seconds, 'song.duration_seconds', { allowNull: true }),
     ai_metadata: validateAiMetadata(song.ai_metadata),
     band_status: validateBandStatus(song.band_status)
   };
@@ -231,6 +245,7 @@ function validateAddSongPayload(value) {
       : [],
     difficulty: song.difficulty ? ensureEnum(song.difficulty, DIFFICULTIES, 'song.difficulty') : null,
     feel: song.feel ? ensureEnum(song.feel, FEELS, 'song.feel') : null,
+    duration_seconds: ensurePositiveInteger(song.duration_seconds, 'song.duration_seconds', { allowNull: true }),
     ai_metadata: song.ai_metadata ? validateAiMetadata(song.ai_metadata) : undefined,
     band_status: song.band_status ? validateBandStatus(song.band_status) : undefined
   };
@@ -280,12 +295,15 @@ function validateAgentAction(value) {
     return validated;
   }
 
-  if (name === 'search_songs' || name === 'find_similar_songs') {
+  if (name === 'search_songs' || name === 'find_similar_songs' || name === 'prepare_rehearsal') {
     const rawQuery =
       action.query && typeof action.query === 'object' && !Array.isArray(action.query)
         ? action.query
         : {};
     validated.query = validateSongQuery(rawQuery);
+    if (name === 'prepare_rehearsal') {
+      validated.duration_minutes = ensurePositiveInteger(action.duration_minutes, 'agent_action.duration_minutes', { allowNull: true });
+    }
     return validated;
   }
 
@@ -330,6 +348,9 @@ function validateAgentAction(value) {
       }
       if ('feel' in validated.updates) {
         validated.updates.feel = ensureEnum(validated.updates.feel, FEELS, 'agent_action.updates.feel');
+      }
+      if ('duration_seconds' in validated.updates) {
+        validated.updates.duration_seconds = ensurePositiveInteger(validated.updates.duration_seconds, 'agent_action.updates.duration_seconds', { allowNull: true });
       }
       if ('chords_url' in validated.updates) {
         validated.updates.chords_url =

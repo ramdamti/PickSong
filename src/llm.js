@@ -28,13 +28,14 @@ const SYSTEM_PROMPT = [
   'When correcting a song from reply_context, prefer result_index and place the corrected identity in updates.song_title and/or updates.artist.',
   'When the request includes a clear target song and corrected values, do not use clarify unless the target itself is ambiguous.',
   'Hebrew examples: "מתי ניגנו את 1" -> get_song_info with result_index=1. "תעדכן את 3 ל-רד מעל הטלוויזיה שלי של פורטיס" -> update_song with result_index=3 and corrected song_title/artist. "תביא 4 שירי רוק קלים" -> search_songs with limit=4, rock genre, and low difficulty.',
+  'For rehearsal planning requests, use prepare_rehearsal with compact query semantics and duration_minutes. Default duration_minutes to 180 when the user does not specify a duration.',
   'Examples are illustrative, not exhaustive. Prefer the best context-based interpretation even when the wording differs from the examples.',
   'Prefer taking a reasonable search interpretation over asking a clarification question.',
   'For vague recommendation requests, default to search_songs with broad query semantics.',
   'Use clarify only when execution would be unsafe or impossible without missing identity: for example ambiguous remove/update target, missing song identity for destructive actions, or missing reference for result-index feedback.',
   'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
-  'Allowed actions: search_songs, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, clarify.',
-  'search_songs and find_similar_songs return compact query semantics only.',
+  'Allowed actions: search_songs, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, clarify.',
+  'search_songs, prepare_rehearsal, and find_similar_songs return compact query semantics only.',
   'add_song must return a complete canonical song payload when identity is sufficiently clear, including keys_role, keys_type, and keys_difficulty.',
   'update_song_feedback must use result_index for list references.',
   'Band-history questions use get_band_failure_reasons or explain_song_rejection.',
@@ -45,7 +46,7 @@ const FALLBACK_SYSTEM_PROMPT = [
   'You are a JSON-only semantic interpreter for a WhatsApp bot for a band.',
   'Return exactly one JSON object. No prose. No markdown.',
   'Never invent a song_id.',
-  'Allowed actions: search_songs, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, clarify.',
+  'Allowed actions: search_songs, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, clarify.',
   'Use reply_context result indexes when relevant.',
   'If the user asks for songs by an artist, preserve the artist strongly.',
   'If the user asks for a list of songs, use search_songs.',
@@ -361,6 +362,43 @@ function inferRequestedLanguage(messageText) {
   if (/(?:באנגלית|אנגלית|שירים באנגלית|שיר באנגלית|english)/iu.test(source)) {
     return 'en';
   }
+
+  return null;
+}
+
+function isRehearsalPlanRequest(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return false;
+
+  return /(?:חזרה|לחזרה|rehearsal|setlist)/iu.test(source)
+    && /(?:תכין|תכיני|רשימת|רשימה|הקרובה|הבאה|prepare|plan)/iu.test(source);
+}
+
+function inferRequestedDurationMinutes(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return null;
+
+  const hourDigitMatch = source.match(/(\d{1,2})\s*ש(?:עה|עות)/iu);
+  if (hourDigitMatch) {
+    const hours = Number.parseInt(hourDigitMatch[1], 10);
+    if (Number.isInteger(hours) && hours > 0) {
+      return hours * 60;
+    }
+  }
+
+  const minuteDigitMatch = source.match(/(\d{2,3})\s*דק(?:ה|ות)?/iu);
+  if (minuteDigitMatch) {
+    const minutes = Number.parseInt(minuteDigitMatch[1], 10);
+    if (Number.isInteger(minutes) && minutes > 0) {
+      return minutes;
+    }
+  }
+
+  if (/(?:שעתיים|two hours)/iu.test(source)) return 120;
+  if (/(?:שעה וחצי|hour and a half)/iu.test(source)) return 90;
+  if (/(?:שעה אחת|one hour)/iu.test(source)) return 60;
+  if (/(?:שלוש שעות|three hours)/iu.test(source)) return 180;
+  if (/(?:ארבע שעות|four hours)/iu.test(source)) return 240;
 
   return null;
 }
@@ -926,6 +964,8 @@ function normalizeUpdateSongAction(action, messageText, replyContext) {
 
 function normalizeAgentAction(action, { messageText, replyContext }) {
   if (!action || typeof action !== 'object') return action;
+  const rehearsalRequest = isRehearsalPlanRequest(messageText);
+  const inferredDurationMinutes = inferRequestedDurationMinutes(messageText);
   if (action.action === 'update_song_feedback') {
     return {
       ...action,
@@ -963,6 +1003,14 @@ function normalizeAgentAction(action, { messageText, replyContext }) {
   }
 
   if (action.action === 'clarify') {
+    if (rehearsalRequest) {
+      return {
+        action: 'prepare_rehearsal',
+        query: {},
+        duration_minutes: inferredDurationMinutes || 180
+      };
+    }
+
     const inferredAddSong = inferAddSongPayload(messageText);
     if (inferredAddSong) {
       return {
@@ -984,7 +1032,7 @@ function normalizeAgentAction(action, { messageText, replyContext }) {
     }
   }
 
-  if (action.action !== 'search_songs' && action.action !== 'find_similar_songs') {
+  if (action.action !== 'search_songs' && action.action !== 'find_similar_songs' && action.action !== 'prepare_rehearsal') {
     return action;
   }
 
@@ -1001,7 +1049,7 @@ function normalizeAgentAction(action, { messageText, replyContext }) {
       ? { ...query.preferences }
       : {};
 
-  if (!Number.isInteger(Number.parseInt(query.limit, 10))) {
+  if (action.action !== 'prepare_rehearsal' && !Number.isInteger(Number.parseInt(query.limit, 10))) {
     const inferredLimit = inferRequestedLimit(messageText);
     if (inferredLimit) {
       query.limit = inferredLimit;
@@ -1053,7 +1101,7 @@ function normalizeAgentAction(action, { messageText, replyContext }) {
     preferences
   );
 
-  return {
+  const normalizedAction = {
     ...action,
     query: {
       ...query,
@@ -1061,6 +1109,23 @@ function normalizeAgentAction(action, { messageText, replyContext }) {
       preferences
     }
   };
+
+  if (rehearsalRequest && (action.action === 'search_songs' || action.action === 'prepare_rehearsal')) {
+    return {
+      action: 'prepare_rehearsal',
+      query: normalizedAction.query,
+      duration_minutes: inferredDurationMinutes || Number.parseInt(action.duration_minutes, 10) || 180
+    };
+  }
+
+  if (action.action === 'prepare_rehearsal') {
+    return {
+      ...normalizedAction,
+      duration_minutes: inferredDurationMinutes || Number.parseInt(action.duration_minutes, 10) || 180
+    };
+  }
+
+  return normalizedAction;
 }
 
 // Final override with Unicode escapes so Hebrew instrument parsing stays stable for drums/guitar/bass only.

@@ -1,6 +1,6 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
-const { interpretMessage } = require('./llm');
+const { interpretMessage, callOpenAiCompatibleChat } = require('./llm');
 const {
   persistResultContext,
   resolveActiveResultContext,
@@ -13,6 +13,20 @@ const { ALLOWED_UPDATE_FIELDS } = require('./schemas');
 const CURRENT_DATE = '2026-08-08';
 const MUTABLE_SONG_FIELDS = new Set(ALLOWED_UPDATE_FIELDS);
 const BOT_PREFIX = '\u200F🤖 ';
+const DEFAULT_REHEARSAL_DURATION_MINUTES = 180;
+const REHEARSAL_BREAK_MINUTES = 10;
+const DEFAULT_SONG_DURATION_SECONDS = 4 * 60;
+const SONG_TRANSITION_SECONDS = 60;
+const JAM_BUFFER_BY_FEEL_SECONDS = {
+  upbeat: 90,
+  calm: 45,
+  ballad: 60
+};
+const MISTAKE_BUFFER_BY_DIFFICULTY_SECONDS = {
+  low: 45,
+  medium: 75,
+  high: 120
+};
 const FIT_LABELS = {
   unknown: '\u05dc\u05d0 \u05d9\u05d3\u05d5\u05e2',
   good: '\u05e2\u05d5\u05d1\u05d3 \u05d8\u05d5\u05d1',
@@ -273,10 +287,9 @@ function isSongInfoRequest(messageText) {
   return /(?:מידע|פרטים|תן מידע|תביא מידע|ספר לי על|מה אתה יודע על|מתי ניגנו|מתי ניגנתם|info|details)/iu.test(normalized);
 }
 
-function parseSongIdentityText(text) {
+function parseSongIdentityLine(text) {
   const source = String(text || '').trim();
   if (!source) return null;
-
   const dashSeparatorIndex = source.lastIndexOf(' - ');
   if (dashSeparatorIndex > 0) {
     const songTitle = source.slice(0, dashSeparatorIndex).trim();
@@ -302,6 +315,108 @@ function parseSongIdentityText(text) {
     if (songTitle && artist) {
       return { song_title: songTitle, artist, confidence: 0.5 };
     }
+  }
+
+  return null;
+}
+
+function normalizeSongIdentityLine(text) {
+  return String(text || '')
+    .replace(/^\u200f?🤖\s*/u, '')
+    .replace(/^\d+[.)]\s*/u, '')
+    .replace(/^(?:הבאתי|הנה|קבל|קיבלת|מצאתי|המלצות|הרשימה)\s*:\s*/iu, '')
+    .trim();
+}
+
+function parseSongIdentityText(text) {
+  const source = String(text || '').trim();
+  if (!source) return null;
+
+  const direct = parseSongIdentityLine(normalizeSongIdentityLine(source));
+  if (direct) {
+    return direct;
+  }
+
+  const candidates = source
+    .split(/\r?\n/u)
+    .map((line) => normalizeSongIdentityLine(line))
+    .map((line) => parseSongIdentityLine(line))
+    .filter(Boolean);
+
+  if (candidates.length !== 1) {
+    return null;
+  }
+
+  return candidates[0];
+}
+
+function inferReferencedResultIndexes(messageText) {
+  const matches = Array.from(String(messageText || '').matchAll(/(?:^|[^\d])(\d{1,3})(?=$|[^\d])/gu));
+  return Array.from(
+    new Set(
+      matches
+        .map((match) => Number.parseInt(match[1], 10))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    )
+  );
+}
+
+function extractSongIdentityFromInfoRequest(messageText) {
+  const source = String(messageText || '').trim();
+  if (!source) return null;
+
+  const stripped = source
+    .replace(/^(?:תן|תני|תביא|תביאי|ספר|ספרי)\s+(?:לי\s+)?(?:מידע|פרטים)\s+(?:על\s+)?/iu, '')
+    .replace(/^(?:מה\s+אתה\s+יודע\s+על|מה\s+את\s+יודעת\s+על|ספר\s+לי\s+על|tell me about)\s+/iu, '')
+    .trim();
+
+  if (!stripped || stripped === source) {
+    return null;
+  }
+
+  return parseSongIdentityText(stripped);
+}
+
+function inferSongInfoAction(messageText, replyContext, quotedText = '') {
+  if (!isSongInfoRequest(messageText)) {
+    return null;
+  }
+
+  const resultIndexes = inferReferencedResultIndexes(messageText);
+  const contextResults = Array.isArray(replyContext?.results) ? replyContext.results : [];
+  if (resultIndexes.length === 1 && contextResults.some((entry) => entry?.index === resultIndexes[0])) {
+    return {
+      action: 'get_song_info',
+      result_index: resultIndexes[0]
+    };
+  }
+
+  const directSongIdentity = extractSongIdentityFromInfoRequest(messageText);
+  if (directSongIdentity) {
+    return {
+      action: 'get_song_info',
+      song_title: directSongIdentity.song_title,
+      artist: directSongIdentity.artist
+    };
+  }
+
+  if (
+    contextResults.length === 1 &&
+    /(?:השיר הזה|השיר\s+הזה|זה|this song|this one)/iu.test(String(messageText || '').trim())
+  ) {
+    return {
+      action: 'get_song_info',
+      result_index: contextResults[0].index
+    };
+  }
+
+  const quotedSongIdentity = parseSongIdentityText(quotedText);
+  if (quotedSongIdentity) {
+    return {
+      action: 'get_song_info',
+      song_title: quotedSongIdentity.song_title,
+      artist: quotedSongIdentity.artist
+    };
   }
 
   return null;
@@ -534,6 +649,9 @@ function buildSongForInsert(rawSong, record) {
       : [],
     difficulty: song.difficulty ? String(song.difficulty).trim().toLowerCase() : null,
     feel: song.feel ? String(song.feel).trim().toLowerCase() : null,
+    duration_seconds: Number.isInteger(Number.parseInt(song.duration_seconds, 10)) && Number.parseInt(song.duration_seconds, 10) > 0
+      ? Number.parseInt(song.duration_seconds, 10)
+      : null,
     used: Boolean(song.used),
     created_at: song.created_at || new Date().toISOString(),
     normalized_title: normalizeText(songTitle),
@@ -573,6 +691,331 @@ function formatBadSongsSummary(songs) {
       return `- ${song.song_title}${song.artist ? ` - ${song.artist}` : ''}: ${issues}`;
     })
   ].join('\n');
+}
+
+function formatMinutesLabel(totalMinutes) {
+  const minutes = Math.max(0, Math.round(Number(totalMinutes) || 0));
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  if (hours <= 0) {
+    return `${minutes} דק'`;
+  }
+  return `${hours}:${String(remainder).padStart(2, '0')} שעות`;
+}
+
+function formatSlotDuration(seconds) {
+  const minutes = Math.max(1, Math.round((Number(seconds) || 0) / 60));
+  return `${minutes} דק'`;
+}
+
+function getSongDurationSeconds(song) {
+  const parsed = Number.parseInt(song?.duration_seconds, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_SONG_DURATION_SECONDS;
+}
+
+function buildDurationEstimationPrompt(songs) {
+  return JSON.stringify({
+    songs: (Array.isArray(songs) ? songs : []).map((song) => ({
+      song_id: String(song?.song_id || '').trim(),
+      song_title: String(song?.song_title || '').trim(),
+      artist: String(song?.artist || '').trim(),
+      genres: Array.isArray(song?.genres) ? song.genres : [],
+      feel: song?.feel || null,
+      difficulty: song?.difficulty || null
+    }))
+  });
+}
+
+async function estimateMissingDurations({
+  songs,
+  config,
+  estimateSongDurationsFn
+}) {
+  const missingSongs = (Array.isArray(songs) ? songs : []).filter((song) => !Number.isInteger(Number.parseInt(song?.duration_seconds, 10)));
+  if (!missingSongs.length) {
+    return [];
+  }
+
+  if (typeof estimateSongDurationsFn === 'function') {
+    const estimated = await estimateSongDurationsFn(missingSongs);
+    return Array.isArray(estimated) ? estimated : [];
+  }
+
+  if (!config?.llmBaseUrl || !config?.llmModel) {
+    return [];
+  }
+
+  const systemPrompt = [
+    'You estimate song durations for rehearsal planning.',
+    'Return exactly one JSON object. No prose.',
+    'Schema: {"durations":[{"song_id":"...","duration_seconds":123}]}',
+    'duration_seconds must be a positive integer.',
+    'Estimate likely studio-song duration, not rehearsal slot duration.',
+    'Include only songs you can estimate confidently.'
+  ].join('\n');
+
+  try {
+    const { parsed } = await callOpenAiCompatibleChat({
+      baseUrl: config.llmBaseUrl,
+      apiKey: config.llmApiKey,
+      model: config.llmModel,
+      systemPrompt,
+      prompt: buildDurationEstimationPrompt(missingSongs),
+      maxCompletionTokens: 400
+    });
+    return Array.isArray(parsed?.durations) ? parsed.durations : [];
+  } catch (error) {
+    console.error('[duration_estimate] failed', error);
+    return [];
+  }
+}
+
+function estimateRehearsalSongSlotSeconds(song) {
+  const feel = String(song?.feel || '').trim().toLowerCase();
+  const difficulty = String(song?.difficulty || '').trim().toLowerCase();
+  return getSongDurationSeconds(song)
+    + (JAM_BUFFER_BY_FEEL_SECONDS[feel] || 60)
+    + (MISTAKE_BUFFER_BY_DIFFICULTY_SECONDS[difficulty] || 75)
+    + SONG_TRANSITION_SECONDS;
+}
+
+function wantsCoherentRehearsalSet(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return false;
+  return /(?:קשר ביניהם|קשור(?:ים|ות)? ביניהם|קו משותף|אותו וייב|אותה אווירה|זורם יחד|flow together|cohesive|similar vibe)/iu.test(source);
+}
+
+function listOverlapScore(left, right) {
+  const leftItems = Array.isArray(left) ? left.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean) : [];
+  const rightItems = Array.isArray(right) ? right.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean) : [];
+  if (!leftItems.length || !rightItems.length) return 0;
+  const rightSet = new Set(rightItems);
+  let matches = 0;
+  for (const item of leftItems) {
+    if (rightSet.has(item)) matches += 1;
+  }
+  return matches;
+}
+
+function normalizedScalar(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function scoreRehearsalCoherence(candidate, selectedSongs, anchorSong) {
+  if (!anchorSong) return 0;
+
+  let score = 0;
+  score += listOverlapScore(candidate?.genres, anchorSong?.genres) * 6;
+  score += listOverlapScore(candidate?.genres, selectedSongs.flatMap((song) => song?.genres || [])) * 2;
+
+  if (normalizedScalar(candidate?.feel) && normalizedScalar(candidate?.feel) === normalizedScalar(anchorSong?.feel)) {
+    score += 5;
+  }
+  if (normalizedScalar(candidate?.difficulty) && normalizedScalar(candidate?.difficulty) === normalizedScalar(anchorSong?.difficulty)) {
+    score += 3;
+  }
+  if (normalizedScalar(candidate?.language) && normalizedScalar(candidate?.language) === normalizedScalar(anchorSong?.language)) {
+    score += 2;
+  }
+  if (normalizedScalar(candidate?.ai_metadata?.band_energy) && normalizedScalar(candidate?.ai_metadata?.band_energy) === normalizedScalar(anchorSong?.ai_metadata?.band_energy)) {
+    score += 3;
+  }
+  if (normalizedScalar(candidate?.ai_metadata?.groove_level) && normalizedScalar(candidate?.ai_metadata?.groove_level) === normalizedScalar(anchorSong?.ai_metadata?.groove_level)) {
+    score += 2;
+  }
+
+  const sameArtistCount = selectedSongs.filter((song) => normalizedScalar(song?.artist) === normalizedScalar(candidate?.artist)).length;
+  if (sameArtistCount > 0) {
+    score -= 12 + (sameArtistCount * 4);
+  }
+
+  const sameFeelCount = selectedSongs.filter((song) => normalizedScalar(song?.feel) === normalizedScalar(candidate?.feel)).length;
+  if (sameFeelCount >= 2) {
+    score -= 4 + sameFeelCount;
+  }
+
+  const sameDifficultyCount = selectedSongs.filter((song) => normalizedScalar(song?.difficulty) === normalizedScalar(candidate?.difficulty)).length;
+  if (sameDifficultyCount >= 3) {
+    score -= 2;
+  }
+
+  return score;
+}
+
+function orderRehearsalSongsForCohesion(songs) {
+  const pool = Array.isArray(songs) ? songs.filter(Boolean) : [];
+  if (pool.length <= 2) {
+    return pool;
+  }
+
+  const ordered = [pool[0]];
+  const remaining = pool.slice(1);
+  const anchorSong = ordered[0];
+
+  while (remaining.length > 0) {
+    let bestIndex = 0;
+    let bestScore = Number.NEGATIVE_INFINITY;
+
+    for (let index = 0; index < remaining.length; index += 1) {
+      const candidate = remaining[index];
+      const score = scoreRehearsalCoherence(candidate, ordered, anchorSong);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    }
+
+    ordered.push(remaining.splice(bestIndex, 1)[0]);
+  }
+
+  return ordered;
+}
+
+function buildRehearsalPlanSongs({ songs, query, activeContext, stateStore, chatId, messageText = '' }) {
+  const plannerQuery = {
+    ...(query || {}),
+    requirements: {
+      ...((query && query.requirements) || {}),
+      excludeRejected:
+        typeof query?.requirements?.excludeRejected === 'boolean'
+          ? query.requirements.excludeRejected
+          : true
+    },
+    limit: Math.min(Math.max(Array.isArray(songs) ? songs.length : 0, 1), 50)
+  };
+
+  const { candidateSongs, afterPreviousFilter } = buildSearchCandidates({
+    songs,
+    query: plannerQuery,
+    activeContext,
+    stateStore,
+    chatId
+  });
+
+  const matches = runSongSearchWithFallback({
+    songs,
+    query: plannerQuery,
+    candidateSongs,
+    afterPreviousFilter
+  });
+
+  if (wantsCoherentRehearsalSet(messageText) && matches.length > 0) {
+    return orderRehearsalSongsForCohesion(matches);
+  }
+
+  return matches;
+}
+
+function buildRehearsalPlan({ songs, durationMinutes }) {
+  const totalMinutes = Number.isInteger(Number.parseInt(durationMinutes, 10))
+    ? Number.parseInt(durationMinutes, 10)
+    : DEFAULT_REHEARSAL_DURATION_MINUTES;
+  const breakCount = totalMinutes > 180 ? 2 : 1;
+  const breakMinutes = breakCount * REHEARSAL_BREAK_MINUTES;
+  const availableSongSeconds = Math.max(0, (totalMinutes - breakMinutes) * 60);
+  const selectedSongs = [];
+  let selectedSeconds = 0;
+
+  for (const song of Array.isArray(songs) ? songs : []) {
+    const slotSeconds = estimateRehearsalSongSlotSeconds(song);
+    const remainingSeconds = availableSongSeconds - selectedSeconds;
+    if (selectedSongs.length > 0 && slotSeconds > remainingSeconds) {
+      continue;
+    }
+    selectedSongs.push({ song, slotSeconds });
+    selectedSeconds += slotSeconds;
+    if (selectedSeconds >= availableSongSeconds) {
+      break;
+    }
+  }
+
+  const chunkCount = breakCount + 1;
+  const chunkTargetSeconds = chunkCount > 0 ? Math.floor(availableSongSeconds / chunkCount) : availableSongSeconds;
+  const items = [];
+  let chunkSeconds = 0;
+  let insertedBreaks = 0;
+
+  for (let index = 0; index < selectedSongs.length; index += 1) {
+    const entry = selectedSongs[index];
+    items.push({
+      type: 'song',
+      song: entry.song,
+      slotSeconds: entry.slotSeconds
+    });
+    chunkSeconds += entry.slotSeconds;
+
+    const songsRemaining = selectedSongs.length - index - 1;
+    const breaksRemaining = breakCount - insertedBreaks;
+    if (breaksRemaining > 0 && songsRemaining > breaksRemaining && chunkSeconds >= chunkTargetSeconds) {
+      items.push({
+        type: 'break',
+        minutes: REHEARSAL_BREAK_MINUTES
+      });
+      insertedBreaks += 1;
+      chunkSeconds = 0;
+    }
+  }
+
+  return {
+    durationMinutes: totalMinutes,
+    breakCount,
+    breakMinutes,
+    songMinutes: Math.round(selectedSeconds / 60),
+    totalPlannedMinutes: Math.round((selectedSeconds / 60) + breakMinutes),
+    slackMinutes: Math.max(0, totalMinutes - Math.round((selectedSeconds / 60) + breakMinutes)),
+    songs: selectedSongs.map((entry) => entry.song),
+    items
+  };
+}
+
+function formatRehearsalPlanReply(plan) {
+  if (!plan?.songs?.length) {
+    return 'לא מצאתי מספיק שירים מתאימים לחזרה.';
+  }
+
+  const lines = [
+    `רשימת חזרה ל-${formatMinutesLabel(plan.durationMinutes)}`,
+    `זמן נגינה מתוכנן: ${formatMinutesLabel(plan.songMinutes)}`,
+    `הפסקות: ${plan.breakCount} x ${REHEARSAL_BREAK_MINUTES} דק'`,
+    plan.slackMinutes > 0 ? `רזרבה: ${plan.slackMinutes} דק'` : null,
+    ''
+  ].filter(Boolean);
+
+  let songIndex = 0;
+  for (const item of plan.items) {
+    if (item.type === 'break') {
+      lines.push(`הפסקה - ${item.minutes} דק'`);
+      continue;
+    }
+    songIndex += 1;
+    lines.push(`${songIndex}. ${item.song.song_title}${item.song.artist ? ` - ${item.song.artist}` : ''} | כ-${formatSlotDuration(item.slotSeconds)}`);
+  }
+
+  return lines.join('\n');
+}
+
+async function sendRehearsalPlanReply({ chat, stateStore, chatId, plan, query = null }) {
+  if (!plan?.songs?.length) {
+    await sendBotMessage(chat, 'לא מצאתי מספיק שירים מתאימים לחזרה.');
+    return;
+  }
+
+  const sentMessage = await sendBotMessage(chat, formatRehearsalPlanReply(plan));
+  const botMessageId = extractBotMessageId(sentMessage);
+  persistResultContext(stateStore, {
+    chatId,
+    botMessageId,
+    songs: plan.songs,
+    query,
+    createdAt: new Date().toISOString()
+  });
+  if (typeof stateStore.recordRecommendations === 'function') {
+    stateStore.recordRecommendations(
+      chatId,
+      plan.songs.map((song) => song.song_id).filter(Boolean)
+    );
+  }
+  await stateStore.queueSave();
 }
 
 function buildBandStatusQuery(fit) {
@@ -704,6 +1147,49 @@ function buildReplacementIndexes(query, activeContext) {
   return indexes.filter((index) => validIndexes.has(index));
 }
 
+function shuffleSongs(songs) {
+  const items = Array.isArray(songs) ? [...songs] : [];
+  for (let index = items.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [items[index], items[swapIndex]] = [items[swapIndex], items[index]];
+  }
+  return items;
+}
+
+function fillReplacementSongsWithRandomFallbacks({
+  songs,
+  candidateSongs,
+  afterPreviousFilter,
+  context,
+  replacementSongs,
+  replacementIndexes
+}) {
+  const needed = Math.max(0, replacementIndexes.length - replacementSongs.length);
+  if (!needed) {
+    return replacementSongs;
+  }
+
+  const excludedSongIds = new Set(
+    context.results
+      .map((entry) => entry.song_id)
+      .concat(replacementSongs.map((song) => song?.song_id))
+      .filter(Boolean)
+  );
+
+  const fallbackPool = [];
+  for (const source of [candidateSongs, afterPreviousFilter, songs]) {
+    for (const song of Array.isArray(source) ? source : []) {
+      if (!song?.song_id || excludedSongIds.has(song.song_id)) {
+        continue;
+      }
+      excludedSongIds.add(song.song_id);
+      fallbackPool.push(song);
+    }
+  }
+
+  return replacementSongs.concat(shuffleSongs(fallbackPool).slice(0, needed));
+}
+
 function rebuildResultListWithReplacements({ context, stateStore, replacementIndexes, replacementSongs }) {
   const replacementMap = new Map();
   replacementIndexes.forEach((index, replacementPosition) => {
@@ -712,10 +1198,11 @@ function rebuildResultListWithReplacements({ context, stateStore, replacementInd
 
   return context.results
     .map((entry) => {
+      const originalSong = entry.song_id ? stateStore.getSongById(entry.song_id) : null;
       if (replacementMap.has(entry.index)) {
-        return replacementMap.get(entry.index);
+        return replacementMap.get(entry.index) || originalSong;
       }
-      return entry.song_id ? stateStore.getSongById(entry.song_id) : null;
+      return originalSong;
     })
     .filter(Boolean);
 }
@@ -744,7 +1231,7 @@ async function sendSongsReply({ chat, stateStore, chatId, songs, query = null })
   await stateStore.queueSave();
 }
 
-async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext }) {
+async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn }) {
   const activeContext = resolveActiveResultContext(stateStore, record);
   const songs = stateStore.getSongs();
 
@@ -762,23 +1249,31 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
         limit: replacementIndexes.length,
         avoid_previous_results: true
       };
-      const { candidateSongs, afterPreviousFilter } = buildSearchCandidates({
-        songs,
-        query: replacementQuery,
-        activeContext,
-        stateStore,
-        chatId: record.chatId
-      });
-      const replacementSongs = runSongSearchWithFallback({
-        songs,
-        query: replacementQuery,
-        candidateSongs,
-        afterPreviousFilter
-      });
-      if (!replacementSongs.length) {
-        await sendBotMessage(chat, '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05d4\u05d7\u05dc\u05e4\u05d5\u05ea \u05de\u05ea\u05d0\u05d9\u05de\u05d5\u05ea.');
-        return;
-      }
+        const { candidateSongs, afterPreviousFilter } = buildSearchCandidates({
+          songs,
+          query: replacementQuery,
+          activeContext,
+          stateStore,
+          chatId: record.chatId
+        });
+        const replacementMatches = runSongSearchWithFallback({
+          songs,
+          query: replacementQuery,
+          candidateSongs,
+          afterPreviousFilter
+        });
+        const replacementSongs = fillReplacementSongsWithRandomFallbacks({
+          songs,
+          candidateSongs,
+          afterPreviousFilter,
+          context: activeContext.context,
+          replacementSongs: replacementMatches,
+          replacementIndexes
+        });
+        if (!replacementSongs.length) {
+          await sendBotMessage(chat, '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05d4\u05d7\u05dc\u05e4\u05d5\u05ea \u05de\u05ea\u05d0\u05d9\u05de\u05d5\u05ea.');
+          return;
+        }
       const rebuiltSongs = rebuildResultListWithReplacements({
         context: activeContext.context,
         stateStore,
@@ -814,6 +1309,56 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       chatId: record.chatId,
       songs: matches,
       query: sanitizeQueryForResultContext(action.query || {}, matches.length)
+    });
+    return;
+  }
+
+  if (action.action === 'prepare_rehearsal') {
+    let rehearsalSongs = buildRehearsalPlanSongs({
+      songs,
+      query: action.query || {},
+      activeContext,
+      stateStore,
+      chatId: record.chatId,
+      messageText
+    });
+    const durationEstimates = await estimateMissingDurations({
+      songs: rehearsalSongs,
+      config,
+      estimateSongDurationsFn
+    });
+    if (Array.isArray(durationEstimates) && durationEstimates.length > 0) {
+      for (const entry of durationEstimates) {
+        const songId = String(entry?.song_id || '').trim();
+        const durationSeconds = Number.parseInt(entry?.duration_seconds, 10);
+        if (!songId || !Number.isInteger(durationSeconds) || durationSeconds <= 0) {
+          continue;
+        }
+        stateStore.updateSongById(songId, (song) => ({
+          ...song,
+          duration_seconds: durationSeconds
+        }));
+      }
+      await stateStore.queueSave();
+      rehearsalSongs = buildRehearsalPlanSongs({
+        songs: stateStore.getSongs(),
+        query: action.query || {},
+        activeContext,
+        stateStore,
+        chatId: record.chatId,
+        messageText
+      });
+    }
+    const plan = buildRehearsalPlan({
+      songs: rehearsalSongs,
+      durationMinutes: action.duration_minutes
+    });
+    await sendRehearsalPlanReply({
+      chat,
+      stateStore,
+      chatId: record.chatId,
+      plan,
+      query: sanitizeQueryForResultContext(action.query || {}, plan.songs.length)
     });
     return;
   }
@@ -997,7 +1542,8 @@ async function handleAgentMessage({
   record,
   recentMessages = [],
   interpretMessageFn = interpretMessage,
-  prepareSongsForReplyFn = prepareSongsForReply
+  prepareSongsForReplyFn = prepareSongsForReply,
+  estimateSongDurationsFn
 }) {
   const handling = shouldHandleMessage(record, config.triggerText);
   const replyContext = buildAgentReplyContext(stateStore, record);
@@ -1022,25 +1568,23 @@ async function handleAgentMessage({
     });
   }
 
-  const quotedSongIdentity = parseSongIdentityText(record?.quoted?.text || record?.quotedText || '');
-  if (quotedSongIdentity && isSongInfoRequest(messageText)) {
+  const quotedText = record?.quoted?.text || record?.quotedText || '';
+  const inferredSongInfoAction = inferSongInfoAction(messageText, replyContext, quotedText);
+  if (inferredSongInfoAction) {
     await executeAgentAction({
-      action: {
-        action: 'get_song_info',
-        song_title: quotedSongIdentity.song_title,
-        artist: quotedSongIdentity.artist
-      },
+      action: inferredSongInfoAction,
       stateStore,
       chat,
+      config,
       record,
       messageText,
-      replyContext
+      replyContext,
+      estimateSongDurationsFn
     });
     return true;
   }
 
   try {
-    const quotedText = record?.quoted?.text || record?.quotedText || '';
     const agentMessageText = buildAgentMessageText(
       messageText,
       recentMessages,
@@ -1063,7 +1607,16 @@ async function handleAgentMessage({
       return true;
     }
 
-    await executeAgentAction({ action, stateStore, chat, record, messageText: agentMessageText, replyContext });
+    await executeAgentAction({
+      action,
+      stateStore,
+      chat,
+      config,
+      record,
+      messageText: agentMessageText,
+      replyContext,
+      estimateSongDurationsFn
+    });
   } catch (error) {
     console.error('[agent] failed:', error);
     await sendBotMessage(chat, buildAgentFailureReply(error));
