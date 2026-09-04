@@ -662,19 +662,43 @@ function buildSongForInsert(rawSong, record) {
   };
 }
 
-function buildFeedbackConfirmation(updatedSongs) {
+function feedbackConfirmationLabel(song, messageText) {
+  const request = String(messageText || '').trim();
+  const issues = Array.isArray(song?.band_status?.issues) ? song.band_status.issues : [];
+
+  // Prefer the user's own feedback vocabulary over the internal fit category.
+  if (issues.includes('too_hard') || /(?:קשה|קשוח|מאתגר|מסובך|hard|challenging)/iu.test(request)) {
+    return 'קשה';
+  }
+  if (issues.includes('too_easy') || /(?:קל מדי|קל|easy)/iu.test(request)) {
+    return 'קל מדי';
+  }
+  if (/(?:לא עבד|לא עובד|didn['’]?t work|doesn['’]?t work)/iu.test(request)) {
+    return 'לא עבד';
+  }
+  if (/(?:לא מתאים|לא מתאימה|לא לנו|not suitable|doesn['’]?t fit)/iu.test(request)) {
+    return 'לא מתאים';
+  }
+  if (issues.includes('doesnt_groove') || /(?:לא גרובי|לא יושב|לא זורם)/iu.test(request)) {
+    return 'לא זורם';
+  }
+
+  return FIT_LABELS[song?.band_status?.fit] || song?.band_status?.fit;
+}
+
+function buildFeedbackConfirmation(updatedSongs, messageText) {
   if (updatedSongs.length === 0) {
     return '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05de\u05d4 \u05dc\u05e2\u05d3\u05db\u05df.';
   }
 
   if (updatedSongs.length === 1) {
     const song = updatedSongs[0];
-    return `\u05e2\u05d3\u05db\u05e0\u05ea\u05d9: ${song.song_title} - ${FIT_LABELS[song.band_status.fit] || song.band_status.fit}`;
+    return `\u05e2\u05d3\u05db\u05e0\u05ea\u05d9: ${song.song_title} - ${feedbackConfirmationLabel(song, messageText)}`;
   }
 
   return [
     '\u05e2\u05d3\u05db\u05e0\u05ea\u05d9:',
-    ...updatedSongs.map((song) => `- ${song.song_title} - ${FIT_LABELS[song.band_status.fit] || song.band_status.fit}`)
+    ...updatedSongs.map((song) => `- ${song.song_title} - ${feedbackConfirmationLabel(song, messageText)}`)
   ].join('\n');
 }
 
@@ -1484,7 +1508,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
     }
 
     await stateStore.queueSave();
-    await sendBotMessage(chat, buildFeedbackConfirmation(updatedSongs));
+    await sendBotMessage(chat, buildFeedbackConfirmation(updatedSongs, messageText));
     return;
   }
 

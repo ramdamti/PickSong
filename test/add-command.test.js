@@ -848,7 +848,8 @@ test('executeAgentAction updates feedback by result index using stored context',
     record: {
       chatId: 'chat-1',
       quoted: { id: 'wamid-1' }
-    }
+    },
+    messageText: 'בוט שיר 1 קשה'
   });
 
   assert.equal(saved, true);
@@ -856,7 +857,8 @@ test('executeAgentAction updates feedback by result index using stored context',
   assert.deepEqual(updated.band_status.issues, ['vocals_too_high']);
   assert.match(sentMessages[0], /^\u200F🤖 /u);
   assert.match(sentMessages[0], /Zombie - /u);
-  assert.match(sentMessages[0], /\u05dc\u05d0 \u05e2\u05d1\u05d3/u);
+  assert.match(sentMessages[0], /\u05e7\u05e9\u05d4/u);
+  assert.doesNotMatch(sentMessages[0], /\u05dc\u05d0 \u05e2\u05d1\u05d3/u);
 });
 
 test('executeAgentAction confirms positive feedback as good instead of unknown', async () => {
@@ -980,7 +982,7 @@ test('executeAgentAction confirms too-easy feedback as maybe instead of bad', as
   assert.equal(updated.band_status.fit, 'maybe');
   assert.match(sentMessages[0], /^\u200F🤖 /u);
   assert.match(sentMessages[0], /Zombie - /u);
-  assert.match(sentMessages[0], /\u05d0\u05d5\u05dc\u05d9/u);
+  assert.match(sentMessages[0], /\u05e7\u05dc \u05de\u05d3\u05d9/u);
 });
 
 test('executeAgentAction explain_song_rejection explains why a bad song was rejected', async () => {
