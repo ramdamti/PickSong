@@ -246,15 +246,17 @@ function normalizeResultContext(value) {
             value.query.exclusions && typeof value.query.exclusions === 'object' && !Array.isArray(value.query.exclusions)
               ? { ...value.query.exclusions }
               : undefined,
-          replace_result_indexes: Array.isArray(value.query.replace_result_indexes)
-            ? Array.from(
-                new Set(
-                  value.query.replace_result_indexes
-                    .map((item) => Number.parseInt(item, 10))
-                    .filter((item) => Number.isInteger(item) && item > 0)
+          ...(Array.isArray(value.query.replace_result_indexes)
+            ? {
+                replace_result_indexes: Array.from(
+                  new Set(
+                    value.query.replace_result_indexes
+                      .map((item) => Number.parseInt(item, 10))
+                      .filter((item) => Number.isInteger(item) && item > 0)
+                  )
                 )
-              )
-            : undefined
+              }
+            : {})
         }
       : undefined;
 

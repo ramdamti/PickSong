@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="2550" viewBox="0 0 1600 2550">
+  <foreignObject width="100%" height="100%">
+    <div xmlns="http://www.w3.org/1999/xhtml" dir="rtl" style="box-sizing:border-box;width:1600px;height:2550px;background:#fff;color:#20252b;font-family:Arial,'Noto Sans Hebrew',sans-serif;padding:80px 110px;font-size:30px;line-height:1.5;text-align:right;">
+      <style>
+        *{box-sizing:border-box} p{margin:0 0 34px} ul{margin:0;padding:0;list-style:none} li{margin:0 0 30px} h2{font-size:38px;color:#087b78;margin:0 0 10px;font-weight:700} code{font-family:Arial,'Noto Sans Hebrew',sans-serif;background:#eef7f7;border-radius:6px;padding:2px 7px;direction:rtl;unicode-bidi:plaintext}.rule{border-top:2px solid #82cfca;margin:26px 0 30px}.small{font-size:28px}.intro{font-size:34px;font-weight:600;border-right:8px solid #087b78;padding-right:20px}.example{display:block;margin-top:6px}.end{font-size:32px;font-weight:600;color:#20252b;margin-top:14px}
+      </style>
+      <p class="intro">כל פנייה חדשה מתחילה ב־<code>בוט</code>. כתגובה להודעה של 🤖 אפשר לכתוב ישירות, בלי <code>בוט</code>.</p>
+      <div class="rule"></div>
+      <ul>
+        <li><h2>• המלצות וחיפוש</h2><span class="example"><code>בוט תן 5 שירים קצביים לחזרה</code></span><span class="example"><code>בוט שירים של רד הוט צ׳ילי פפרז</code></span><span class="example"><code>בוט שירים רגועים באנגלית</code></span><span class="example"><code>בוט תן שיר קל לגיטרה אבל עם תופים מעניינים</code></span><span class="example"><code>בוט תן שירים עם קלידים</code></span><span class="example"><code>בוט תן שירים שמתאימים לקהל</code></span></li>
+        <li><div class="rule"></div><h2>• המשך לרשימת תוצאות</h2><span class="example">בתגובה לרשימה של הבוט: <code>עוד כאלה כמו 2</code></span><span class="example"><code>מידע על 3</code></span><span class="example"><code>למה 4 לא מתאים לנו?</code></span><span class="example"><code>תביא חלופות ל־1</code></span><span class="example"><code>אקורדים</code> — מחזיר קישורי אקורדים לשירים ברשימה.</span></li>
+        <li><div class="rule"></div><h2>• הוספת שיר למאגר</h2><span class="example"><code>בוט תוסיף Zombie של The Cranberries</code></span><span class="example">בתגובה להודעה עם שם שיר: <code>בוט תוסיף למאגר</code></span></li>
+        <li><div class="rule"></div><h2>• עדכון שיר</h2><span class="example"><code>בוט שנה את שם השיר מ־Wonderwall ל־Wonder Wall</code></span><span class="example"><code>בוט עדכן את האמן של 2 ל־Oasis</code></span><span class="example"><code>בוט עדכן את 3 לרמת קושי קשה</code></span><span class="example">אפשר לעדכן שם, אמן, שפה, ז׳אנרים, קושי, אווירה, אקורדים ופרטי התאמה ללהקה.</span></li>
+        <li><div class="rule"></div><h2>• מחיקת שיר</h2><span class="example"><code>בוט מחק את Zombie של The Cranberries</code></span><span class="example">או בתגובה לרשימה: <code>מחק את 2</code></span></li>
+        <li><div class="rule"></div><h2>• פידבק והתאמה ללהקה</h2><span class="example">בתגובה לרשימה: <code>1 טוב לנו, 2 אולי, 3 לא מתאים</code></span><span class="example"><code>3 קשה מדי לגיטרה</code></span><span class="example"><code>2 קל מדי</code></span><span class="example"><code>4 לא מתאים לסולן</code></span><span class="example">הבוט שומר סטטוס טוב / אולי / לא מתאים, בעיות והערות.</span></li>
+        <li><div class="rule"></div><h2>• שאילתות על המאגר</h2><span class="example"><code>בוט תראה שירים שטובים לנו</code></span><span class="example"><code>בוט תראה שירים שאולי מתאימים</code></span><span class="example"><code>בוט תראה שירים שלא מתאימים</code></span><span class="example"><code>בוט למה השירים האלה נפסלו?</code></span></li>
+      </ul>
+      <div class="rule"></div><p class="end">אפשר לנסח חופשי בעברית — לא חייבים להשתמש בניסוח המדויק של הדוגמאות.</p>
+    </div>
+  </foreignObject>
+</svg>

@@ -156,6 +156,7 @@ test('createStateStore stores per-chat result context and preserves it on save',
     assert.equal(reloaded.schema_version, 3);
     assert.equal(reloaded.chats['chat-1'].last_results.results[0].song_id, 'song_123456789abc');
     assert.equal(reloaded.chats['chat-1'].last_results.query.requirements.artist, 'Rockfour');
+    assert.equal('replace_result_indexes' in reloaded.chats['chat-1'].last_results.query, false);
     assert.equal(reloaded.result_messages['wamid-1'].results[0].title, 'Zombie');
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
