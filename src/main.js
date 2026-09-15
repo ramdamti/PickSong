@@ -1689,8 +1689,9 @@ async function handleAgentMessage({
         await sendBotMessage(chat, '\u05e1\u05d1\u05d1\u05d4, \u05dc\u05d0 \u05d4\u05d5\u05e1\u05e4\u05ea\u05d9.');
         return true;
       }
-      await sendBotMessage(chat, '\u05dc\u05d0 \u05d4\u05d1\u05e0\u05ea\u05d9 \u05d0\u05dd \u05dc\u05d4\u05d5\u05e1\u05d9\u05e3 \u05d0\u05d5 \u05dc\u05d5\u05d5\u05ea\u05e8.');
-      return true;
+      // A new, unrelated request is an implicit decision not to add the old
+      // song. Drop it silently and continue through the normal agent flow.
+      pendingAdditions.delete(pendingChatId);
     }
   }
 

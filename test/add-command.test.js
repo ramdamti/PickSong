@@ -252,6 +252,25 @@ test('handleAgentMessage reviews difficulty before confirming an add, then accep
   assert.equal(pendingAdditions.size, 0);
   assert.equal(stateStore.song.song_title, 'Hard Song');
   assert.match(sentMessages[2], /לא הוספתי/);
+
+  pendingAdditions.set('chat-1', {
+    song: { song_title: 'Old Hard Song', artist: 'Artist', difficulty: 'high' },
+    createdAt: Date.now()
+  });
+  await handleAgentMessage({
+    chat, stateStore, config, pendingAdditions,
+    record: { text: 'bot do something else', quoted: { fromMe: false }, chatId: 'chat-1' },
+    interpretAdditionConfirmationFn: async () => 'unclear',
+    interpretMessageFn: async () => {
+      agentCalls += 1;
+      return { action: 'clarify', question: 'new request handled' };
+    }
+  });
+
+  assert.equal(agentCalls, 2);
+  assert.equal(pendingAdditions.size, 0);
+  assert.equal(stateStore.song.song_title, 'Hard Song');
+  assert.match(sentMessages[3], /new request handled/);
 });
 
 test('handleAgentMessage promotes overall difficulty when the agent marks an instrument part high', async () => {
