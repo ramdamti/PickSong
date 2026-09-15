@@ -435,7 +435,7 @@ async function interpretAdditionConfirmation({
     prompt,
     systemPrompt: `${ADDITION_CONFIRMATION_SYSTEM_PROMPT}\nReturn only one lowercase word: positive, negative, or unclear.`,
     requestFn,
-    maxCompletionTokens: 80,
+    maxCompletionTokens: 256,
     responseFormat: 'text'
   }));
   const decision = String(parsed?.text || '').trim().toLowerCase();
@@ -456,7 +456,10 @@ async function interpretSongDifficulty({ baseUrl, apiKey, model, song, requestFn
     prompt,
     systemPrompt: SONG_DIFFICULTY_SYSTEM_PROMPT,
     requestFn,
-    maxCompletionTokens: 80,
+    // Reasoning-capable models may spend the first tokens internally and emit
+    // an empty visible response with a tiny cap. Leave enough room to return
+    // the final one-word assessment.
+    maxCompletionTokens: 512,
     responseFormat: 'text'
   }));
   const rawDifficulty = String(parsed?.text || '').trim().toLowerCase();
