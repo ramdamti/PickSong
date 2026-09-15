@@ -31,7 +31,7 @@ const SYSTEM_PROMPT = [
   'Hebrew examples: "מתי ניגנו את 1" -> get_song_info with result_index=1. "תעדכן את 3 ל-רד מעל הטלוויזיה שלי של פורטיס" -> update_song with result_index=3 and corrected song_title/artist. "תביא 4 שירי רוק קלים" -> search_songs with limit=4, rock genre, and low difficulty.',
   'For rehearsal plans, use prepare_rehearsal; default duration_minutes to 180.',
   'Prefer taking a reasonable search interpretation over asking a clarification question.',
-  'For banter/off-topic without an explicit song action, clarify.question is one brutal, specific, dry/sarcastic Hebrew roast, never a question. Be insolent and sometimes gross—not warm or servicey. Riff on details; never redirect to songs or claim/invent facts. No slurs, threats, or protected-trait insults. Do not treat hypothetical rehearsal scenarios as titles. Vary from recent_messages; "לא" alone never means failure reasons. Examples: "זאביק הולך לישון בשבע" -> "זאביק לא הולך לישון, הוא נכנס למצב חיסכון לפני שהפזמון השני מתחיל."; "חזרה בחצי עירום" -> "כל עוד המגבות לא מקבלות סולו, אני בפנים."; "אתה חי?" -> "חי מספיק כדי להצטער ששלחת הודעה."',
+  'For banter/off-topic, clarify.question is a short, declarative Hebrew roast: the field name notwithstanding, never use ? and never echo/parrot the user. Be sharp, varied, and sometimes gross, not servicey. Music/rehearsal riffs are optional, only when natural. Never redirect to songs or invent facts; no slurs, threats, or protected-trait insults.',
   'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
   'Allowed actions: search_songs, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, clarify.',
   'search_songs, prepare_rehearsal, and find_similar_songs return compact query semantics only.',
@@ -50,7 +50,7 @@ const FALLBACK_SYSTEM_PROMPT = [
   'If the user asks for songs by an artist, preserve the artist strongly.',
   'If the user asks for a list of songs, use search_songs.',
   'For an explicit add request, return add_song with non-empty song.song_title and song.artist. Difficulty is mandatory: high for demanding/prog/virtuoso material. Resolve known "A - B" title/artist pairs in either order; never leave the entire phrase as the title or ask again when one side is clearly the artist.',
-  'For banter/off-topic, clarify.question is one brutal, specific, dry/sarcastic Hebrew roast, not a question. Never redirect to songs.',
+  'For banter/off-topic, clarify.question is a declarative Hebrew roast, never a question or an echo of the user. Music/rehearsal references only when natural.',
   'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
   'Return only valid JSON.'
 ].join('\n');
@@ -67,6 +67,13 @@ const SONG_DIFFICULTY_SYSTEM_PROMPT = [
   'Return only one lowercase word: low, medium, high, or unknown.',
   'Judge the hardest meaningful band parts. Technical, progressive, virtuoso, or demanding instrumental material is high.',
   'Do not default to medium when the song is known.'
+].join('\n');
+
+const PLAIN_FALLBACK_SYSTEM_PROMPT = [
+  'You are the fallback conversational voice of a Hebrew WhatsApp band bot after structured JSON failed.',
+  'Decide semantically whether the user requires a song-library action (add, search, update, remove, feedback, rehearsal, song metadata). If so, return exactly ACTION_UNAVAILABLE.',
+  'Otherwise return one short, varied, dry, sarcastic Hebrew reply. Be sharp and human, never warm or servicey; no slurs, threats, or protected-trait insults.',
+  'Return only the reply text, with no label or markdown.'
 ].join('\n');
 
 const SUPPORTED_SEARCH_FIELDS = {
@@ -469,6 +476,25 @@ async function interpretSongDifficulty({ baseUrl, apiKey, model, song, requestFn
     return null;
   }
   return match[1].toLowerCase();
+}
+
+async function interpretPlainFallbackReply({ baseUrl, apiKey, model, messageText, quotedText, requestFn }) {
+  const prompt = JSON.stringify({
+    user_message: String(messageText || '').trim(),
+    quoted_message: String(quotedText || '').trim() || null
+  });
+  const { parsed } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
+    baseUrl,
+    apiKey,
+    model,
+    prompt,
+    systemPrompt: PLAIN_FALLBACK_SYSTEM_PROMPT,
+    requestFn,
+    maxCompletionTokens: 512,
+    responseFormat: 'text'
+  }));
+  const reply = String(parsed?.text || '').trim();
+  return reply || null;
 }
 
 function isRehearsalPlanRequest(messageText) {
@@ -1489,6 +1515,7 @@ module.exports = {
   FALLBACK_SYSTEM_PROMPT,
   ADDITION_CONFIRMATION_SYSTEM_PROMPT,
   SONG_DIFFICULTY_SYSTEM_PROMPT,
+  PLAIN_FALLBACK_SYSTEM_PROMPT,
   MAX_CONCURRENT_AGENT_CALLS,
   DEFAULT_MAX_COMPLETION_TOKENS,
   extractJsonBlock,
@@ -1497,6 +1524,7 @@ module.exports = {
   interpretMessage,
   interpretAdditionConfirmation,
   interpretSongDifficulty,
+  interpretPlainFallbackReply,
   callOpenAiCompatibleChat,
   getAgentUsageStats
 };

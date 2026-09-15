@@ -748,6 +748,26 @@ test('handleAgentMessage blocks generic fallback for short specific hints with a
   assert.deepEqual(sentMessages, ['\u200F🤖 איזה שירים אתה רוצה?']);
 });
 
+test('handleAgentMessage uses the text fallback for a JSON failure on banter', async () => {
+  const sentMessages = [];
+  const stateStore = { getResultMessage() { return null; }, getLastResults() { return null; }, getSongs() { return []; } };
+  const chat = { async sendMessage(text) { sentMessages.push(text); return { id: { _serialized: 'wamid-fallback' } }; } };
+  const jsonError = new Error('LLM request failed: 400 Bad Request json_validate_failed');
+  jsonError.status = 400;
+
+  await handleAgentMessage({
+    chat,
+    stateStore,
+    config: { triggerText: 'bot', llmProvider: 'groq', llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model' },
+    record: { text: 'bot יש לך ערך כלשהו?', quoted: { fromMe: false }, chatId: 'chat-1' },
+    interpretMessageFn: async () => { throw jsonError; },
+    plainFallbackReplyFn: async () => 'יש לי ערך, פשוט הוא במינוס.'
+  });
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /יש לי ערך, פשוט הוא במינוס/);
+});
+
 test('buildAgentFailureReply returns a specific message for rate limits', () => {
   assert.equal(
     buildAgentFailureReply({ rateLimited: true, status: 429, message: 'Too Many Requests' }),

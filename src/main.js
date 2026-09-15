@@ -1,6 +1,6 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
-const { interpretMessage, interpretAdditionConfirmation, interpretSongDifficulty, callOpenAiCompatibleChat } = require('./llm');
+const { interpretMessage, interpretAdditionConfirmation, interpretSongDifficulty, interpretPlainFallbackReply, callOpenAiCompatibleChat } = require('./llm');
 const {
   persistResultContext,
   resolveActiveResultContext,
@@ -1651,6 +1651,7 @@ async function handleAgentMessage({
   interpretMessageFn = interpretMessage,
   interpretAdditionConfirmationFn = interpretAdditionConfirmation,
   reviewSongDifficultyFn,
+  plainFallbackReplyFn = interpretPlainFallbackReply,
   prepareSongsForReplyFn = prepareSongsForReply,
   estimateSongDurationsFn
 }) {
@@ -1761,6 +1762,23 @@ async function handleAgentMessage({
     });
   } catch (error) {
     console.error('[agent] failed:', error);
+    if (Number(error?.status) === 400 && /json_validate_failed/i.test(String(error?.message || ''))) {
+      try {
+        const fallbackReply = await plainFallbackReplyFn({
+          baseUrl: config.llmBaseUrl,
+          apiKey: config.llmApiKey,
+          model: config.llmModel,
+          messageText,
+          quotedText
+        });
+        if (fallbackReply && fallbackReply !== 'ACTION_UNAVAILABLE') {
+          await sendBotMessage(chat, fallbackReply);
+          return true;
+        }
+      } catch (fallbackError) {
+        console.error('[agent] plain_fallback_failed:', fallbackError);
+      }
+    }
     await sendBotMessage(chat, buildAgentFailureReply(error));
   }
   return true;

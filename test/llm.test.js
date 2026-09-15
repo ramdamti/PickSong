@@ -9,6 +9,7 @@ const {
   interpretMessage,
   interpretAdditionConfirmation,
   interpretSongDifficulty,
+  interpretPlainFallbackReply,
   getAgentUsageStats
 } = require('../src/llm');
 
@@ -19,12 +20,11 @@ test('SYSTEM_PROMPT stays compact and stable', () => {
   assert.match(SYSTEM_PROMPT, /מתאים לגיטריסט/);
   assert.match(SYSTEM_PROMPT, /Prefer taking a reasonable search interpretation/);
   assert.match(SYSTEM_PROMPT, /For banter\/off-topic/);
-  assert.match(SYSTEM_PROMPT, /never redirect to songs/);
-  assert.match(SYSTEM_PROMPT, /Do not treat hypothetical rehearsal scenarios as titles/);
+  assert.match(SYSTEM_PROMPT, /never redirect to songs/i);
   assert.match(SYSTEM_PROMPT, /supported_search_fields/);
   assert.match(SYSTEM_PROMPT, /closest supported query parameters/);
-  assert.match(SYSTEM_PROMPT, /brutal, specific, dry\/sarcastic Hebrew roast/);
-  assert.match(SYSTEM_PROMPT, /"לא" alone never means failure reasons/);
+  assert.match(SYSTEM_PROMPT, /never use \? and never echo\/parrot the user/);
+  assert.match(SYSTEM_PROMPT, /Music\/rehearsal riffs are optional/);
 });
 
 test('buildAgentPrompt includes reply context without full database payloads', () => {
@@ -103,6 +103,20 @@ test('interpretSongDifficulty uses a dedicated agent assessment without JSON mod
   });
 
   assert.equal(difficulty, 'high');
+});
+
+test('interpretPlainFallbackReply uses text mode for conversational recovery', async () => {
+  const reply = await interpretPlainFallbackReply({
+    baseUrl: 'https://api.example.com', apiKey: 'test', model: 'test-model',
+    messageText: 'יש לך ערך כלשהו?', quotedText: '',
+    requestFn: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      assert.equal(body.response_format, undefined);
+      return { ok: true, async json() { return { choices: [{ message: { content: 'יש לי ערך, פשוט הוא במינוס.' } }], usage: {} }; } };
+    }
+  });
+
+  assert.equal(reply, 'יש לי ערך, פשוט הוא במינוס.');
 });
 
 test('buildFallbackAgentPrompt keeps only compact context', () => {
