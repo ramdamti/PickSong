@@ -696,10 +696,12 @@ function classifyAdditionConfirmation(messageText) {
   const source = String(messageText || '').trim().toLocaleLowerCase();
   if (!source || source.length > 120) return null;
 
-  if (/^(?:לא|לא רוצה|לא מעוניין|לא מעוניינת|לא משנה|עזוב|עזבי|וותר|תוותר|בטל|תבטל|נוותר|no|nope|cancel)$/iu.test(source)) {
+  // Accept natural short replies such as "אז לא" or "יאללה, כן". Check
+  // negative first so a mixed reply such as "כן אבל לא" safely cancels.
+  if (/(?:^|[\s,!.?])(?:לא|עזוב|עזבי|וותר|תוותר|בטל|תבטל|נוותר|no|nope|cancel)(?:$|[\s,!.?])/iu.test(source)) {
     return 'negative';
   }
-  if (/^(?:כן|כן בטח|בטח|ברור|יאללה|קדימה|תוסיף|להוסיף|רוצה|סבבה|ok|okay|yes|yep|sure|go ahead)$/iu.test(source)) {
+  if (/(?:^|[\s,!.?])(?:כן|בטח|ברור|יאללה|קדימה|תוסיף|להוסיף|רוצה|סבבה|ok|okay|yes|yep|sure)(?:$|[\s,!.?])|\bgo ahead\b/iu.test(source)) {
     return 'positive';
   }
   return null;
