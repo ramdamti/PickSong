@@ -27,7 +27,7 @@ const SYSTEM_PROMPT = [
   'For correction requests like "תתקן את שם השיר", "האמן הנכון הוא ...", "תעדכן את 3 ל-...", or "שיר 2 הוא של ...", prefer update_song.',
   'When correcting a song from reply_context, prefer result_index and place the corrected identity in updates.song_title and/or updates.artist.',
   'When the request includes a clear target song and corrected values, do not use clarify unless the target itself is ambiguous.',
-  'For add_song "A - B", infer whether A/B are artist/title; never duplicate them, and clarify only if unresolved.',
+  'For add_song "A - B", infer whether A/B are artist/title; return just the title in song_title, never the whole A - B string or a duplicate.',
   'Hebrew examples: "מתי ניגנו את 1" -> get_song_info with result_index=1. "תעדכן את 3 ל-רד מעל הטלוויזיה שלי של פורטיס" -> update_song with result_index=3 and corrected song_title/artist. "תביא 4 שירי רוק קלים" -> search_songs with limit=4, rock genre, and low difficulty.',
   'For rehearsal plans, use prepare_rehearsal; default duration_minutes to 180.',
   'Prefer taking a reasonable search interpretation over asking a clarification question.',
@@ -35,7 +35,7 @@ const SYSTEM_PROMPT = [
   'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
   'Allowed actions: search_songs, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, clarify.',
   'search_songs, prepare_rehearsal, and find_similar_songs return compact query semantics only.',
-  'add_song must return a complete canonical song payload when identity is sufficiently clear, including keys_role, keys_type, and keys_difficulty.',
+  'add_song must return complete metadata in ai_metadata; never put keys_role, keys_type, or keys_difficulty at the top level.',
   'update_song_feedback must use result_index for list references.',
   'Band-history questions use get_band_failure_reasons or explain_song_rejection.',
   'Do not return formatted WhatsApp replies.'
@@ -613,6 +613,21 @@ function getExplicitAddCandidate(messageText) {
   return candidate || null;
 }
 
+function getDashedAddParts(messageText) {
+  const candidate = getExplicitAddCandidate(messageText);
+  const match = String(candidate || '').match(/^(.+?)\s*[-–—]\s*(.+)$/u);
+  if (!match) return null;
+
+  const left = String(match[1] || '').trim();
+  const right = String(match[2] || '').trim();
+  return left && right ? { left, right } : null;
+}
+
+function sameSongIdentityPart(left, right) {
+  return String(left || '').trim().normalize('NFKC').toLocaleLowerCase() ===
+    String(right || '').trim().normalize('NFKC').toLocaleLowerCase();
+}
+
 function inferAddSongPayload(messageText) {
   const candidate = getExplicitAddCandidate(messageText);
   if (!candidate) return null;
@@ -1058,19 +1073,28 @@ function normalizeAgentAction(action, { messageText, replyContext, quotedText })
     const song = action.song && typeof action.song === 'object' && !Array.isArray(action.song)
       ? { ...action.song }
       : {};
-    const dashedInput = /^.+?\s*[-–—]\s*.+$/u.test(getExplicitAddCandidate(messageText) || '');
+    const dashedParts = getDashedAddParts(messageText);
+    const dashedInput = Boolean(dashedParts);
     const unambiguousIdentity = inferUnambiguousAddSongPayload(messageText);
     const titleFromModel = typeof song.song_title === 'string' ? song.song_title.trim() : '';
     const artistFromModel = typeof song.artist === 'string' ? song.artist.trim() : '';
     const duplicateDashedIdentity = dashedInput && titleFromModel && artistFromModel &&
-      titleFromModel.localeCompare(artistFromModel, undefined, { sensitivity: 'accent' }) === 0;
+      sameSongIdentityPart(titleFromModel, artistFromModel);
+    // The model may correctly recognize the artist but leave the original whole
+    // "artist - title" phrase in song_title. Once it identifies either side, the
+    // split is unambiguous; support both orders without making a blanket guess.
+    const titleFromDashedArtistMatch = dashedParts && artistFromModel
+      ? (sameSongIdentityPart(artistFromModel, dashedParts.left)
+          ? dashedParts.right
+          : (sameSongIdentityPart(artistFromModel, dashedParts.right) ? dashedParts.left : null))
+      : null;
 
     return {
       ...action,
       song: {
         ...inferredAddSong,
         ...song,
-        song_title: unambiguousIdentity?.song_title || (titleFromModel
+        song_title: unambiguousIdentity?.song_title || titleFromDashedArtistMatch || (titleFromModel
           ? song.song_title.trim()
           : inferredAddSong.song_title),
         artist: unambiguousIdentity?.artist || (!duplicateDashedIdentity && artistFromModel

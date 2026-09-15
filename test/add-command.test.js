@@ -154,6 +154,85 @@ test('handleAgentMessage accepts sparse add_song payloads for explicit add reque
   assert.equal(sentMessages.length, 1);
 });
 
+test('handleAgentMessage preserves legacy top-level keyboard metadata on insertion', async () => {
+  const stateStore = {
+    addSong(song) {
+      this.song = song;
+      return true;
+    },
+    async queueSave() {},
+    getSongs() { return []; },
+    getResultMessage() { return null; },
+    getLastResults() { return null; }
+  };
+  const chat = { async sendMessage() { return { id: { _serialized: 'wamid-keys' } }; } };
+
+  await handleAgentMessage({
+    chat,
+    stateStore,
+    config: { triggerText: 'bot', llmProvider: 'groq', llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model' },
+    record: { text: 'bot add Song by Artist', quoted: { fromMe: false }, chatId: 'chat-1' },
+    interpretMessageFn: async () => ({
+      action: 'add_song',
+      song: {
+        song_title: 'Song', artist: 'Artist', keys_role: 'important',
+        keys_type_any: ['piano'], keys_difficulty: 'hard'
+      }
+    })
+  });
+
+  assert.deepEqual(stateStore.song.ai_metadata, {
+    keys_role: 'important', keys_type: ['piano'], keys_difficulty: 'hard'
+  });
+});
+
+test('handleAgentMessage confirms a high-difficulty add, then accepts a positive reply without another agent call', async () => {
+  const sentMessages = [];
+  const pendingAdditions = new Map();
+  let agentCalls = 0;
+  const stateStore = {
+    addSong(song) { this.song = song; return true; },
+    async queueSave() {},
+    getSongs() { return []; },
+    getResultMessage() { return null; },
+    getLastResults() { return null; }
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+      return { id: { _serialized: `wamid-${sentMessages.length}` } };
+    }
+  };
+  const config = { triggerText: 'bot', llmProvider: 'groq', llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model' };
+
+  await handleAgentMessage({
+    chat, stateStore, config, pendingAdditions,
+    record: { text: 'bot add Hard Song by Artist', quoted: { fromMe: false }, chatId: 'chat-1' },
+    interpretMessageFn: async () => {
+      agentCalls += 1;
+      return { action: 'add_song', song: { song_title: 'Hard Song', artist: 'Artist', difficulty: 'high' } };
+    }
+  });
+
+  assert.equal(stateStore.song, undefined);
+  assert.equal(pendingAdditions.size, 1);
+  assert.match(sentMessages[0], /רמת קושי גבוהה/);
+
+  await handleAgentMessage({
+    chat, stateStore, config, pendingAdditions,
+    record: { text: 'כן בטח', quoted: { fromMe: false, text: sentMessages[0] }, chatId: 'chat-1' },
+    interpretMessageFn: async () => {
+      agentCalls += 1;
+      throw new Error('confirmation must not call the agent');
+    }
+  });
+
+  assert.equal(agentCalls, 1);
+  assert.equal(pendingAdditions.size, 0);
+  assert.equal(stateStore.song.song_title, 'Hard Song');
+  assert.match(sentMessages[1], /הוספתי: Hard Song - Artist/);
+});
+
 test('handleAgentMessage resolves explicit song-info requests without sending them to the agent', async () => {
   const sentMessages = [];
   const song = createSong({

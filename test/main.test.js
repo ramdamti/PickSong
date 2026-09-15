@@ -477,7 +477,7 @@ test('handleAgentMessage rewrites plain add requests using the replied song mess
   assert.equal(sentMessages.length, 1);
 });
 
-test('handleAgentMessage resolves replied song identity for info requests without calling the agent', async () => {
+test('handleAgentMessage answers metadata questions about an added song reply without calling the agent', async () => {
   let agentCalls = 0;
   const sentMessages = [];
   const song = {
@@ -551,8 +551,8 @@ test('handleAgentMessage resolves replied song identity for info requests withou
       llmModel: 'test-model'
     },
     record: {
-      text: '\u05d1\u05d5\u05d8 \u05ea\u05df \u05de\u05d9\u05d3\u05e2 \u05e2\u05dc \u05d4\u05e9\u05d9\u05e8',
-      quoted: { fromMe: false, text: 'wish you where here - Pink Floyd' },
+      text: '\u05d1\u05d5\u05d8 \u05de\u05d4 \u05e8\u05de\u05ea \u05d4\u05e7\u05d5\u05e9\u05d9 \u05e9\u05dc \u05d4\u05e9\u05d9\u05e8',
+      quoted: { fromMe: false, text: '\u200f🤖 \u05d4\u05d5\u05e1\u05e4\u05ea\u05d9: wish you where here - Pink Floyd' },
       chatId: 'chat-1'
     },
     interpretMessageFn: async () => {
@@ -565,6 +565,7 @@ test('handleAgentMessage resolves replied song identity for info requests withou
   assert.equal(agentCalls, 0);
   assert.equal(sentMessages.length, 1);
   assert.match(sentMessages[0], /Wish You Were Here - Pink Floyd/);
+  assert.match(sentMessages[0], /\u05e8\u05de\u05ea \u05e7\u05d5\u05e9\u05d9: medium/);
 });
 
 test('handleAgentMessage returns reply-context songs with chords without calling the agent', async () => {

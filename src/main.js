@@ -18,6 +18,7 @@ const REHEARSAL_BREAK_MINUTES = 12;
 const DEFAULT_SONG_DURATION_SECONDS = 4 * 60;
 const SONG_TRANSITION_SECONDS = 90;
 const SONG_REHEARSAL_DISCUSSION_SECONDS = 180;
+const HIGH_DIFFICULTY_ADD_CONFIRMATION_TTL_MS = 15 * 60 * 1000;
 const JAM_BUFFER_BY_FEEL_SECONDS = {
   upbeat: 120,
   calm: 75,
@@ -262,7 +263,15 @@ function isChordsReplyRequest(messageText) {
 function isSongInfoRequest(messageText) {
   const normalized = String(messageText || '').trim();
   if (!normalized) return false;
-  return /(?:מידע|פרטים|תן מידע|תביא מידע|ספר לי על|מה אתה יודע על|מתי ניגנו|מתי ניגנתם|info|details)/iu.test(normalized);
+  // A reply to a song may ask for any stored field, not only use the word
+  // "information". The quoted-song resolution below still makes this
+  // deterministic and prevents an unrelated catalog search.
+  if (/(?:מידע|פרטים|תן מידע|תביא מידע|ספר לי על|מה אתה יודע על|מתי ניגנו|מתי ניגנתם|info|details)/iu.test(normalized)) {
+    return true;
+  }
+  const asksQuestion = /(?:^|\s)(?:מה|כמה|האם|איך|what|how|is|are)(?:\s|$)|[?？]$/iu.test(normalized);
+  const mentionsMetadata = /(?:רמת?\s*(?:ה)?קושי|כמה\s+קשה|קושי|ז[׳']?אנר|סגנון|אווירה|feel|שפה|אורך|משך|ווקאל|ווקל|קול|זמר|טווח|אנרגיה|קהל|גרוב|גיטרה|בס|תופים|קלידים|פסנתר|סינת|אורגן|סטטוס|ניסיונות|חזרה|נוגן|difficulty|genre|language|duration|vocal|range|energy|crowd|groove|guitar|bass|drums|keys|piano|synth|organ|status|attempts|rehears)/iu.test(normalized);
+  return asksQuestion && mentionsMetadata;
 }
 
 function parseSongIdentityLine(text) {
@@ -302,7 +311,7 @@ function normalizeSongIdentityLine(text) {
   return String(text || '')
     .replace(/^\u200f?🤖\s*/u, '')
     .replace(/^\d+[.)]\s*/u, '')
-    .replace(/^(?:הבאתי|הנה|קבל|קיבלת|מצאתי|המלצות|הרשימה)\s*:\s*/iu, '')
+    .replace(/^(?:הבאתי|הנה|קבל|קיבלת|מצאתי|המלצות|הרשימה|הוספתי)\s*:\s*/iu, '')
     .trim();
 }
 
@@ -561,10 +570,27 @@ function formatSongInfo(song) {
   const played = song?.band_status?.last_played || '\u05d0\u05d9\u05df';
   return [
     `${song.song_title}${song.artist ? ` - ${song.artist}` : ''}`,
+    `שפה: ${song.language || 'לא ידוע'}`,
+    `ז'אנרים: ${Array.isArray(song.genres) && song.genres.length > 0 ? song.genres.join(', ') : 'לא ידוע'}`,
+    `רמת קושי: ${song.difficulty || 'לא ידוע'}`,
+    `אווירה: ${song.feel || 'לא ידוע'}`,
+    `אורך: ${song.duration_seconds ? `${song.duration_seconds} שניות` : 'לא ידוע'}`,
+    `ווקאל מקורי: ${song?.ai_metadata?.original_vocal || 'לא ידוע'}`,
+    `טווח ווקאלי: ${song?.ai_metadata?.vocal_range || 'לא ידוע'}`,
+    `סגנון ווקאלי: ${Array.isArray(song?.ai_metadata?.vocal_style) && song.ai_metadata.vocal_style.length > 0 ? song.ai_metadata.vocal_style.join(', ') : 'לא ידוע'}`,
+    `התאמה לזמר: ${song?.ai_metadata?.singer_fit || 'לא ידוע'}`,
+    `אנרגיה ווקאלית: ${song?.ai_metadata?.vocal_energy || 'לא ידוע'}`,
+    `אנרגיית להקה: ${song?.ai_metadata?.band_energy || 'לא ידוע'}`,
+    `ידידותי לקהל: ${song?.ai_metadata?.crowd_friendly === true ? 'כן' : song?.ai_metadata?.crowd_friendly === false ? 'לא' : 'לא ידוע'}`,
+    `גרוב: ${song?.ai_metadata?.groove_level || 'לא ידוע'}`,
+    `קושי גיטרה: ${song?.ai_metadata?.guitar_difficulty || 'לא ידוע'}`,
+    `קושי בס: ${song?.ai_metadata?.bass_difficulty || 'לא ידוע'}`,
+    `קושי תופים: ${song?.ai_metadata?.drums_difficulty || 'לא ידוע'}`,
     `\u05de\u05e6\u05d1: ${FIT_LABELS[song.band_status.fit] || song.band_status.fit}`,
     `קלידים: ${keysType}`,
     `תפקיד קלידים: ${song?.ai_metadata?.keys_role || 'לא ידוע'}`,
     `קושי קלידים: ${song?.ai_metadata?.keys_difficulty || 'לא ידוע'}`,
+    `עניין לבס: ${song?.ai_metadata?.bass_interest || 'לא ידוע'}`,
     `\u05d1\u05e2\u05d9\u05d5\u05ea: ${issues}`,
     `\u05e0\u05d9\u05e1\u05d9\u05d5\u05e0\u05d5\u05ea: ${attempts}`,
     `\u05e0\u05e1\u05e7\u05e8 \u05dc\u05d0\u05d7\u05e8\u05d5\u05e0\u05d4: ${reviewed}`,
@@ -612,6 +638,23 @@ function buildSongForInsert(rawSong, record) {
   const song = rawSong && typeof rawSong === 'object' ? rawSong : {};
   const songTitle = String(song.song_title || '').trim();
   const artist = song.artist === null || song.artist === undefined ? null : String(song.artist).trim();
+  const aiMetadata = song.ai_metadata && typeof song.ai_metadata === 'object'
+    ? { ...song.ai_metadata }
+    : {};
+
+  // Older prompts (and occasional model replies) place the keyboard fields on
+  // the song itself. The canonical state stores them under ai_metadata, so do
+  // not silently discard useful metadata during insertion.
+  if (aiMetadata.keys_role === undefined && song.keys_role !== undefined) {
+    aiMetadata.keys_role = song.keys_role;
+  }
+  if (aiMetadata.keys_type === undefined) {
+    if (Array.isArray(song.keys_type_any)) aiMetadata.keys_type = song.keys_type_any;
+    else if (Array.isArray(song.keys_type)) aiMetadata.keys_type = song.keys_type;
+  }
+  if (aiMetadata.keys_difficulty === undefined && song.keys_difficulty !== undefined) {
+    aiMetadata.keys_difficulty = song.keys_difficulty;
+  }
 
   return {
     ...song,
@@ -634,9 +677,34 @@ function buildSongForInsert(rawSong, record) {
     created_at: song.created_at || new Date().toISOString(),
     normalized_title: normalizeText(songTitle),
     normalized_artist: normalizeText(artist),
-    ai_metadata: song.ai_metadata && typeof song.ai_metadata === 'object' ? song.ai_metadata : undefined,
+    ai_metadata: Object.keys(aiMetadata).length > 0 ? aiMetadata : undefined,
     band_status: song.band_status && typeof song.band_status === 'object' ? song.band_status : undefined
   };
+}
+
+function classifyAdditionConfirmation(messageText) {
+  const source = String(messageText || '').trim().toLocaleLowerCase();
+  if (!source || source.length > 120) return null;
+
+  if (/^(?:לא|לא רוצה|לא מעוניין|לא מעוניינת|לא משנה|עזוב|עזבי|וותר|תוותר|בטל|תבטל|נוותר|no|nope|cancel)$/iu.test(source)) {
+    return 'negative';
+  }
+  if (/^(?:כן|כן בטח|בטח|ברור|יאללה|קדימה|תוסיף|להוסיף|רוצה|סבבה|ok|okay|yes|yep|sure|go ahead)$/iu.test(source)) {
+    return 'positive';
+  }
+  return null;
+}
+
+async function insertSongAndReply({ stateStore, chat, song }) {
+  const inserted = stateStore.addSong(song);
+  if (!inserted) {
+    await sendBotMessage(chat, '\u05d4\u05e9\u05d9\u05e8 \u05db\u05d1\u05e8 \u05e7\u05d9\u05d9\u05dd.');
+    return false;
+  }
+
+  await stateStore.queueSave();
+  await sendBotMessage(chat, `\u05d4\u05d5\u05e1\u05e4\u05ea\u05d9: ${song.song_title}${song.artist ? ` - ${song.artist}` : ''}`);
+  return true;
 }
 
 function feedbackConfirmationLabel(song, messageText) {
@@ -1257,7 +1325,7 @@ async function sendSongsReply({ chat, stateStore, chatId, songs, query = null })
   await stateStore.queueSave();
 }
 
-async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn }) {
+async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions }) {
   const activeContext = resolveActiveResultContext(stateStore, record);
   const songs = stateStore.getSongs();
 
@@ -1448,15 +1516,13 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
 
   if (action.action === 'add_song') {
     const songToInsert = buildSongForInsert(action.song, record);
-    const inserted = stateStore.addSong(songToInsert);
-
-    if (!inserted) {
-      await sendBotMessage(chat, '\u05d4\u05e9\u05d9\u05e8 \u05db\u05d1\u05e8 \u05e7\u05d9\u05d9\u05dd.');
+    const chatId = String(record?.chatId || '').trim();
+    if (songToInsert.difficulty === 'high' && pendingAdditions instanceof Map && chatId) {
+      pendingAdditions.set(chatId, { song: songToInsert, createdAt: Date.now() });
+      await sendBotMessage(chat, `\u05d4\u05e9\u05d9\u05e8 ${songToInsert.song_title}${songToInsert.artist ? ` - ${songToInsert.artist}` : ''} \u05d1\u05e8\u05de\u05ea \u05e7\u05d5\u05e9\u05d9 \u05d2\u05d1\u05d5\u05d4\u05d4 \u2014 \u05d0\u05ea\u05d4 \u05d1\u05d8\u05d5\u05d7 \u05e9\u05dc\u05d4\u05d5\u05e1\u05d9\u05e3 \u05d0\u05d5\u05ea\u05d5?`);
       return;
     }
-
-    await stateStore.queueSave();
-    await sendBotMessage(chat, `\u05d4\u05d5\u05e1\u05e4\u05ea\u05d9: ${songToInsert.song_title}${songToInsert.artist ? ` - ${songToInsert.artist}` : ''}`);
+    await insertSongAndReply({ stateStore, chat, song: songToInsert });
     return;
   }
 
@@ -1567,6 +1633,7 @@ async function handleAgentMessage({
   config,
   record,
   recentMessages = [],
+  pendingAdditions,
   interpretMessageFn = interpretMessage,
   prepareSongsForReplyFn = prepareSongsForReply,
   estimateSongDurationsFn
@@ -1581,6 +1648,26 @@ async function handleAgentMessage({
   if (!messageText) {
     await sendBotMessage(chat, '\u05de\u05d4 \u05dc\u05d7\u05e4\u05e9?');
     return true;
+  }
+
+  const pendingChatId = String(record?.chatId || '').trim();
+  const pendingAddition = pendingAdditions instanceof Map ? pendingAdditions.get(pendingChatId) : null;
+  if (pendingAddition) {
+    if (Date.now() - Number(pendingAddition.createdAt || 0) > HIGH_DIFFICULTY_ADD_CONFIRMATION_TTL_MS) {
+      pendingAdditions.delete(pendingChatId);
+    } else {
+      const confirmation = classifyAdditionConfirmation(messageText);
+      if (confirmation === 'positive') {
+        pendingAdditions.delete(pendingChatId);
+        await insertSongAndReply({ stateStore, chat, song: pendingAddition.song });
+        return true;
+      }
+      if (confirmation === 'negative') {
+        pendingAdditions.delete(pendingChatId);
+        await sendBotMessage(chat, '\u05e1\u05d1\u05d1\u05d4, \u05dc\u05d0 \u05d4\u05d5\u05e1\u05e4\u05ea\u05d9.');
+        return true;
+      }
+    }
   }
 
   if (replyContext?.results?.length && isChordsReplyRequest(messageText)) {
@@ -1605,7 +1692,8 @@ async function handleAgentMessage({
       record,
       messageText,
       replyContext,
-      estimateSongDurationsFn
+      estimateSongDurationsFn,
+      pendingAdditions
     });
     return true;
   }
@@ -1641,7 +1729,8 @@ async function handleAgentMessage({
       record,
       messageText: agentMessageText,
       replyContext,
-      estimateSongDurationsFn
+      estimateSongDurationsFn,
+      pendingAdditions
     });
   } catch (error) {
     console.error('[agent] failed:', error);
@@ -1709,6 +1798,7 @@ async function bootstrap() {
   });
 
   const pendingMessages = [];
+  const pendingAdditions = new Map();
   const recentMessagesByChat = new Map();
   let readyToProcess = false;
   const startupTimeoutMs = 60000;
@@ -1762,7 +1852,7 @@ async function bootstrap() {
     }
 
     const recentMessages = buildRecentMessageContext(getRecentMessagesForChat(record.chatId));
-    await handleAgentMessage({ chat, stateStore, config, record, recentMessages });
+    await handleAgentMessage({ chat, stateStore, config, record, recentMessages, pendingAdditions });
   }
 
   async function processMessageObject(message, source) {

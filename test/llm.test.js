@@ -750,6 +750,37 @@ test('interpretMessage preserves the agent resolution of artist-title shorthand'
   assert.equal(action.song.song_title, 'its probably me');
 });
 
+test('interpretMessage removes the recognized artist from a dashed title left intact by the model', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'add Sting - Its Probably Me',
+    replyContext: null,
+    recentMessages: [],
+    currentDate: '2026-08-11',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                action: 'add_song',
+                song: { song_title: 'Sting - Its Probably Me', artist: 'Sting' }
+              })
+            }
+          }]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.song.song_title, 'Its Probably Me');
+  assert.equal(action.song.artist, 'Sting');
+});
+
 test('interpretMessage retries a duplicated identity in shorthand and accepts the corrected resolution', async () => {
   let callCount = 0;
   const action = await interpretMessage({
