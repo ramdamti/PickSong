@@ -1737,10 +1737,10 @@ async function bootstrap() {
     return recentMessagesByChat.get(normalizedChatId) || [];
   }
 
-  function rememberRecentMessage(record) {
+  function rememberRecentMessage(record, isBotDirected) {
     const normalizedChatId = String(record?.chatId || '').trim();
     const text = String(record?.text || '').trim();
-    if (!normalizedChatId || !text) return;
+    if (!isBotDirected || !normalizedChatId || !text) return;
     if (/^\u200f?🤖(?:\s|$)/u.test(text)) return;
 
     const existing = recentMessagesByChat.get(normalizedChatId) || [];
@@ -1821,12 +1821,12 @@ async function bootstrap() {
 
     if (!readyToProcess) {
       pendingMessages.push(record);
-      rememberRecentMessage(record);
+      rememberRecentMessage(record, routing.handling.shouldHandle);
       return;
     }
 
     await handleLiveMessage(record);
-    rememberRecentMessage(record);
+    rememberRecentMessage(record, routing.handling.shouldHandle);
   }
 
   async function finalizeStartup() {

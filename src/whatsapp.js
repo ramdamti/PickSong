@@ -139,8 +139,6 @@ function messageToRecord(message) {
 }
 
 async function readQuotedMessage(message) {
-  if (!message.hasQuotedMsg) return null;
-
   const fallbackQuoted = (() => {
     const raw = message?._data?.quotedMsg || message?._data?.quotedMessage || null;
     const rawId =
@@ -172,6 +170,11 @@ async function readQuotedMessage(message) {
       author: rawAuthor ? String(rawAuthor).trim() : null
     };
   })();
+
+  // whatsapp-web.js can report hasQuotedMsg=false for history-sync/message events even while
+  // the raw stanza still contains the reply target. Keep that context for follow-up commands.
+  if (!message.hasQuotedMsg && !fallbackQuoted) return null;
+  if (typeof message.getQuotedMessage !== 'function') return fallbackQuoted;
 
   try {
     const quoted = await message.getQuotedMessage();

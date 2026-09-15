@@ -622,6 +622,13 @@ function inferAddSongPayload(messageText) {
     if (englishSplit) {
       songTitle = englishSplit[1].trim();
       artist = englishSplit[2].trim();
+    } else {
+      // In band chat, the common shorthand is "artist - title" (including no space after the dash).
+      const artistTitleSplit = candidate.match(/^(.+?)\s*[-–—]\s*(.+)$/u);
+      if (artistTitleSplit) {
+        artist = artistTitleSplit[1].trim();
+        songTitle = artistTitleSplit[2].trim();
+      }
     }
   }
 
@@ -637,6 +644,18 @@ function inferAddSongPayload(messageText) {
     artist: artist || null,
     confidence: 0.5
   };
+}
+
+function inferAddSongFromArtistReply(messageText, quotedText) {
+  const artist = String(messageText || '').trim();
+  const quoted = String(quotedText || '').trim();
+  if (!artist || artist.length > 120 || !quoted) return null;
+
+  const titleMatch = quoted.match(/(?:מי המבצע של|who (?:is the )?(?:artist|performer) (?:for|of))\s*["“]?(.+?)["”?؟]/iu);
+  const songTitle = String(titleMatch?.[1] || '').trim();
+  if (!songTitle) return null;
+
+  return { song_title: songTitle, artist, confidence: 0.5 };
 }
 
 function shouldAvoidPreviousResults(messageText, replyContext) {
@@ -994,8 +1013,12 @@ function normalizeUpdateSongAction(action, messageText, replyContext) {
   return normalized;
 }
 
-function normalizeAgentAction(action, { messageText, replyContext }) {
+function normalizeAgentAction(action, { messageText, replyContext, quotedText }) {
   if (!action || typeof action !== 'object') return action;
+  const artistReplyAdd = inferAddSongFromArtistReply(messageText, quotedText);
+  if (artistReplyAdd) {
+    return { action: 'add_song', song: artistReplyAdd };
+  }
   const rehearsalRequest = isRehearsalPlanRequest(messageText);
   const inferredDurationMinutes = inferRequestedDurationMinutes(messageText);
   if (action.action === 'update_song_feedback') {
@@ -1287,7 +1310,7 @@ async function interpretMessage({
           requestFn
         });
         const action = validateAgentAction(
-          normalizeAgentAction(parsed, { messageText, replyContext })
+          normalizeAgentAction(parsed, { messageText, replyContext, quotedText })
         );
         console.log(
           `[agent] action=${estimateActionName(action)} input=${usage.promptTokens} cached=${usage.cachedTokens} output=${usage.completionTokens} total=${usage.totalTokens} latency=${usage.latencyMs}ms`

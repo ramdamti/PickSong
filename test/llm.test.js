@@ -721,6 +721,53 @@ test('interpretMessage repairs incomplete add_song payloads from explicit add re
   assert.equal(action.song.artist, 'pink floyd');
 });
 
+test('interpretMessage repairs add_song payloads from artist-title shorthand', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'בוט תוסיף sting -its probably me',
+    replyContext: null,
+    recentMessages: [],
+    currentDate: '2026-08-11',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return { choices: [{ message: { content: JSON.stringify({ action: 'add_song', song: {} }) } }] };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'add_song');
+  assert.equal(action.song.artist, 'sting');
+  assert.equal(action.song.song_title, 'its probably me');
+});
+
+test('interpretMessage completes an add after an artist-only reply to the bot question', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'Sting',
+    quotedText: '‏🤖 מי המבצע של "Its Probably Me"?',
+    replyContext: null,
+    recentMessages: [],
+    currentDate: '2026-08-11',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return { choices: [{ message: { content: JSON.stringify({ action: 'search_songs', query: {} }) } }] };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'add_song');
+  assert.equal(action.song.song_title, 'Its Probably Me');
+  assert.equal(action.song.artist, 'Sting');
+});
+
 test('interpretMessage retries after a locally invalid add_song payload and recovers with the compact prompt', async () => {
   let callCount = 0;
   const action = await interpretMessage({

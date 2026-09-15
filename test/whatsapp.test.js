@@ -65,3 +65,20 @@ test('readQuotedMessage falls back to raw quoted data for outgoing reply message
     author: '61143188005088@lid'
   });
 });
+
+test('readQuotedMessage keeps raw reply context when hasQuotedMsg is false', async () => {
+  const quoted = await readQuotedMessage({
+    hasQuotedMsg: false,
+    _data: {
+      quotedStanzaID: 'wamid.bot-question',
+      quotedMsg: { body: '\u200f🤖 מי המבצע של "Its Probably Me"?' }
+    }
+  });
+
+  assert.deepEqual(quoted, {
+    id: 'wamid.bot-question',
+    text: '\u200f🤖 מי המבצע של "Its Probably Me"?',
+    fromMe: null,
+    author: null
+  });
+});
