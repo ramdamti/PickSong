@@ -189,6 +189,34 @@ test('createStateStore addSong fills canonical placeholders for legacy add flow'
   assert.equal(added.band_status.fit, 'unknown');
 });
 
+test('loadState repairs incomplete agent song fields instead of failing startup', async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'picksong-state-repair-'));
+  const stateFile = path.join(tempDir, 'state.json');
+  try {
+    const broken = createCanonicalState({
+      songs: [createCanonicalSong({
+        difficulty: null,
+        feel: null,
+        genres: [],
+        ai_metadata: { ...createCanonicalSong().ai_metadata, keys_type: ['not-a-real-key-type'] }
+      })]
+    });
+    await fs.writeFile(stateFile, JSON.stringify(broken), 'utf8');
+
+    const repaired = await loadState(stateFile);
+    assert.equal(repaired.songs[0].difficulty, 'medium');
+    assert.equal(repaired.songs[0].feel, 'upbeat');
+    assert.deepEqual(repaired.songs[0].genres, ['unknown']);
+    assert.deepEqual(repaired.songs[0].ai_metadata.keys_type, []);
+    assert.doesNotThrow(() => validateCanonicalState(repaired, stateFile));
+
+    const persisted = JSON.parse(await fs.readFile(stateFile, 'utf8'));
+    assert.equal(persisted.songs[0].feel, 'upbeat');
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('loadState accepts the schema-v3 workspace dataset', async () => {
   const loaded = await loadState(path.resolve('state.json'));
 

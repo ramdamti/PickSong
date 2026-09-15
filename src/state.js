@@ -71,12 +71,12 @@ function normalizeGenres(value) {
 
 function normalizeDifficulty(value) {
   const normalized = String(value || '').trim().toLowerCase();
-  return ALLOWED_DIFFICULTIES.has(normalized) ? normalized : null;
+  return ALLOWED_DIFFICULTIES.has(normalized) ? normalized : 'medium';
 }
 
 function normalizeFeel(value) {
   const normalized = String(value || '').trim().toLowerCase();
-  return ALLOWED_FEELS.has(normalized) ? normalized : null;
+  return ALLOWED_FEELS.has(normalized) ? normalized : 'upbeat';
 }
 
 function normalizeDurationSeconds(value) {
@@ -136,7 +136,7 @@ function normalizeAiMetadata(value = {}) {
           new Set(
             source.keys_type
               .map((item) => String(item || '').trim().toLowerCase())
-              .filter(Boolean)
+              .filter((item) => KEYS_TYPES.has(item))
           )
         )
       : [],
@@ -185,19 +185,26 @@ function createSongId(song) {
 
 function normalizeSong(rawSong) {
   const song = rawSong && typeof rawSong === 'object' ? rawSong : {};
-  const normalizedTitle = song.normalized_title || normalizeText(song.song_title);
-  const normalizedArtist = song.normalized_artist || normalizeText(song.artist || '');
+  const songTitle = String(song.song_title || '').trim() || 'Untitled';
+  const artist = song.artist === null || song.artist === undefined
+    ? ''
+    : String(song.artist).trim();
+  const canonicalArtist = artist || 'Unknown Artist';
+  const normalizedTitle = normalizeText(song.normalized_title || songTitle) || 'untitled';
+  const normalizedArtist = normalizeText(song.normalized_artist || canonicalArtist) || 'unknown artist';
+  const songId = String(song.song_id || createSongId({ song_title: songTitle, artist: canonicalArtist })).trim();
+  const genres = normalizeGenres(song.genres);
 
   return {
     ...song,
-    message_id: String(song.message_id || '').trim(),
+    message_id: String(song.message_id || `state:${songId}`).trim(),
     source_text: String(song.source_text || '').trim(),
-    song_title: String(song.song_title || '').trim(),
-    artist: song.artist === null || song.artist === undefined ? null : String(song.artist).trim(),
+    song_title: songTitle,
+    artist: canonicalArtist,
     language: song.language ? String(song.language).trim().toLowerCase() : null,
     chords_url: song.chords_url ? String(song.chords_url).trim() : null,
     confidence: Number.isFinite(Number(song.confidence)) ? Number(song.confidence) : 0,
-    genres: normalizeGenres(song.genres),
+    genres: genres.length > 0 ? genres : ['unknown'],
     difficulty: normalizeDifficulty(song.difficulty),
     feel: normalizeFeel(song.feel),
     duration_seconds: normalizeDurationSeconds(song.duration_seconds),
@@ -205,7 +212,7 @@ function normalizeSong(rawSong) {
     created_at: song.created_at || new Date().toISOString(),
     normalized_title: normalizedTitle,
     normalized_artist: normalizedArtist,
-    song_id: String(song.song_id || createSongId({ song_title: song.song_title, artist: song.artist })).trim(),
+    song_id: songId,
     ai_metadata: normalizeAiMetadata(song.ai_metadata),
     band_status: normalizeBandStatus(song.band_status)
   };
@@ -449,7 +456,19 @@ function normalizeSeenState(raw) {
 async function loadState(filePath) {
   try {
     const content = await fs.readFile(filePath, 'utf8');
-    return normalizeState(JSON.parse(content), { validateCanonical: true, filePath });
+    const raw = JSON.parse(content);
+    let needsRepair = false;
+    try {
+      validateCanonicalState(raw, filePath);
+    } catch {
+      needsRepair = true;
+    }
+    const state = normalizeState(raw, { validateCanonical: true, filePath });
+    if (needsRepair) {
+      await saveState(filePath, state);
+      console.warn(`[state] repaired invalid canonical fields in ${filePath}`);
+    }
+    return state;
   } catch (error) {
     if (error.code === 'ENOENT') return createDefaultState();
     throw error;
