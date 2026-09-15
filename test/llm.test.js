@@ -861,6 +861,30 @@ test('interpretMessage completes an add after an artist-only reply to the bot qu
   assert.equal(action.song.artist, 'Sting');
 });
 
+test('interpretMessage splits a dashed quoted title after the user supplies its artist', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'Rush',
+    quotedText: '🤖 Who is the artist of "YYZ - Rush"?',
+    replyContext: null,
+    recentMessages: [],
+    currentDate: '2026-08-11',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return { choices: [{ message: { content: JSON.stringify({ action: 'search_songs', query: {} }) } }] };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'add_song');
+  assert.equal(action.song.song_title, 'YYZ');
+  assert.equal(action.song.artist, 'Rush');
+});
+
 test('interpretMessage retries after a locally invalid add_song payload and recovers with the compact prompt', async () => {
   let callCount = 0;
   const action = await interpretMessage({

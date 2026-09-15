@@ -35,7 +35,7 @@ const SYSTEM_PROMPT = [
   'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
   'Allowed actions: search_songs, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, clarify.',
   'search_songs, prepare_rehearsal, and find_similar_songs return compact query semantics only.',
-  'add_song must return complete metadata in ai_metadata; never put keys_role, keys_type, or keys_difficulty at the top level.',
+  'For add_song, assess real performance difficulty; do not default to medium. Use high for genuinely demanding songs; metadata goes in ai_metadata.',
   'update_song_feedback must use result_index for list references.',
   'Band-history questions use get_band_failure_reasons or explain_song_rejection.',
   'Do not return formatted WhatsApp replies.'
@@ -49,6 +49,7 @@ const FALLBACK_SYSTEM_PROMPT = [
   'Use reply_context result indexes when relevant.',
   'If the user asks for songs by an artist, preserve the artist strongly.',
   'If the user asks for a list of songs, use search_songs.',
+  'For an explicit add request, return add_song with non-empty song.song_title and song.artist. Assess performance difficulty; use high for genuinely demanding songs. Resolve known "A - B" title/artist pairs in either order; never leave the entire phrase as the title or ask again when one side is clearly the artist.',
   'For banter/off-topic, clarify.question is one brutal, specific, dry/sarcastic Hebrew roast, not a question. Never redirect to songs.',
   'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
   'Return only valid JSON.'
@@ -686,6 +687,21 @@ function inferAddSongFromArtistReply(messageText, quotedText) {
   const titleMatch = quoted.match(/(?:מי המבצע של|who (?:is the )?(?:artist|performer) (?:for|of))\s*["“]?(.+?)["”?؟]/iu);
   const songTitle = String(titleMatch?.[1] || '').trim();
   if (!songTitle) return null;
+
+  // A recovery question can quote the original "title - artist" text. Once
+  // the user supplies an artist that equals either side, the title is no
+  // longer ambiguous; never persist the complete dashed phrase as its title.
+  const dashedMatch = songTitle.match(/^(.+?)\s*[-–—]\s*(.+)$/u);
+  if (dashedMatch) {
+    const left = String(dashedMatch[1] || '').trim();
+    const right = String(dashedMatch[2] || '').trim();
+    if (sameSongIdentityPart(artist, left)) {
+      return { song_title: right, artist, confidence: 0.5 };
+    }
+    if (sameSongIdentityPart(artist, right)) {
+      return { song_title: left, artist, confidence: 0.5 };
+    }
+  }
 
   return { song_title: songTitle, artist, confidence: 0.5 };
 }
