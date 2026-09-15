@@ -27,6 +27,7 @@ const SYSTEM_PROMPT = [
   'For correction requests like "תתקן את שם השיר", "האמן הנכון הוא ...", "תעדכן את 3 ל-...", or "שיר 2 הוא של ...", prefer update_song.',
   'When correcting a song from reply_context, prefer result_index and place the corrected identity in updates.song_title and/or updates.artist.',
   'When the request includes a clear target song and corrected values, do not use clarify unless the target itself is ambiguous.',
+  'For add_song "A - B", infer whether A/B are artist/title; never duplicate them, and clarify only if unresolved.',
   'Hebrew examples: "מתי ניגנו את 1" -> get_song_info with result_index=1. "תעדכן את 3 ל-רד מעל הטלוויזיה שלי של פורטיס" -> update_song with result_index=3 and corrected song_title/artist. "תביא 4 שירי רוק קלים" -> search_songs with limit=4, rock genre, and low difficulty.',
   'For rehearsal plans, use prepare_rehearsal; default duration_minutes to 180.',
   'Prefer taking a reasonable search interpretation over asking a clarification question.',
@@ -597,7 +598,7 @@ function shouldOverrideArtistRequirement({ messageText, inferredArtist, existing
   return true;
 }
 
-function inferAddSongPayload(messageText) {
+function getExplicitAddCandidate(messageText) {
   const source = String(messageText || '').trim();
   if (!source) return null;
 
@@ -609,6 +610,11 @@ function inferAddSongPayload(messageText) {
   if (!addMatch) return null;
 
   const candidate = String(addMatch[1] || '').trim();
+  return candidate || null;
+}
+
+function inferAddSongPayload(messageText) {
+  const candidate = getExplicitAddCandidate(messageText);
   if (!candidate) return null;
 
   let songTitle = '';
@@ -622,13 +628,6 @@ function inferAddSongPayload(messageText) {
     if (englishSplit) {
       songTitle = englishSplit[1].trim();
       artist = englishSplit[2].trim();
-    } else {
-      // In band chat, the common shorthand is "artist - title" (including no space after the dash).
-      const artistTitleSplit = candidate.match(/^(.+?)\s*[-–—]\s*(.+)$/u);
-      if (artistTitleSplit) {
-        artist = artistTitleSplit[1].trim();
-        songTitle = artistTitleSplit[2].trim();
-      }
     }
   }
 
@@ -644,6 +643,24 @@ function inferAddSongPayload(messageText) {
     artist: artist || null,
     confidence: 0.5
   };
+}
+
+function inferUnambiguousAddSongPayload(messageText) {
+  const candidate = getExplicitAddCandidate(messageText);
+  if (!candidate) return null;
+
+  const hebrewSeparator = candidate.lastIndexOf(' של ');
+  if (hebrewSeparator > 0) {
+    const songTitle = candidate.slice(0, hebrewSeparator).trim();
+    const artist = candidate.slice(hebrewSeparator + ' של '.length).trim();
+    return songTitle && artist ? { song_title: songTitle, artist, confidence: 0.5 } : null;
+  }
+
+  const bySplit = candidate.match(/^(.*?)\s+by\s+(.+)$/i);
+  if (!bySplit) return null;
+  const songTitle = bySplit[1].trim();
+  const artist = bySplit[2].trim();
+  return songTitle && artist ? { song_title: songTitle, artist, confidence: 0.5 } : null;
 }
 
 function inferAddSongFromArtistReply(messageText, quotedText) {
@@ -1041,18 +1058,24 @@ function normalizeAgentAction(action, { messageText, replyContext, quotedText })
     const song = action.song && typeof action.song === 'object' && !Array.isArray(action.song)
       ? { ...action.song }
       : {};
+    const dashedInput = /^.+?\s*[-–—]\s*.+$/u.test(getExplicitAddCandidate(messageText) || '');
+    const unambiguousIdentity = inferUnambiguousAddSongPayload(messageText);
+    const titleFromModel = typeof song.song_title === 'string' ? song.song_title.trim() : '';
+    const artistFromModel = typeof song.artist === 'string' ? song.artist.trim() : '';
+    const duplicateDashedIdentity = dashedInput && titleFromModel && artistFromModel &&
+      titleFromModel.localeCompare(artistFromModel, undefined, { sensitivity: 'accent' }) === 0;
 
     return {
       ...action,
       song: {
         ...inferredAddSong,
         ...song,
-        song_title: typeof song.song_title === 'string' && song.song_title.trim()
+        song_title: unambiguousIdentity?.song_title || (titleFromModel
           ? song.song_title.trim()
-          : inferredAddSong.song_title,
-        artist: typeof song.artist === 'string' && song.artist.trim()
+          : inferredAddSong.song_title),
+        artist: unambiguousIdentity?.artist || (!duplicateDashedIdentity && artistFromModel
           ? song.artist.trim()
-          : inferredAddSong.artist
+          : inferredAddSong.artist)
       }
     };
   }

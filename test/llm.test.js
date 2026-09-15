@@ -721,7 +721,7 @@ test('interpretMessage repairs incomplete add_song payloads from explicit add re
   assert.equal(action.song.artist, 'pink floyd');
 });
 
-test('interpretMessage repairs add_song payloads from artist-title shorthand', async () => {
+test('interpretMessage preserves the agent resolution of artist-title shorthand', async () => {
   const action = await interpretMessage({
     provider: 'groq',
     baseUrl: 'https://api.example.com',
@@ -734,7 +734,13 @@ test('interpretMessage repairs add_song payloads from artist-title shorthand', a
     requestFn: async () => ({
       ok: true,
       async json() {
-        return { choices: [{ message: { content: JSON.stringify({ action: 'add_song', song: {} }) } }] };
+        return {
+          choices: [{
+            message: {
+              content: JSON.stringify({ action: 'add_song', song: { song_title: 'its probably me', artist: 'sting' } })
+            }
+          }]
+        };
       }
     })
   });
@@ -742,6 +748,62 @@ test('interpretMessage repairs add_song payloads from artist-title shorthand', a
   assert.equal(action.action, 'add_song');
   assert.equal(action.song.artist, 'sting');
   assert.equal(action.song.song_title, 'its probably me');
+});
+
+test('interpretMessage retries a duplicated identity in shorthand and accepts the corrected resolution', async () => {
+  let callCount = 0;
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'בוט תוסיף sting - its probably me',
+    replyContext: null,
+    recentMessages: [],
+    currentDate: '2026-08-11',
+    requestFn: async () => {
+      callCount += 1;
+      const song = callCount === 1
+        ? { song_title: 'its probably me', artist: 'its probably me' }
+        : { song_title: 'its probably me', artist: 'sting' };
+      return {
+        ok: true,
+        async json() {
+          return { choices: [{ message: { content: JSON.stringify({ action: 'add_song', song }) } }] };
+        }
+      };
+    }
+  });
+
+  assert.equal(callCount, 2);
+  assert.equal(action.song.artist, 'sting');
+  assert.equal(action.song.song_title, 'its probably me');
+});
+
+test('interpretMessage trusts the explicit Hebrew title-artist separator over a conflicting model guess', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'בוט תוסיף הללויה של משה',
+    replyContext: null,
+    recentMessages: [],
+    currentDate: '2026-08-11',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [{
+            message: { content: JSON.stringify({ action: 'add_song', song: { song_title: 'משה', artist: 'הללויה' } }) }
+          }]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.song.song_title, 'הללויה');
+  assert.equal(action.song.artist, 'משה');
 });
 
 test('interpretMessage completes an add after an artist-only reply to the bot question', async () => {
