@@ -16,10 +16,10 @@ test('SYSTEM_PROMPT stays compact and stable', () => {
   assert.match(SYSTEM_PROMPT, /מתאים לזמר/);
   assert.match(SYSTEM_PROMPT, /מתאים לגיטריסט/);
   assert.match(SYSTEM_PROMPT, /Prefer taking a reasonable search interpretation/);
-  assert.match(SYSTEM_PROMPT, /Use clarify only when execution would be unsafe or impossible/);
+  assert.match(SYSTEM_PROMPT, /Use clarify for missing identity and for banter\/off-topic/);
   assert.match(SYSTEM_PROMPT, /supported_search_fields/);
   assert.match(SYSTEM_PROMPT, /closest supported query parameters/);
-  assert.match(SYSTEM_PROMPT, /playful Hebrew reply/);
+  assert.match(SYSTEM_PROMPT, /dry\/sarcastic Hebrew comeback/);
 });
 
 test('buildAgentPrompt includes reply context without full database payloads', () => {
