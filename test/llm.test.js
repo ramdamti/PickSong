@@ -16,11 +16,11 @@ test('SYSTEM_PROMPT stays compact and stable', () => {
   assert.match(SYSTEM_PROMPT, /מתאים לזמר/);
   assert.match(SYSTEM_PROMPT, /מתאים לגיטריסט/);
   assert.match(SYSTEM_PROMPT, /Prefer taking a reasonable search interpretation/);
-  assert.match(SYSTEM_PROMPT, /Use clarify for missing identity and for banter\/off-topic/);
-  assert.match(SYSTEM_PROMPT, /not a question and no question mark/);
+  assert.match(SYSTEM_PROMPT, /For banter\/off-topic/);
+  assert.match(SYSTEM_PROMPT, /never say it is unrelated to music/);
   assert.match(SYSTEM_PROMPT, /supported_search_fields/);
   assert.match(SYSTEM_PROMPT, /closest supported query parameters/);
-  assert.match(SYSTEM_PROMPT, /dry\/sarcastic Hebrew statement/);
+  assert.match(SYSTEM_PROMPT, /dry\/sarcastic Hebrew punchline/);
   assert.match(SYSTEM_PROMPT, /"לא" alone never means failure reasons/);
 });
 
