@@ -8,6 +8,7 @@ const {
   buildFallbackAgentPrompt,
   interpretMessage,
   interpretAdditionConfirmation,
+  interpretSongDifficulty,
   getAgentUsageStats
 } = require('../src/llm');
 
@@ -80,6 +81,28 @@ test('interpretAdditionConfirmation lets the agent classify a natural negative r
   });
 
   assert.equal(decision, 'negative');
+});
+
+test('interpretSongDifficulty uses a dedicated agent assessment without JSON mode', async () => {
+  const difficulty = await interpretSongDifficulty({
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    song: { song_title: 'Firth of Fifth', artist: 'Genesis', difficulty: 'medium' },
+    requestFn: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      assert.equal(body.response_format, undefined);
+      assert.match(body.messages[0].content, /performance difficulty/i);
+      return {
+        ok: true,
+        async json() {
+          return { choices: [{ message: { content: 'high' } }], usage: {} };
+        }
+      };
+    }
+  });
+
+  assert.equal(difficulty, 'high');
 });
 
 test('buildFallbackAgentPrompt keeps only compact context', () => {

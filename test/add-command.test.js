@@ -186,7 +186,7 @@ test('handleAgentMessage preserves legacy top-level keyboard metadata on inserti
   });
 });
 
-test('handleAgentMessage confirms a high-difficulty add, then accepts a positive reply without another agent call', async () => {
+test('handleAgentMessage reviews difficulty before confirming an add, then accepts a positive reply', async () => {
   const sentMessages = [];
   const pendingAdditions = new Map();
   let agentCalls = 0;
@@ -208,9 +208,10 @@ test('handleAgentMessage confirms a high-difficulty add, then accepts a positive
   await handleAgentMessage({
     chat, stateStore, config, pendingAdditions,
     record: { text: 'bot add Hard Song by Artist', quoted: { fromMe: false }, chatId: 'chat-1' },
+    reviewSongDifficultyFn: async () => 'high',
     interpretMessageFn: async () => {
       agentCalls += 1;
-      return { action: 'add_song', song: { song_title: 'Hard Song', artist: 'Artist', difficulty: 'high' } };
+      return { action: 'add_song', song: { song_title: 'Hard Song', artist: 'Artist', difficulty: 'medium' } };
     }
   });
 

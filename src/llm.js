@@ -62,6 +62,13 @@ const ADDITION_CONFIRMATION_SYSTEM_PROMPT = [
   'No prose or extra words.'
 ].join('\n');
 
+const SONG_DIFFICULTY_SYSTEM_PROMPT = [
+  'You assess a song\'s real band performance difficulty from its title, artist, and known arrangement.',
+  'Return only one lowercase word: low, medium, high, or unknown.',
+  'Judge the hardest meaningful band parts. Technical, progressive, virtuoso, or demanding instrumental material is high.',
+  'Do not default to medium when the song is known.'
+].join('\n');
+
 const SUPPORTED_SEARCH_FIELDS = {
   requirements: ['artist', 'language', 'genres', 'feel', 'difficulty', 'keys_type_any', 'has_keys', 'excludeRejected', 'excludePlayed'],
   preferences: ['genres', 'feel', 'difficulty', 'original_vocal', 'singer_fit', 'vocal_range', 'vocal_energy', 'band_energy', 'groove_level', 'guitar_difficulty', 'bass_difficulty', 'drums_difficulty', 'keys_difficulty', 'keys_role', 'keys_type_any', 'bass_interest', 'crowd_friendly', 'untried'],
@@ -433,6 +440,27 @@ async function interpretAdditionConfirmation({
   }));
   const decision = String(parsed?.text || '').trim().toLowerCase();
   return ['positive', 'negative', 'unclear'].includes(decision) ? decision : 'unclear';
+}
+
+async function interpretSongDifficulty({ baseUrl, apiKey, model, song, requestFn }) {
+  const prompt = JSON.stringify({
+    song_title: song?.song_title || null,
+    artist: song?.artist || null,
+    current_difficulty: song?.difficulty || null,
+    ai_metadata: song?.ai_metadata || null
+  });
+  const { parsed } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
+    baseUrl,
+    apiKey,
+    model,
+    prompt,
+    systemPrompt: SONG_DIFFICULTY_SYSTEM_PROMPT,
+    requestFn,
+    maxCompletionTokens: 80,
+    responseFormat: 'text'
+  }));
+  const difficulty = String(parsed?.text || '').trim().toLowerCase();
+  return ['low', 'medium', 'high'].includes(difficulty) ? difficulty : null;
 }
 
 function isRehearsalPlanRequest(messageText) {
@@ -1452,6 +1480,7 @@ module.exports = {
   SYSTEM_PROMPT,
   FALLBACK_SYSTEM_PROMPT,
   ADDITION_CONFIRMATION_SYSTEM_PROMPT,
+  SONG_DIFFICULTY_SYSTEM_PROMPT,
   MAX_CONCURRENT_AGENT_CALLS,
   DEFAULT_MAX_COMPLETION_TOKENS,
   extractJsonBlock,
@@ -1459,6 +1488,7 @@ module.exports = {
   buildFallbackAgentPrompt,
   interpretMessage,
   interpretAdditionConfirmation,
+  interpretSongDifficulty,
   callOpenAiCompatibleChat,
   getAgentUsageStats
 };

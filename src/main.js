@@ -1,6 +1,6 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
-const { interpretMessage, interpretAdditionConfirmation, callOpenAiCompatibleChat } = require('./llm');
+const { interpretMessage, interpretAdditionConfirmation, interpretSongDifficulty, callOpenAiCompatibleChat } = require('./llm');
 const {
   persistResultContext,
   resolveActiveResultContext,
@@ -1322,7 +1322,7 @@ async function sendSongsReply({ chat, stateStore, chatId, songs, query = null })
   await stateStore.queueSave();
 }
 
-async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions }) {
+async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, reviewSongDifficultyFn }) {
   const activeContext = resolveActiveResultContext(stateStore, record);
   const songs = stateStore.getSongs();
 
@@ -1513,6 +1513,23 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
 
   if (action.action === 'add_song') {
     const songToInsert = buildSongForInsert(action.song, record);
+    if (typeof reviewSongDifficultyFn === 'function') {
+      try {
+        const reviewedDifficulty = await reviewSongDifficultyFn({
+          baseUrl: config.llmBaseUrl,
+          apiKey: config.llmApiKey,
+          model: config.llmModel,
+          song: songToInsert
+        });
+        if (reviewedDifficulty) {
+          songToInsert.difficulty = reviewedDifficulty;
+          console.log(`[agent] difficulty_review=${reviewedDifficulty} title=${JSON.stringify(songToInsert.song_title)} artist=${JSON.stringify(songToInsert.artist)}`);
+        }
+      } catch (error) {
+        // Keep the original agent assessment when a review is unavailable.
+        console.warn(`[agent] difficulty_review_failed: ${error.message}`);
+      }
+    }
     const chatId = String(record?.chatId || '').trim();
     if (songToInsert.difficulty === 'high' && pendingAdditions instanceof Map && chatId) {
       pendingAdditions.set(chatId, { song: songToInsert, createdAt: Date.now() });
@@ -1633,6 +1650,7 @@ async function handleAgentMessage({
   pendingAdditions,
   interpretMessageFn = interpretMessage,
   interpretAdditionConfirmationFn = interpretAdditionConfirmation,
+  reviewSongDifficultyFn,
   prepareSongsForReplyFn = prepareSongsForReply,
   estimateSongDurationsFn
 }) {
@@ -1699,7 +1717,8 @@ async function handleAgentMessage({
       messageText,
       replyContext,
       estimateSongDurationsFn,
-      pendingAdditions
+      pendingAdditions,
+      reviewSongDifficultyFn
     });
     return true;
   }
@@ -1736,7 +1755,8 @@ async function handleAgentMessage({
       messageText: agentMessageText,
       replyContext,
       estimateSongDurationsFn,
-      pendingAdditions
+      pendingAdditions,
+      reviewSongDifficultyFn
     });
   } catch (error) {
     console.error('[agent] failed:', error);
@@ -1858,7 +1878,15 @@ async function bootstrap() {
     }
 
     const recentMessages = buildRecentMessageContext(getRecentMessagesForChat(record.chatId));
-    await handleAgentMessage({ chat, stateStore, config, record, recentMessages, pendingAdditions });
+    await handleAgentMessage({
+      chat,
+      stateStore,
+      config,
+      record,
+      recentMessages,
+      pendingAdditions,
+      reviewSongDifficultyFn: interpretSongDifficulty
+    });
   }
 
   async function processMessageObject(message, source) {
