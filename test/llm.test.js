@@ -17,9 +17,10 @@ test('SYSTEM_PROMPT stays compact and stable', () => {
   assert.match(SYSTEM_PROMPT, /מתאים לגיטריסט/);
   assert.match(SYSTEM_PROMPT, /Prefer taking a reasonable search interpretation/);
   assert.match(SYSTEM_PROMPT, /Use clarify for missing identity and for banter\/off-topic/);
+  assert.match(SYSTEM_PROMPT, /not a question and no question mark/);
   assert.match(SYSTEM_PROMPT, /supported_search_fields/);
   assert.match(SYSTEM_PROMPT, /closest supported query parameters/);
-  assert.match(SYSTEM_PROMPT, /dry\/sarcastic Hebrew comeback/);
+  assert.match(SYSTEM_PROMPT, /dry\/sarcastic Hebrew statement/);
 });
 
 test('buildAgentPrompt includes reply context without full database payloads', () => {
@@ -770,8 +771,8 @@ test('interpretMessage returns a useful clarification rather than throwing after
   assert.match(action.question, /מי המבצע/u);
 });
 
-test('interpretMessage preserves an agent-generated conversational clarification', async () => {
-  const question = 'רק עושה סאונדצ׳ק לנשמה 😄 מה מנגנים?';
+test('interpretMessage preserves an agent-generated conversational statement', async () => {
+  const question = 'רק עושה סאונדצ׳ק לנשמה 😄';
   const action = await interpretMessage({
     provider: 'groq',
     baseUrl: 'https://api.example.com',
