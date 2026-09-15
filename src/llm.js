@@ -57,9 +57,9 @@ const FALLBACK_SYSTEM_PROMPT = [
 
 const ADDITION_CONFIRMATION_SYSTEM_PROMPT = [
   'You classify a reply to a pending song-addition confirmation.',
-  'Return exactly one JSON object: {"decision":"positive"}, {"decision":"negative"}, or {"decision":"unclear"}.',
+  'Choose exactly one decision: positive, negative, or unclear.',
   'Interpret natural Hebrew or English meaning, not fixed keywords. A negative reply declines the add; a positive reply approves it.',
-  'No prose or extra fields.'
+  'No prose or extra words.'
 ].join('\n');
 
 const SUPPORTED_SEARCH_FIELDS = {
@@ -265,7 +265,8 @@ async function callOpenAiCompatibleChat({
   prompt,
   systemPrompt = SYSTEM_PROMPT,
   requestFn = fetch,
-  maxCompletionTokens = DEFAULT_MAX_COMPLETION_TOKENS
+  maxCompletionTokens = DEFAULT_MAX_COMPLETION_TOKENS,
+  responseFormat = 'json_object'
 }) {
   const endpoint = `${String(baseUrl || '').replace(/\/$/, '')}/chat/completions`;
   const startedAt = Date.now();
@@ -278,7 +279,7 @@ async function callOpenAiCompatibleChat({
     body: JSON.stringify({
       model,
       temperature: 0,
-      response_format: { type: 'json_object' },
+      ...(responseFormat === 'json_object' ? { response_format: { type: 'json_object' } } : {}),
       max_completion_tokens: maxCompletionTokens,
       messages: [
         {
@@ -303,7 +304,9 @@ async function callOpenAiCompatibleChat({
 
   const data = await response.json();
   const content = data?.choices?.[0]?.message?.content || '';
-  const parsed = extractJsonBlock(content);
+  const parsed = responseFormat === 'json_object'
+    ? extractJsonBlock(content)
+    : { text: String(content || '').trim() };
   if (!parsed || typeof parsed !== 'object') {
     throw new Error(`Could not parse agent JSON response: ${content}`);
   }
@@ -423,11 +426,12 @@ async function interpretAdditionConfirmation({
     apiKey,
     model,
     prompt,
-    systemPrompt: ADDITION_CONFIRMATION_SYSTEM_PROMPT,
+    systemPrompt: `${ADDITION_CONFIRMATION_SYSTEM_PROMPT}\nReturn only one lowercase word: positive, negative, or unclear.`,
     requestFn,
-    maxCompletionTokens: 40
+    maxCompletionTokens: 80,
+    responseFormat: 'text'
   }));
-  const decision = String(parsed?.decision || '').trim().toLowerCase();
+  const decision = String(parsed?.text || '').trim().toLowerCase();
   return ['positive', 'negative', 'unclear'].includes(decision) ? decision : 'unclear';
 }
 

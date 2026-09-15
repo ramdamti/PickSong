@@ -69,10 +69,11 @@ test('interpretAdditionConfirmation lets the agent classify a natural negative r
       const body = JSON.parse(options.body);
       assert.match(body.messages[0].content, /Interpret natural Hebrew/i);
       assert.match(body.messages[1].content, /אז לא/);
+      assert.equal(body.response_format, undefined);
       return {
         ok: true,
         async json() {
-          return { choices: [{ message: { content: '{"decision":"negative"}' } }], usage: {} };
+          return { choices: [{ message: { content: 'negative' } }], usage: {} };
         }
       };
     }
