@@ -21,6 +21,7 @@ test('SYSTEM_PROMPT stays compact and stable', () => {
   assert.match(SYSTEM_PROMPT, /supported_search_fields/);
   assert.match(SYSTEM_PROMPT, /closest supported query parameters/);
   assert.match(SYSTEM_PROMPT, /dry\/sarcastic Hebrew statement/);
+  assert.match(SYSTEM_PROMPT, /"לא" alone never means failure reasons/);
 });
 
 test('buildAgentPrompt includes reply context without full database payloads', () => {
