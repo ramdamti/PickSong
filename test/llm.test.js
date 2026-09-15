@@ -7,6 +7,7 @@ const {
   buildAgentPrompt,
   buildFallbackAgentPrompt,
   interpretMessage,
+  interpretAdditionConfirmation,
   getAgentUsageStats
 } = require('../src/llm');
 
@@ -55,6 +56,29 @@ test('buildAgentPrompt includes reply context without full database payloads', (
   assert.match(SYSTEM_PROMPT, /remove_song/);
   assert.doesNotMatch(prompt, /"songs":\s*\[/);
   assert.doesNotMatch(prompt, /history/i);
+});
+
+test('interpretAdditionConfirmation lets the agent classify a natural negative reply', async () => {
+  const decision = await interpretAdditionConfirmation({
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'אז לא',
+    pendingSong: { song_title: 'YYZ', artist: 'Rush', difficulty: 'high' },
+    requestFn: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      assert.match(body.messages[0].content, /Interpret natural Hebrew/i);
+      assert.match(body.messages[1].content, /אז לא/);
+      return {
+        ok: true,
+        async json() {
+          return { choices: [{ message: { content: '{"decision":"negative"}' } }], usage: {} };
+        }
+      };
+    }
+  });
+
+  assert.equal(decision, 'negative');
 });
 
 test('buildFallbackAgentPrompt keeps only compact context', () => {

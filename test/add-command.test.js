@@ -221,6 +221,7 @@ test('handleAgentMessage confirms a high-difficulty add, then accepts a positive
   await handleAgentMessage({
     chat, stateStore, config, pendingAdditions,
     record: { text: 'כן בטח', quoted: { fromMe: false, text: sentMessages[0] }, chatId: 'chat-1' },
+    interpretAdditionConfirmationFn: async () => 'positive',
     interpretMessageFn: async () => {
       agentCalls += 1;
       throw new Error('confirmation must not call the agent');
@@ -239,6 +240,7 @@ test('handleAgentMessage confirms a high-difficulty add, then accepts a positive
   await handleAgentMessage({
     chat, stateStore, config, pendingAdditions,
     record: { text: 'אז לא', quoted: { fromMe: false, text: sentMessages[0] }, chatId: 'chat-1' },
+    interpretAdditionConfirmationFn: async () => 'negative',
     interpretMessageFn: async () => {
       agentCalls += 1;
       throw new Error('negative confirmation must not call the agent');

@@ -1,6 +1,6 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
-const { interpretMessage, callOpenAiCompatibleChat } = require('./llm');
+const { interpretMessage, interpretAdditionConfirmation, callOpenAiCompatibleChat } = require('./llm');
 const {
   persistResultContext,
   resolveActiveResultContext,
@@ -690,21 +690,6 @@ function buildSongForInsert(rawSong, record) {
     ai_metadata: Object.keys(aiMetadata).length > 0 ? aiMetadata : undefined,
     band_status: song.band_status && typeof song.band_status === 'object' ? song.band_status : undefined
   };
-}
-
-function classifyAdditionConfirmation(messageText) {
-  const source = String(messageText || '').trim().toLocaleLowerCase();
-  if (!source || source.length > 120) return null;
-
-  // Accept natural short replies such as "אז לא" or "יאללה, כן". Check
-  // negative first so a mixed reply such as "כן אבל לא" safely cancels.
-  if (/(?:^|[\s,!.?])(?:לא|עזוב|עזבי|וותר|תוותר|בטל|תבטל|נוותר|no|nope|cancel)(?:$|[\s,!.?])/iu.test(source)) {
-    return 'negative';
-  }
-  if (/(?:^|[\s,!.?])(?:כן|בטח|ברור|יאללה|קדימה|תוסיף|להוסיף|רוצה|סבבה|ok|okay|yes|yep|sure)(?:$|[\s,!.?])|\bgo ahead\b/iu.test(source)) {
-    return 'positive';
-  }
-  return null;
 }
 
 async function insertSongAndReply({ stateStore, chat, song }) {
@@ -1647,6 +1632,7 @@ async function handleAgentMessage({
   recentMessages = [],
   pendingAdditions,
   interpretMessageFn = interpretMessage,
+  interpretAdditionConfirmationFn = interpretAdditionConfirmation,
   prepareSongsForReplyFn = prepareSongsForReply,
   estimateSongDurationsFn
 }) {
@@ -1668,7 +1654,13 @@ async function handleAgentMessage({
     if (Date.now() - Number(pendingAddition.createdAt || 0) > HIGH_DIFFICULTY_ADD_CONFIRMATION_TTL_MS) {
       pendingAdditions.delete(pendingChatId);
     } else {
-      const confirmation = classifyAdditionConfirmation(messageText);
+      const confirmation = await interpretAdditionConfirmationFn({
+        baseUrl: config.llmBaseUrl,
+        apiKey: config.llmApiKey,
+        model: config.llmModel,
+        messageText,
+        pendingSong: pendingAddition.song
+      });
       if (confirmation === 'positive') {
         pendingAdditions.delete(pendingChatId);
         await insertSongAndReply({ stateStore, chat, song: pendingAddition.song });
@@ -1679,6 +1671,8 @@ async function handleAgentMessage({
         await sendBotMessage(chat, '\u05e1\u05d1\u05d1\u05d4, \u05dc\u05d0 \u05d4\u05d5\u05e1\u05e4\u05ea\u05d9.');
         return true;
       }
+      await sendBotMessage(chat, '\u05dc\u05d0 \u05d4\u05d1\u05e0\u05ea\u05d9 \u05d0\u05dd \u05dc\u05d4\u05d5\u05e1\u05d9\u05e3 \u05d0\u05d5 \u05dc\u05d5\u05d5\u05ea\u05e8.');
+      return true;
     }
   }
 

@@ -55,6 +55,13 @@ const FALLBACK_SYSTEM_PROMPT = [
   'Return only valid JSON.'
 ].join('\n');
 
+const ADDITION_CONFIRMATION_SYSTEM_PROMPT = [
+  'You classify a reply to a pending song-addition confirmation.',
+  'Return exactly one JSON object: {"decision":"positive"}, {"decision":"negative"}, or {"decision":"unclear"}.',
+  'Interpret natural Hebrew or English meaning, not fixed keywords. A negative reply declines the add; a positive reply approves it.',
+  'No prose or extra fields.'
+].join('\n');
+
 const SUPPORTED_SEARCH_FIELDS = {
   requirements: ['artist', 'language', 'genres', 'feel', 'difficulty', 'keys_type_any', 'has_keys', 'excludeRejected', 'excludePlayed'],
   preferences: ['genres', 'feel', 'difficulty', 'original_vocal', 'singer_fit', 'vocal_range', 'vocal_energy', 'band_energy', 'groove_level', 'guitar_difficulty', 'bass_difficulty', 'drums_difficulty', 'keys_difficulty', 'keys_role', 'keys_type_any', 'bass_interest', 'crowd_friendly', 'untried'],
@@ -393,6 +400,35 @@ function inferRequestedLanguage(messageText) {
   }
 
   return null;
+}
+
+async function interpretAdditionConfirmation({
+  baseUrl,
+  apiKey,
+  model,
+  messageText,
+  pendingSong,
+  requestFn
+}) {
+  const prompt = JSON.stringify({
+    pending_addition: {
+      song_title: pendingSong?.song_title || null,
+      artist: pendingSong?.artist || null,
+      difficulty: pendingSong?.difficulty || null
+    },
+    user_reply: String(messageText || '').trim()
+  });
+  const { parsed } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
+    baseUrl,
+    apiKey,
+    model,
+    prompt,
+    systemPrompt: ADDITION_CONFIRMATION_SYSTEM_PROMPT,
+    requestFn,
+    maxCompletionTokens: 40
+  }));
+  const decision = String(parsed?.decision || '').trim().toLowerCase();
+  return ['positive', 'negative', 'unclear'].includes(decision) ? decision : 'unclear';
 }
 
 function isRehearsalPlanRequest(messageText) {
@@ -1411,12 +1447,14 @@ async function interpretMessage({
 module.exports = {
   SYSTEM_PROMPT,
   FALLBACK_SYSTEM_PROMPT,
+  ADDITION_CONFIRMATION_SYSTEM_PROMPT,
   MAX_CONCURRENT_AGENT_CALLS,
   DEFAULT_MAX_COMPLETION_TOKENS,
   extractJsonBlock,
   buildAgentPrompt,
   buildFallbackAgentPrompt,
   interpretMessage,
+  interpretAdditionConfirmation,
   callOpenAiCompatibleChat,
   getAgentUsageStats
 };
