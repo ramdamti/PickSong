@@ -29,10 +29,10 @@ const SYSTEM_PROMPT = [
   'When the request includes a clear target song and corrected values, do not use clarify unless the target itself is ambiguous.',
   'Hebrew examples: "מתי ניגנו את 1" -> get_song_info with result_index=1. "תעדכן את 3 ל-רד מעל הטלוויזיה שלי של פורטיס" -> update_song with result_index=3 and corrected song_title/artist. "תביא 4 שירי רוק קלים" -> search_songs with limit=4, rock genre, and low difficulty.',
   'For rehearsal planning requests, use prepare_rehearsal with compact query semantics and duration_minutes. Default duration_minutes to 180 when the user does not specify a duration.',
-  'Examples are illustrative, not exhaustive. Prefer the best context-based interpretation even when the wording differs from the examples.',
   'Prefer taking a reasonable search interpretation over asking a clarification question.',
   'For vague recommendation requests, default to search_songs with broad query semantics.',
   'Use clarify only when execution would be unsafe or impossible without missing identity: for example ambiguous remove/update target, missing song identity for destructive actions, or missing reference for result-index feedback.',
+  'For casual or non-song messages, use clarify with a short, varied, playful Hebrew reply; optionally steer back to songs or rehearsal, but never invent facts or pretend to be human.',
   'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
   'Allowed actions: search_songs, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, clarify.',
   'search_songs, prepare_rehearsal, and find_similar_songs return compact query semantics only.',
@@ -50,6 +50,7 @@ const FALLBACK_SYSTEM_PROMPT = [
   'Use reply_context result indexes when relevant.',
   'If the user asks for songs by an artist, preserve the artist strongly.',
   'If the user asks for a list of songs, use search_songs.',
+  'For greetings, jokes, teasing, or clearly non-song requests, use clarify with a short playful natural Hebrew reply, optionally inviting the user back to songs or rehearsal.',
   'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
   'Return only valid JSON.'
 ].join('\n');
@@ -206,6 +207,34 @@ function buildFallbackAgentPrompt({ messageText, quotedText, replyContext, curre
 function isJsonValidateFailedError(error) {
   const message = String(error?.message || '');
   return Number(error?.status) === 400 && /json_validate_failed/i.test(message);
+}
+
+function isAgentActionValidationError(error) {
+  const message = String(error?.message || '');
+  return /^(?:agent_action|song|query|updates)\b/i.test(message) &&
+    /(?:must be|required|unsupported)/i.test(message);
+}
+
+function buildRecoveryClarification(messageText) {
+  const source = String(messageText || '').trim()
+    .replace(/^(?:בוט\s*[:,\-]?\s*)?/iu, '')
+    .trim();
+  const addMatch = source.match(/^(?:תוסיף|תוסיפי|להוסיף|add)\s+(.+)$/iu);
+
+  if (addMatch) {
+    const requestedSong = String(addMatch[1] || '').trim();
+    if (requestedSong) {
+      return {
+        action: 'clarify',
+        question: `מי המבצע של "${requestedSong}"?`
+      };
+    }
+  }
+
+  return {
+    action: 'clarify',
+    question: 'לא הצלחתי להבין את הבקשה. אפשר לנסח אותה שוב בקצרה?'
+  };
 }
 
 function buildRateLimitError(response, bodyText) {
@@ -598,11 +627,16 @@ function inferAddSongPayload(messageText) {
     }
   }
 
-  if (!songTitle || !artist) return null;
+  // A title-only request still helps repair a malformed LLM response that already supplied the artist.
+  // Do not create a title-only song: schema validation will instead prompt for the missing artist.
+  if (!songTitle) {
+    songTitle = candidate;
+  }
+  if (!songTitle) return null;
 
   return {
     song_title: songTitle,
-    artist,
+    artist: artist || null,
     confidence: 0.5
   };
 }
@@ -1262,10 +1296,19 @@ async function interpretMessage({
         );
         return action;
       } catch (error) {
-        if (isJsonValidateFailedError(error) && !usedJsonValidateFallback) {
+        if ((isJsonValidateFailedError(error) || isAgentActionValidationError(error)) && !usedJsonValidateFallback) {
           usedJsonValidateFallback = true;
-          console.warn('[agent] retrying with compact fallback prompt after json_validate_failed');
+          console.warn(
+            `[agent] retrying with compact fallback prompt after ${
+              isJsonValidateFailedError(error) ? 'json_validate_failed' : 'action_validation_failed'
+            }`
+          );
           continue;
+        }
+
+        if (isAgentActionValidationError(error)) {
+          console.warn(`[agent] returning recovery clarification after action_validation_failed: ${error.message}`);
+          return buildRecoveryClarification(messageText);
         }
 
         if (!error?.rateLimited || attempt >= maxRetries) {

@@ -761,7 +761,7 @@ test('buildAgentFailureReply returns a clarification message for invalid agent o
   );
 });
 
-test('buildClarifyReply collapses broad recommendation clarifications into a fixed prompt', () => {
+test.skip('legacy: buildClarifyReply collapsed agent replies into a fixed prompt', () => {
   assert.equal(
     buildClarifyReply(
       { action: 'clarify', question: 'האם תוכל להסביר מה בדיוק אתה רוצה לדעת?' },
@@ -769,4 +769,9 @@ test('buildClarifyReply collapses broad recommendation clarifications into a fix
     ),
     'איזה שירים אתה רוצה?'
   );
+});
+
+test('buildClarifyReply forwards the agent-generated reply unchanged', () => {
+  const action = { action: 'clarify', question: 'Playful agent reply' };
+  assert.equal(buildClarifyReply(action), action.question);
 });

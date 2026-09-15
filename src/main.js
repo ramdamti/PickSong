@@ -192,30 +192,7 @@ function buildAgentFailureReply(error) {
   return 'יש לי עכשיו עומס קטן. נסו שוב עוד רגע.';
 }
 
-function shouldUseGenericClarifyReply(messageText, replyContext) {
-  if (replyContext?.results?.length) {
-    return false;
-  }
-
-  const source = String(messageText || '').trim().toLowerCase();
-  if (!source) {
-    return true;
-  }
-
-  if (
-    /(?:להסיר|תסיר|למחוק|תמחק|לעדכן|תעדכן|שנה|לשנות|למה|מדוע|פרטים|מידע|similar|דומה|כמו\s+\d+|שיר\s+\d+|\d+\s+לא)/iu.test(source)
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
-function buildClarifyReply(action, { messageText, replyContext }) {
-  if (shouldUseGenericClarifyReply(messageText, replyContext)) {
-    return 'איזה שירים אתה רוצה?';
-  }
-
+function buildClarifyReply(action) {
   return action.question;
 }
 
