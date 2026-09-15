@@ -459,8 +459,13 @@ async function interpretSongDifficulty({ baseUrl, apiKey, model, song, requestFn
     maxCompletionTokens: 80,
     responseFormat: 'text'
   }));
-  const difficulty = String(parsed?.text || '').trim().toLowerCase();
-  return ['low', 'medium', 'high'].includes(difficulty) ? difficulty : null;
+  const rawDifficulty = String(parsed?.text || '').trim().toLowerCase();
+  const match = rawDifficulty.match(/(?:^|[^a-z])(low|medium|high)(?:$|[^a-z])/i);
+  if (!match) {
+    console.warn(`[agent] difficulty_review_unrecognized=${JSON.stringify(rawDifficulty)}`);
+    return null;
+  }
+  return match[1].toLowerCase();
 }
 
 function isRehearsalPlanRequest(messageText) {

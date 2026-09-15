@@ -96,7 +96,7 @@ test('interpretSongDifficulty uses a dedicated agent assessment without JSON mod
       return {
         ok: true,
         async json() {
-          return { choices: [{ message: { content: 'high' } }], usage: {} };
+          return { choices: [{ message: { content: 'high — demanding instrumental parts' } }], usage: {} };
         }
       };
     }
