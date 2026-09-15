@@ -16,7 +16,7 @@ const SYSTEM_PROMPT = [
   'Do not treat piano as the same thing as synth, organ, or electric_piano unless the user was vague and you intentionally choose a soft preference.',
   'For a generic keyboard request, you may use requirements.has_keys=true and/or preferences.keys_role=important.',
   'For an exact piano request, prefer requirements.keys_type_any=["piano"]. For an exact synth request, prefer requirements.keys_type_any=["synth"].',
-  'You own keyboard semantic understanding. The application only validates and executes the structured keyboard constraints you return.',
+  'Return structured keyboard constraints.',
   'Canonicalize non-English artist names to standard English in query.requirements.artist.',
   'For artist or band requests, preserve the artist constraint strongly and do not answer with unrelated songs.',
   'For language requests, preserve query.requirements.language strongly and do not answer with songs from another language.',
@@ -35,7 +35,7 @@ const SYSTEM_PROMPT = [
   'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
   'Allowed actions: search_songs, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, clarify.',
   'search_songs, prepare_rehearsal, and find_similar_songs return compact query semantics only.',
-  'For add_song, assess real performance difficulty; do not default to medium. Use high for genuinely demanding songs; metadata goes in ai_metadata.',
+  'For add_song, difficulty is mandatory: judge real playing demands. High for demanding/prog/virtuoso material; medium only if ordinary. Put metadata in ai_metadata.',
   'update_song_feedback must use result_index for list references.',
   'Band-history questions use get_band_failure_reasons or explain_song_rejection.',
   'Do not return formatted WhatsApp replies.'
@@ -49,7 +49,7 @@ const FALLBACK_SYSTEM_PROMPT = [
   'Use reply_context result indexes when relevant.',
   'If the user asks for songs by an artist, preserve the artist strongly.',
   'If the user asks for a list of songs, use search_songs.',
-  'For an explicit add request, return add_song with non-empty song.song_title and song.artist. Assess performance difficulty; use high for genuinely demanding songs. Resolve known "A - B" title/artist pairs in either order; never leave the entire phrase as the title or ask again when one side is clearly the artist.',
+  'For an explicit add request, return add_song with non-empty song.song_title and song.artist. Difficulty is mandatory: high for demanding/prog/virtuoso material. Resolve known "A - B" title/artist pairs in either order; never leave the entire phrase as the title or ask again when one side is clearly the artist.',
   'For banter/off-topic, clarify.question is one brutal, specific, dry/sarcastic Hebrew roast, not a question. Never redirect to songs.',
   'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
   'Return only valid JSON.'

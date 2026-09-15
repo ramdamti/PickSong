@@ -233,6 +233,33 @@ test('handleAgentMessage confirms a high-difficulty add, then accepts a positive
   assert.match(sentMessages[1], /הוספתי: Hard Song - Artist/);
 });
 
+test('handleAgentMessage promotes overall difficulty when the agent marks an instrument part high', async () => {
+  const stateStore = {
+    addSong(song) { this.song = song; return true; },
+    async queueSave() {},
+    getSongs() { return []; },
+    getResultMessage() { return null; },
+    getLastResults() { return null; }
+  };
+  const chat = { async sendMessage() { return { id: { _serialized: 'wamid-demanding' } }; } };
+
+  await handleAgentMessage({
+    chat,
+    stateStore,
+    config: { triggerText: 'bot', llmProvider: 'groq', llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model' },
+    record: { text: 'bot add Demanding Song by Artist', quoted: { fromMe: false }, chatId: 'chat-1' },
+    interpretMessageFn: async () => ({
+      action: 'add_song',
+      song: {
+        song_title: 'Demanding Song', artist: 'Artist', difficulty: 'medium',
+        ai_metadata: { bass_difficulty: 'high' }
+      }
+    })
+  });
+
+  assert.equal(stateStore.song.difficulty, 'high');
+});
+
 test('handleAgentMessage resolves explicit song-info requests without sending them to the agent', async () => {
   const sentMessages = [];
   const song = createSong({

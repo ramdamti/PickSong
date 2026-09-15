@@ -655,6 +655,16 @@ function buildSongForInsert(rawSong, record) {
   if (aiMetadata.keys_difficulty === undefined && song.keys_difficulty !== undefined) {
     aiMetadata.keys_difficulty = song.keys_difficulty;
   }
+  const hasDemandingInstrumentPart = [
+    aiMetadata.guitar_difficulty,
+    aiMetadata.bass_difficulty,
+    aiMetadata.drums_difficulty,
+    aiMetadata.keys_difficulty
+  ].some((value) => String(value || '').trim().toLowerCase() === 'high');
+  const requestedDifficulty = song.difficulty ? String(song.difficulty).trim().toLowerCase() : null;
+  // Overall difficulty must not contradict a demanding part returned by the
+  // agent. This preserves the agent's instrumental assessment for every song.
+  const difficulty = hasDemandingInstrumentPart ? 'high' : requestedDifficulty;
 
   return {
     ...song,
@@ -668,7 +678,7 @@ function buildSongForInsert(rawSong, record) {
     genres: Array.isArray(song.genres)
       ? Array.from(new Set(song.genres.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)))
       : [],
-    difficulty: song.difficulty ? String(song.difficulty).trim().toLowerCase() : null,
+    difficulty,
     feel: song.feel ? String(song.feel).trim().toLowerCase() : null,
     duration_seconds: Number.isInteger(Number.parseInt(song.duration_seconds, 10)) && Number.parseInt(song.duration_seconds, 10) > 0
       ? Number.parseInt(song.duration_seconds, 10)
