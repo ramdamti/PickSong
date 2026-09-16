@@ -96,7 +96,7 @@ const BANTER_POLISH_SYSTEM_PROMPT = [
 const EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT = [
   'Recommend one real, well-known song for a band, based on the user request and compact search constraints.',
   'The requested song must be outside the local catalog. Do not invent songs, artists, facts, or links.',
-  'Return exactly one line: title<TAB>artist<TAB>short natural Hebrew reason. If no confident real recommendation exists, return exactly UNKNOWN.',
+  'Return the final line immediately; do not spend output on reasoning. Format: title<TAB>artist<TAB>short natural Hebrew reason. If no confident real recommendation exists, return exactly UNKNOWN.',
   'The reason must be specific to playing the song and concise; do not ask a question or suggest adding it.'
 ].join('\n');
 
@@ -342,6 +342,7 @@ async function callOpenAiCompatibleChat({
   requestFn = fetch,
   maxCompletionTokens = DEFAULT_MAX_COMPLETION_TOKENS,
   responseFormat = 'json_object',
+  reasoningEffort,
   tools,
   messages
 }) {
@@ -358,6 +359,7 @@ async function callOpenAiCompatibleChat({
       temperature: 0,
       ...(responseFormat === 'json_object' && !Array.isArray(tools) ? { response_format: { type: 'json_object' } } : {}),
       ...(Array.isArray(tools) ? { tools, tool_choice: 'auto' } : {}),
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       max_completion_tokens: maxCompletionTokens,
       messages: Array.isArray(messages) && messages.length > 0
         ? messages
@@ -646,7 +648,7 @@ async function recommendExternalSong({ baseUrl, apiKey, model, messageText, quer
   });
   const { parsed } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
     baseUrl, apiKey, model, prompt, systemPrompt: EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT,
-    requestFn, maxCompletionTokens: 180, responseFormat: 'text'
+    requestFn, maxCompletionTokens: 300, reasoningEffort: 'low', responseFormat: 'text'
   }));
   const recommendation = parseExternalSongRecommendation(parsed?.text);
   if (!recommendation || !recommendation.song_title || !recommendation.artist || !recommendation.reason) {
