@@ -337,6 +337,98 @@ test('handleAgentMessage forwards replied text to the agent for general context'
   assert.equal(sentMessages.length, 1);
 });
 
+test('handleAgentMessage keeps a factual clarification across a bare reply instead of running an unrelated action', async () => {
+  const sentMessages = [];
+  const pendingClarifications = new Map();
+  const stateStore = { getResultMessage() { return null; }, getLastResults() { return null; }, getSongs() { return []; } };
+  const chat = { async sendMessage(text) { sentMessages.push(text); return { id: { _serialized: `wamid-${sentMessages.length}` } }; } };
+  const config = { triggerText: 'bot', llmProvider: 'groq', llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model' };
+
+  await handleAgentMessage({
+    chat, stateStore, config, pendingClarifications,
+    record: { text: 'bot is this song hard?', quoted: { fromMe: false }, chatId: 'chat-1' },
+    interpretMessageFn: async () => ({
+      action: 'clarify',
+      question: 'Which song and artist?',
+      clarification: { intent: 'song_metadata', missing: 'song identity', subject: 'difficulty' }
+    })
+  });
+
+  assert.deepEqual(pendingClarifications.get('chat-1').intent, 'song_metadata');
+  await handleAgentMessage({
+    chat, stateStore, config, pendingClarifications,
+    record: { text: 'yes', quoted: { fromMe: false, text: sentMessages[0] }, chatId: 'chat-1' },
+    interpretMessageFn: async (params) => {
+      assert.deepEqual(params.pendingClarification.intent, 'song_metadata');
+      return {
+        action: 'clarify',
+        question: 'I still need the song name and artist.',
+        clarification: { intent: 'song_metadata', missing: 'song identity', subject: 'difficulty' }
+      };
+    }
+  });
+
+  assert.equal(pendingClarifications.get('chat-1').missing, 'song identity');
+  assert.equal(sentMessages.length, 2);
+  assert.match(sentMessages[1], /still need the song name/);
+});
+
+test('handleAgentMessage blocks a hallucinated add action for a song metadata question', async () => {
+  const sentMessages = [];
+  let added = false;
+  const stateStore = {
+    getResultMessage() { return null; },
+    getLastResults() { return null; },
+    getSongs() { return []; },
+    addSong() { added = true; }
+  };
+  const chat = { async sendMessage(text) { sentMessages.push(text); return { id: { _serialized: 'wamid-1' } }; } };
+  const config = { triggerText: 'bot', llmProvider: 'groq', llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model' };
+
+  await handleAgentMessage({
+    chat, stateStore, config,
+    record: { text: 'bot what is the difficulty of an imaginary song?', quoted: { fromMe: false }, chatId: 'chat-1' },
+    interpretMessageFn: async () => ({
+      action: 'add_song',
+      song: { song_title: 'Completely Unrelated Song', artist: 'Nobody', difficulty: 'medium', feel: 'calm', genres: ['rock'] }
+    })
+  });
+
+  assert.equal(added, false);
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /לא הוספתי/);
+});
+
+test('handleAgentMessage asks the execution reviewer before an explicit durable action', async () => {
+  const sentMessages = [];
+  let added = false;
+  const stateStore = {
+    getResultMessage() { return null; },
+    getLastResults() { return null; },
+    getSongs() { return []; },
+    addSong() { added = true; }
+  };
+  const chat = { async sendMessage(text) { sentMessages.push(text); return { id: { _serialized: 'wamid-1' } }; } };
+  const config = { triggerText: 'bot', llmProvider: 'groq', llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model' };
+
+  await handleAgentMessage({
+    chat, stateStore, config,
+    record: { text: 'bot add an uncertain song', quoted: { fromMe: false }, chatId: 'chat-1' },
+    interpretMessageFn: async () => ({
+      action: 'add_song',
+      song: { song_title: 'Uncertain Song', artist: 'Unknown', difficulty: 'medium', feel: 'calm', genres: ['rock'] }
+    }),
+    reviewActionExecutionFn: async ({ messageText, action }) => {
+      assert.equal(messageText, 'add an uncertain song');
+      assert.equal(action.action, 'add_song');
+      return 'clarify';
+    }
+  });
+
+  assert.equal(added, false);
+  assert.match(sentMessages[0], /לא ביצעתי שינוי/);
+});
+
 test('handleAgentMessage rewrites generic add-to-library requests using the latest recent song message', async () => {
   let agentCalls = 0;
   let capturedMessageText = null;

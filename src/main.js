@@ -1,6 +1,6 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
-const { interpretMessage, interpretAdditionConfirmation, interpretSongDifficulty, interpretPlainFallbackReply, callOpenAiCompatibleChat } = require('./llm');
+const { interpretMessage, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, callOpenAiCompatibleChat } = require('./llm');
 const {
   persistResultContext,
   resolveActiveResultContext,
@@ -19,6 +19,7 @@ const DEFAULT_SONG_DURATION_SECONDS = 4 * 60;
 const SONG_TRANSITION_SECONDS = 90;
 const SONG_REHEARSAL_DISCUSSION_SECONDS = 180;
 const HIGH_DIFFICULTY_ADD_CONFIRMATION_TTL_MS = 15 * 60 * 1000;
+const PENDING_CLARIFICATION_TTL_MS = 15 * 60 * 1000;
 const JAM_BUFFER_BY_FEEL_SECONDS = {
   upbeat: 120,
   calm: 75,
@@ -422,6 +423,29 @@ function inferDirectAddSongFromMessage(messageText) {
   }
 
   return parseSongIdentityText(candidate);
+}
+
+function isExplicitAddRequest(messageText) {
+  const source = String(messageText || '').trim();
+  return /^(?:תוסיף|תוסיפי|להוסיף|הוסף|add)(?:\s|$)/iu.test(source);
+}
+
+function isArtistReplyToAddClarification(messageText, quotedText = '') {
+  const artist = String(messageText || '').trim();
+  const quoted = String(quotedText || '').trim();
+  if (!artist || artist.length > 120 || !quoted) return false;
+
+  // This is deliberately narrow: it is the one add flow that does not repeat
+  // the add verb, because the bot explicitly asked for the missing performer.
+  return /(?:מי\s+המבצע\s+של|who\s+(?:is\s+the\s+)?(?:artist|performer)\s+(?:for|of))/iu.test(quoted);
+}
+
+function isAuthorizedAddAction(messageText, quotedText = '') {
+  return isExplicitAddRequest(messageText) || isArtistReplyToAddClarification(messageText, quotedText);
+}
+
+function isMutationAction(action) {
+  return ['add_song', 'update_song', 'remove_song', 'update_song_feedback'].includes(action?.action);
 }
 
 function isGenericAddToLibraryRequest(messageText) {
@@ -1322,13 +1346,25 @@ async function sendSongsReply({ chat, stateStore, chatId, songs, query = null })
   await stateStore.queueSave();
 }
 
-async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, reviewSongDifficultyFn }) {
+async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn }) {
   const activeContext = resolveActiveResultContext(stateStore, record);
   const songs = stateStore.getSongs();
+  const chatId = String(record?.chatId || '').trim();
 
   if (action.action === 'clarify') {
+    if (pendingClarifications instanceof Map && chatId) {
+      if (action.clarification) {
+        pendingClarifications.set(chatId, { ...action.clarification, createdAt: Date.now() });
+      } else {
+        pendingClarifications.delete(chatId);
+      }
+    }
     await sendBotMessage(chat, buildClarifyReply(action, { messageText, replyContext }));
     return;
+  }
+
+  if (pendingClarifications instanceof Map && chatId) {
+    pendingClarifications.delete(chatId);
   }
 
   if (action.action === 'search_songs') {
@@ -1648,9 +1684,11 @@ async function handleAgentMessage({
   record,
   recentMessages = [],
   pendingAdditions,
+  pendingClarifications,
   interpretMessageFn = interpretMessage,
   interpretAdditionConfirmationFn = interpretAdditionConfirmation,
   reviewSongDifficultyFn,
+  reviewActionExecutionFn,
   plainFallbackReplyFn = interpretPlainFallbackReply,
   prepareSongsForReplyFn = prepareSongsForReply,
   estimateSongDurationsFn
@@ -1668,6 +1706,11 @@ async function handleAgentMessage({
   }
 
   const pendingChatId = String(record?.chatId || '').trim();
+  let pendingClarification = pendingClarifications instanceof Map ? pendingClarifications.get(pendingChatId) : null;
+  if (pendingClarification && Date.now() - Number(pendingClarification.createdAt || 0) > PENDING_CLARIFICATION_TTL_MS) {
+    pendingClarifications.delete(pendingChatId);
+    pendingClarification = null;
+  }
   const pendingAddition = pendingAdditions instanceof Map ? pendingAdditions.get(pendingChatId) : null;
   if (pendingAddition) {
     if (Date.now() - Number(pendingAddition.createdAt || 0) > HIGH_DIFFICULTY_ADD_CONFIRMATION_TTL_MS) {
@@ -1720,6 +1763,7 @@ async function handleAgentMessage({
       replyContext,
       estimateSongDurationsFn,
       pendingAdditions,
+      pendingClarifications,
       reviewSongDifficultyFn
     });
     return true;
@@ -1740,8 +1784,39 @@ async function handleAgentMessage({
       quotedText,
       replyContext,
       recentMessages,
+      pendingClarification,
       currentDate: CURRENT_DATE
     });
+
+    // Adding a song is a durable mutation. Do not let an LLM turn a metadata
+    // question, a bare acknowledgement, or ordinary chat into an insertion.
+    // The only implicit continuation allowed is answering our own explicit
+    // "who is the performer" clarification.
+    if (action.action === 'add_song' && !isAuthorizedAddAction(messageText, quotedText)) {
+      console.warn(`[agent] blocked unauthorized add_song message=${JSON.stringify(messageText)}`);
+      await sendBotMessage(chat, 'לא הוספתי כלום — לא ביקשת להוסיף שיר.');
+      return true;
+    }
+
+    // Let the agent explicitly review every durable change before the local
+    // executor mutates state. The executor remains authoritative for whether
+    // the referenced song actually exists and can be changed.
+    if (isMutationAction(action) && typeof reviewActionExecutionFn === 'function') {
+      const review = await reviewActionExecutionFn({
+        baseUrl: config.llmBaseUrl,
+        apiKey: config.llmApiKey,
+        model: config.llmModel,
+        messageText,
+        quotedText,
+        pendingClarification,
+        action
+      });
+      if (review !== 'execute') {
+        console.warn(`[agent] execution_review=${JSON.stringify(review)} action=${action.action}`);
+        await sendBotMessage(chat, 'לא ביצעתי שינוי — לא היה לי ברור שזה מה שביקשת.');
+        return true;
+      }
+    }
 
     if (shouldBlockGenericSearchFallback(action, { messageText: agentMessageText, replyContext })) {
       await sendBotMessage(chat, 'איזה שירים אתה רוצה?');
@@ -1758,6 +1833,7 @@ async function handleAgentMessage({
       replyContext,
       estimateSongDurationsFn,
       pendingAdditions,
+      pendingClarifications,
       reviewSongDifficultyFn
     });
   } catch (error) {
@@ -1844,6 +1920,7 @@ async function bootstrap() {
 
   const pendingMessages = [];
   const pendingAdditions = new Map();
+  const pendingClarifications = new Map();
   const recentMessagesByChat = new Map();
   let readyToProcess = false;
   const startupTimeoutMs = 60000;
@@ -1904,7 +1981,9 @@ async function bootstrap() {
       record,
       recentMessages,
       pendingAdditions,
-      reviewSongDifficultyFn: interpretSongDifficulty
+      pendingClarifications,
+      reviewSongDifficultyFn: interpretSongDifficulty,
+      reviewActionExecutionFn: reviewAgentActionExecution
     });
   }
 
@@ -2043,6 +2122,7 @@ module.exports = {
   buildClarifyReply,
   buildRecentMessageContext,
   isChordsReplyRequest,
+  isAuthorizedAddAction,
   handleAgentMessage,
   executeAgentAction
 };

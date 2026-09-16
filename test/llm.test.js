@@ -83,6 +83,22 @@ test('interpretAdditionConfirmation lets the agent classify a natural negative r
   assert.equal(decision, 'negative');
 });
 
+test('reviewAgentActionExecution uses text mode and fails closed on an unclear review', async () => {
+  const { reviewAgentActionExecution } = require('../src/llm');
+  let requestBody;
+  const result = await reviewAgentActionExecution({
+    baseUrl: 'https://example.com', apiKey: 'test', model: 'test-model',
+    messageText: 'what is this song difficulty?',
+    action: { action: 'add_song', song: { song_title: 'Wrong Song' } },
+    requestFn: async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return { ok: true, async json() { return { choices: [{ message: { content: 'clarify' } }] }; } };
+    }
+  });
+  assert.equal(requestBody.response_format, undefined);
+  assert.equal(result, 'clarify');
+});
+
 test('interpretSongDifficulty uses a dedicated agent assessment without JSON mode', async () => {
   const difficulty = await interpretSongDifficulty({
     baseUrl: 'https://api.example.com',

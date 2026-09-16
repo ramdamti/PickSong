@@ -27,6 +27,9 @@ const SYSTEM_PROMPT = [
   'For correction requests like "תתקן את שם השיר", "האמן הנכון הוא ...", "תעדכן את 3 ל-...", or "שיר 2 הוא של ...", prefer update_song.',
   'When correcting a song from reply_context, prefer result_index and place the corrected identity in updates.song_title and/or updates.artist.',
   'When the request includes a clear target song and corrected values, do not use clarify unless the target itself is ambiguous.',
+  'Named-song metadata/difficulty -> get_song_info, never search or add. Use add_song only for an explicit add request or its performer reply.',
+  'When pending_clarification exists, a bare acknowledgement never fills it; clarify again. A distinct new request replaces it.',
+  'For a factual clarify, include clarification={intent,missing,subject}; omit clarification for banter.',
   'For add_song "A - B", infer whether A/B are artist/title; return just the title in song_title, never the whole A - B string or a duplicate.',
   'Hebrew examples: "מתי ניגנו את 1" -> get_song_info with result_index=1. "תעדכן את 3 ל-רד מעל הטלוויזיה שלי של פורטיס" -> update_song with result_index=3 and corrected song_title/artist. "תביא 4 שירי רוק קלים" -> search_songs with limit=4, rock genre, and low difficulty.',
   'For rehearsal plans, use prepare_rehearsal; default duration_minutes to 180.',
@@ -50,6 +53,7 @@ const FALLBACK_SYSTEM_PROMPT = [
   'If the user asks for songs by an artist, preserve the artist strongly.',
   'If the user asks for a list of songs, use search_songs.',
   'For an explicit add request, return add_song with non-empty song.song_title and song.artist. Difficulty is mandatory: high for demanding/prog/virtuoso material. Resolve known "A - B" title/artist pairs in either order; never leave the entire phrase as the title or ask again when one side is clearly the artist.',
+  'Never return add_song for a question about song metadata, a bare acknowledgement, or normal conversation.',
   'For banter/off-topic, clarify.question is a declarative Hebrew roast, never a question or an echo of the user. Music/rehearsal references only when natural.',
   'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
   'Return only valid JSON.'
@@ -67,6 +71,14 @@ const SONG_DIFFICULTY_SYSTEM_PROMPT = [
   'Return only one lowercase word: low, medium, high, or unknown.',
   'Judge the hardest meaningful band parts. Technical, progressive, virtuoso, or demanding instrumental material is high.',
   'Do not default to medium when the song is known.'
+].join('\n');
+
+const ACTION_EXECUTION_REVIEW_SYSTEM_PROMPT = [
+  'You review whether a proposed mutation by a WhatsApp band bot faithfully follows the user message and its context.',
+  'Return exactly one lowercase word: execute or clarify.',
+  'Use execute only when the proposed add, update, remove, or feedback action is directly requested and its target is supported by the message or quoted context.',
+  'Use clarify for a metadata question, a bare acknowledgement, banter, an uncertain target, or any action that goes beyond what the user asked.',
+  'Never infer permission to add, edit, or remove a song.'
 ].join('\n');
 
 const PLAIN_FALLBACK_SYSTEM_PROMPT = [
@@ -205,23 +217,25 @@ function extractJsonBlock(text) {
   return null;
 }
 
-function buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate }) {
+function buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate, pendingClarification }) {
   return JSON.stringify({
     supported_search_fields: SUPPORTED_SEARCH_FIELDS,
     current_date: currentDate,
     user_message: messageText,
     quoted_message: quotedText ? String(quotedText).trim() : null,
     recent_messages: Array.isArray(recentMessages) ? recentMessages : [],
-    reply_context: replyContext || null
+    reply_context: replyContext || null,
+    pending_clarification: pendingClarification || null
   });
 }
 
-function buildFallbackAgentPrompt({ messageText, quotedText, replyContext, currentDate }) {
+function buildFallbackAgentPrompt({ messageText, quotedText, replyContext, currentDate, pendingClarification }) {
   return JSON.stringify({
     current_date: currentDate,
     user_message: messageText,
     quoted_message: quotedText ? String(quotedText).trim() : null,
-    reply_context: replyContext || null
+    reply_context: replyContext || null,
+    pending_clarification: pendingClarification || null
   });
 }
 
@@ -476,6 +490,35 @@ async function interpretSongDifficulty({ baseUrl, apiKey, model, song, requestFn
     return null;
   }
   return match[1].toLowerCase();
+}
+
+async function reviewAgentActionExecution({
+  baseUrl,
+  apiKey,
+  model,
+  messageText,
+  quotedText,
+  pendingClarification,
+  action,
+  requestFn
+}) {
+  const prompt = JSON.stringify({
+    user_message: String(messageText || '').trim(),
+    quoted_message: String(quotedText || '').trim() || null,
+    pending_clarification: pendingClarification || null,
+    proposed_action: action || null
+  });
+  const { parsed } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
+    baseUrl,
+    apiKey,
+    model,
+    prompt,
+    systemPrompt: ACTION_EXECUTION_REVIEW_SYSTEM_PROMPT,
+    requestFn,
+    maxCompletionTokens: 256,
+    responseFormat: 'text'
+  }));
+  return /^execute\b/i.test(String(parsed?.text || '').trim()) ? 'execute' : 'clarify';
 }
 
 async function interpretPlainFallbackReply({ baseUrl, apiKey, model, messageText, quotedText, requestFn }) {
@@ -1440,6 +1483,7 @@ async function interpretMessage({
   quotedText,
   replyContext,
   recentMessages,
+  pendingClarification,
   currentDate,
   requestFn,
   maxRetries = DEFAULT_MAX_RETRIES
@@ -1457,8 +1501,8 @@ async function interpretMessage({
     throw new Error('LLM base URL is required');
   }
 
-  const prompt = buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate });
-  const fallbackPrompt = buildFallbackAgentPrompt({ messageText, quotedText, replyContext, currentDate });
+  const prompt = buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate, pendingClarification });
+  const fallbackPrompt = buildFallbackAgentPrompt({ messageText, quotedText, replyContext, currentDate, pendingClarification });
 
   return runWithAgentConcurrencyLimit(async () => {
     let attempt = 0;
@@ -1524,6 +1568,7 @@ module.exports = {
   interpretMessage,
   interpretAdditionConfirmation,
   interpretSongDifficulty,
+  reviewAgentActionExecution,
   interpretPlainFallbackReply,
   callOpenAiCompatibleChat,
   getAgentUsageStats

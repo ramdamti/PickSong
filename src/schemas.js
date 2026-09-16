@@ -292,6 +292,16 @@ function validateAgentAction(value) {
 
   if (name === 'clarify') {
     validated.question = ensureString(action.question, 'agent_action.question');
+    if (action.clarification !== undefined && action.clarification !== null) {
+      const clarification = ensureObject(action.clarification, 'agent_action.clarification');
+      validated.clarification = {
+        intent: ensureString(clarification.intent, 'agent_action.clarification.intent'),
+        missing: ensureString(clarification.missing, 'agent_action.clarification.missing'),
+        subject: clarification.subject === undefined || clarification.subject === null
+          ? null
+          : String(clarification.subject).trim() || null
+      };
+    }
     return validated;
   }
 
