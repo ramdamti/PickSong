@@ -1675,6 +1675,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
             question: messageText
           });
           if (answer) {
+            console.log(`[song_info] source=agent_knowledge catalog=missing title=${JSON.stringify(action.song_title)} artist=${JSON.stringify(action.artist || null)}`);
             await sendBotMessage(chat, `השיר לא קיים במאגר שלנו, אבל לפי מה שאני יודע: ${answer}`);
             return;
           }
@@ -1692,6 +1693,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
 
     const localAnswer = formatRequestedSongInfo(song, messageText);
     if (localAnswer) {
+      console.log(`[song_info] source=catalog title=${JSON.stringify(song.song_title)} artist=${JSON.stringify(song.artist || null)}`);
       await sendBotMessage(chat, localAnswer);
       return;
     }
@@ -1707,6 +1709,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
           catalogSong: song
         });
         if (answer) {
+          console.log(`[song_info] source=agent_knowledge catalog=partial title=${JSON.stringify(song.song_title)} artist=${JSON.stringify(song.artist || null)}`);
           await sendBotMessage(chat, `במאגר אין לי נתון מדויק לזה, אבל לפי מה שאני יודע: ${answer}`);
           return;
         }
@@ -1905,6 +1908,10 @@ async function handleAgentMessage({
       }
     } catch (error) {
       console.warn(`[agent] song_reference_resolution_failed: ${error.message}`);
+    }
+    if (/(?:השיר|song|האם\s+)/iu.test(messageText)) {
+      await sendBotMessage(chat, 'לא הצלחתי לזהות את השיר. תכתוב את שם השיר והאמן, ואני אבדוק.');
+      return true;
     }
   }
 

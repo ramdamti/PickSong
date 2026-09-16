@@ -585,7 +585,8 @@ async function resolveSongReference({ baseUrl, apiKey, model, messageText, quote
   }));
   const line = String(parsed?.text || '').trim();
   if (!line || line.toUpperCase() === 'UNKNOWN') return null;
-  const [rawTitle, rawArtist = ''] = line.split('\t');
+  const parts = line.split(/\t|\s*\|\s*|\r?\n/u);
+  const [rawTitle, rawArtist = ''] = parts;
   const songTitle = String(rawTitle || '').trim();
   const artist = String(rawArtist || '').trim();
   return songTitle ? { song_title: songTitle, artist: artist || null } : null;
