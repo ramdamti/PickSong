@@ -2255,33 +2255,38 @@ async function bootstrap() {
     });
   }).catch((error) => {
     console.error('[fatal]', error);
-    void destroyClient('ready failure').finally(() => process.exit(1));
+    void destroyClient('ready failure');
   });
-  // whatsapp-web.js initializes Puppeteer asynchronously. Await it so a browser
-  // crash (for example "Navigating frame was detached") is handled by the
-  // normal startup cleanup path instead of becoming an unhandled rejection.
-  try {
-    await client.initialize();
-    console.log('[whatsapp] initialize called');
-  } catch (error) {
-    console.error('[whatsapp] initialize failed:', error);
-    await destroyClient('initialize failure');
-    throw error;
-  }
+  // Keep initialization and the ready timeout concurrent. Awaiting initialize
+  // first can hang forever when Chromium stops responding before it rejects.
+  const initializePromise = Promise.resolve().then(() => client.initialize());
+  const initializeFailurePromise = initializePromise.then(
+    () => new Promise(() => {}),
+    (error) => {
+      console.error('[whatsapp] initialize failed:', error);
+      throw error;
+    }
+  );
+  console.log('[whatsapp] initialize called');
   console.log('[whatsapp] waiting for ready');
-
-  await Promise.race([
-    readyPromise,
-    new Promise((resolve) => {
-      setTimeout(() => {
-        resolve('timeout');
-      }, startupTimeoutMs);
-    })
-  ]).then((result) => {
+  let startupTimer = null;
+  try {
+    const result = await Promise.race([
+      readyPromise.then(() => 'ready'),
+      initializeFailurePromise,
+      new Promise((resolve) => {
+        startupTimer = setTimeout(() => resolve('timeout'), startupTimeoutMs);
+      })
+    ]);
     if (result === 'timeout') {
       throw new Error(`WhatsApp startup timed out after ${startupTimeoutMs}ms`);
     }
-  });
+  } catch (error) {
+    await destroyClient('startup failure');
+    throw error;
+  } finally {
+    clearTimeout(startupTimer);
+  }
 }
 
 module.exports = {
