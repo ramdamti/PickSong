@@ -1,5 +1,6 @@
 const ACTION_NAMES = new Set([
   'search_songs',
+  'recommend_external_song',
   'prepare_rehearsal',
   'add_song',
   'update_song',
@@ -305,7 +306,7 @@ function validateAgentAction(value) {
     return validated;
   }
 
-  if (name === 'search_songs' || name === 'find_similar_songs' || name === 'prepare_rehearsal') {
+  if (name === 'search_songs' || name === 'recommend_external_song' || name === 'find_similar_songs' || name === 'prepare_rehearsal') {
     const rawQuery =
       action.query && typeof action.query === 'object' && !Array.isArray(action.query)
         ? action.query

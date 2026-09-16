@@ -1,6 +1,6 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
-const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, polishBanterReply, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat } = require('./llm');
+const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, polishBanterReply, recommendExternalSong, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat } = require('./llm');
 const { READ_ONLY_SONG_TOOLS, executeReadOnlySongTool } = require('./agent-tools');
 const {
   persistResultContext,
@@ -1437,7 +1437,7 @@ async function sendSongsReply({ chat, stateStore, chatId, songs, query = null, i
   await stateStore.queueSave();
 }
 
-async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn, polishBanterReplyFn }) {
+async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn, polishBanterReplyFn, recommendExternalSongFn }) {
   const activeContext = resolveActiveResultContext(stateStore, record);
   const songs = stateStore.getSongs();
   const chatId = String(record?.chatId || '').trim();
@@ -1473,6 +1473,36 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
 
   if (pendingClarifications instanceof Map && chatId) {
     pendingClarifications.delete(chatId);
+  }
+
+  if (action.action === 'recommend_external_song') {
+    if (typeof recommendExternalSongFn !== 'function') {
+      await sendBotMessage(chat, 'אין לי כרגע דרך למצוא המלצה מחוץ למאגר.');
+      return;
+    }
+    const excludedCandidates = [];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const recommendation = await recommendExternalSongFn({
+        baseUrl: config.llmBaseUrl,
+        apiKey: config.llmApiKey,
+        model: config.llmModel,
+        messageText,
+        query: action.query || {},
+        excludedCandidates
+      });
+      if (!recommendation?.song_title || !recommendation?.artist) break;
+      const existing = typeof stateStore.findSongsByNormalizedName === 'function'
+        ? stateStore.findSongsByNormalizedName(recommendation.song_title, recommendation.artist)
+        : songs.filter((song) => normalizeText(song.song_title) === normalizeText(recommendation.song_title) && normalizeText(song.artist) === normalizeText(recommendation.artist));
+      if (!existing.length) {
+        console.log(`[external_recommendation] title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
+        await sendBotMessage(chat, `מצאתי מחוץ למאגר: ${recommendation.song_title} - ${recommendation.artist}\nלמה: ${recommendation.reason}`);
+        return;
+      }
+      excludedCandidates.push(`${recommendation.song_title} - ${recommendation.artist}`);
+    }
+    await sendBotMessage(chat, 'לא מצאתי כרגע המלצה בטוחה מחוץ למאגר.');
+    return;
   }
 
   if (action.action === 'search_songs') {
@@ -1855,6 +1885,7 @@ async function handleAgentMessage({
   resolveSongReferenceFn,
   plainFallbackReplyFn = interpretPlainFallbackReply,
   polishBanterReplyFn = polishBanterReply,
+  recommendExternalSongFn = recommendExternalSong,
   prepareSongsForReplyFn = prepareSongsForReply,
   estimateSongDurationsFn
 }) {
@@ -1955,7 +1986,8 @@ async function handleAgentMessage({
       pendingClarifications,
       reviewSongDifficultyFn,
       unknownSongInfoFn,
-      polishBanterReplyFn
+      polishBanterReplyFn,
+      recommendExternalSongFn
     });
     return true;
   }
@@ -2062,7 +2094,8 @@ async function handleAgentMessage({
       pendingClarifications,
       reviewSongDifficultyFn,
       unknownSongInfoFn,
-      polishBanterReplyFn
+      polishBanterReplyFn,
+      recommendExternalSongFn
     });
   } catch (error) {
     console.error('[agent] failed:', error);
