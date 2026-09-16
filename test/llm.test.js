@@ -11,6 +11,7 @@ const {
   interpretSongDifficulty,
   interpretPlainFallbackReply,
   polishBanterReply,
+  parseExternalSongRecommendation,
   getAgentUsageStats
 } = require('../src/llm');
 
@@ -203,6 +204,17 @@ test('polishBanterReply uses text mode to produce the final Hebrew reply', async
     }
   });
   assert.equal(reply, 'זאביק, גם למטרונום יש יותר מודעות עצמית.');
+});
+
+test('parseExternalSongRecommendation accepts natural text alternatives to tabs', () => {
+  assert.deepEqual(
+    parseExternalSongRecommendation('Hysteria - Muse: קו בס בולט ואנרגיה גבוהה.'),
+    { song_title: 'Hysteria', artist: 'Muse', reason: 'קו בס בולט ואנרגיה גבוהה.' }
+  );
+  assert.deepEqual(
+    parseExternalSongRecommendation('Hysteria | Muse | קו בס בולט ואנרגיה גבוהה.'),
+    { song_title: 'Hysteria', artist: 'Muse', reason: 'קו בס בולט ואנרגיה גבוהה.' }
+  );
 });
 
 test('buildFallbackAgentPrompt keeps only compact context', () => {

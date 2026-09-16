@@ -615,6 +615,29 @@ async function polishBanterReply({ baseUrl, apiKey, model, messageText, draftRep
   return reply && reply !== 'ACTION_UNAVAILABLE' ? reply : null;
 }
 
+function parseExternalSongRecommendation(text) {
+  const raw = String(text || '').trim().replace(/^```(?:text|json)?\s*|\s*```$/giu, '');
+  if (!raw || /^unknown$/i.test(raw)) return null;
+  try {
+    const json = JSON.parse(raw);
+    if (json?.song_title && json?.artist && json?.reason) {
+      return { song_title: String(json.song_title).trim(), artist: String(json.artist).trim(), reason: String(json.reason).trim() };
+    }
+  } catch (error) {
+    // Natural text formats are also accepted below.
+  }
+
+  const delimited = raw.split(/\t|\s*\|\s*/u).map((part) => part.trim()).filter(Boolean);
+  if (delimited.length === 3) return { song_title: delimited[0], artist: delimited[1], reason: delimited[2] };
+
+  const lines = raw.split(/\r?\n/u).map((line) => line.replace(/^[-*]\s*/u, '').trim()).filter(Boolean);
+  if (lines.length === 3) return { song_title: lines[0], artist: lines[1], reason: lines[2] };
+
+  const natural = raw.replace(/\s+/gu, ' ').match(/^(.+?)\s+-\s+(.+?)\s*(?:[:—–]\s*)(.+)$/u);
+  if (natural) return { song_title: natural[1].trim(), artist: natural[2].trim(), reason: natural[3].trim() };
+  return null;
+}
+
 async function recommendExternalSong({ baseUrl, apiKey, model, messageText, query, excludedCandidates = [], requestFn }) {
   const prompt = JSON.stringify({
     user_request: String(messageText || '').trim(),
@@ -625,9 +648,12 @@ async function recommendExternalSong({ baseUrl, apiKey, model, messageText, quer
     baseUrl, apiKey, model, prompt, systemPrompt: EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT,
     requestFn, maxCompletionTokens: 180, responseFormat: 'text'
   }));
-  const parts = String(parsed?.text || '').trim().split('\t').map((part) => part.trim());
-  if (parts.length !== 3 || !parts.every(Boolean) || /^unknown$/i.test(parts[0])) return null;
-  return { song_title: parts[0], artist: parts[1], reason: parts[2] };
+  const recommendation = parseExternalSongRecommendation(parsed?.text);
+  if (!recommendation || !recommendation.song_title || !recommendation.artist || !recommendation.reason) {
+    console.warn(`[external_recommendation] unrecognized_response=${JSON.stringify(String(parsed?.text || '').slice(0, 300))}`);
+    return null;
+  }
+  return recommendation;
 }
 
 async function interpretUnknownSongInfo({ baseUrl, apiKey, model, songTitle, artist, question, catalogSong, requestFn }) {
@@ -1775,6 +1801,7 @@ module.exports = {
   reviewAgentActionExecution,
   interpretPlainFallbackReply,
   polishBanterReply,
+  parseExternalSongRecommendation,
   recommendExternalSong,
   interpretUnknownSongInfo,
   resolveSongReference,
