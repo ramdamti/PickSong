@@ -117,9 +117,11 @@ const SUPPORTED_SEARCH_FIELDS = {
   }
 };
 
-const MAX_CONCURRENT_AGENT_CALLS = 2;
+// The free Groq tier is token-per-minute limited. Serializing this small bot's
+// requests avoids simultaneous messages exhausting the minute budget.
+const MAX_CONCURRENT_AGENT_CALLS = 1;
 const DEFAULT_MAX_COMPLETION_TOKENS = 800;
-const DEFAULT_MAX_RETRIES = 0;
+const DEFAULT_MAX_RETRIES = 1;
 
 let activeAgentCalls = 0;
 const pendingAgentCalls = [];
@@ -291,7 +293,15 @@ function buildRecoveryClarification(messageText) {
 
 function buildRateLimitError(response, bodyText) {
   const retryAfterHeader = response.headers.get('retry-after');
-  const retryAfterMs = retryAfterHeader ? Number.parseFloat(retryAfterHeader) * 1000 : null;
+  const headerRetryAfterMs = retryAfterHeader ? Number.parseFloat(retryAfterHeader) * 1000 : null;
+  const bodyRetryMatch = String(bodyText || '').match(/try again in\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds|s|seconds?)\b/i);
+  const bodyRetryAfterMs = bodyRetryMatch
+    ? Number.parseFloat(bodyRetryMatch[1]) * (/^m/i.test(bodyRetryMatch[2]) ? 1 : 1000)
+    : null;
+  // Groq can return a rounded Retry-After header alongside a more precise
+  // duration in the JSON message. Prefer the latter to avoid an unnecessary
+  // whole-second pause for a short burst limit.
+  const retryAfterMs = Number.isFinite(bodyRetryAfterMs) ? bodyRetryAfterMs : headerRetryAfterMs;
   const error = new Error(`LLM request failed: ${response.status} ${response.statusText} ${bodyText}`);
   error.status = response.status;
   error.retryAfterMs = Number.isFinite(retryAfterMs) ? retryAfterMs : null;
@@ -301,6 +311,18 @@ function buildRateLimitError(response, bodyText) {
 
 async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function retryShortRateLimit(task, label) {
+  try {
+    return await task();
+  } catch (error) {
+    if (!error?.rateLimited) throw error;
+    const delayMs = Math.max(50, error.retryAfterMs ?? 1000);
+    console.warn(`[agent] ${label}_rate_limited retry_in=${delayMs}ms`);
+    await sleep(delayMs);
+    return task();
+  }
 }
 
 async function callOpenAiCompatibleChat({
@@ -553,16 +575,21 @@ async function interpretPlainFallbackReply({ baseUrl, apiKey, model, messageText
     user_message: String(messageText || '').trim(),
     quoted_message: String(quotedText || '').trim() || null
   });
-  const { parsed } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
-    baseUrl,
-    apiKey,
-    model,
-    prompt,
-    systemPrompt: PLAIN_FALLBACK_SYSTEM_PROMPT,
-    requestFn,
-    maxCompletionTokens: 512,
-    responseFormat: 'text'
-  }));
+  const { parsed } = await runWithAgentConcurrencyLimit(() => retryShortRateLimit(
+    () => callOpenAiCompatibleChat({
+      baseUrl,
+      apiKey,
+      model,
+      prompt,
+      systemPrompt: PLAIN_FALLBACK_SYSTEM_PROMPT,
+      requestFn,
+      // A fallback reply is one short line. Reserving 512 tokens here needlessly
+      // consumes the TPM budget after a structured-output failure.
+      maxCompletionTokens: 120,
+      responseFormat: 'text'
+    }),
+    'plain_fallback'
+  ));
   const reply = String(parsed?.text || '').trim();
   return reply || null;
 }
