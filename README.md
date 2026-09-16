@@ -1,5 +1,6 @@
 # PickSong
 
+
 WhatsApp bot for a band group that uses one LLM agent path for Hebrew natural-language requests and keeps search, ranking, validation, persistence, and updates deterministic in local code.
 
 ## Current Architecture
