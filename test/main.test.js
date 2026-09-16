@@ -879,6 +879,27 @@ test('handleAgentMessage blocks generic fallback for short specific hints with a
   assert.deepEqual(sentMessages, ['\u200F🤖 איזה שירים אתה רוצה?']);
 });
 
+test('handleAgentMessage polishes an agent banter reply before sending it', async () => {
+  const sentMessages = [];
+  const stateStore = { getResultMessage() { return null; }, getLastResults() { return null; }, getSongs() { return []; } };
+  const chat = { async sendMessage(text) { sentMessages.push(text); return { id: { _serialized: 'wamid-banter-polish' } }; } };
+
+  await handleAgentMessage({
+    chat,
+    stateStore,
+    config: { triggerText: 'bot', llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model' },
+    record: { text: 'bot tell Zvik to stop bothering you', quoted: { fromMe: false }, chatId: 'chat-1' },
+    interpretMessageFn: async () => ({ action: 'clarify', question: 'Zvik, stop bothering me.' }),
+    polishBanterReplyFn: async ({ messageText, draftReply }) => {
+      assert.equal(messageText, 'tell Zvik to stop bothering you');
+      assert.equal(draftReply, 'Zvik, stop bothering me.');
+      return 'Zvik, even a metronome has more self-awareness.';
+    }
+  });
+
+  assert.deepEqual(sentMessages, ['‏🤖 Zvik, even a metronome has more self-awareness.']);
+});
+
 test('handleAgentMessage uses the text fallback for a JSON failure on banter', async () => {
   const sentMessages = [];
   const stateStore = { getResultMessage() { return null; }, getLastResults() { return null; }, getSongs() { return []; } };

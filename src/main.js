@@ -1,6 +1,6 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
-const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat } = require('./llm');
+const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, polishBanterReply, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat } = require('./llm');
 const { READ_ONLY_SONG_TOOLS, executeReadOnlySongTool } = require('./agent-tools');
 const {
   persistResultContext,
@@ -1402,7 +1402,7 @@ async function sendSongsReply({ chat, stateStore, chatId, songs, query = null })
   await stateStore.queueSave();
 }
 
-async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn }) {
+async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn, polishBanterReplyFn }) {
   const activeContext = resolveActiveResultContext(stateStore, record);
   const songs = stateStore.getSongs();
   const chatId = String(record?.chatId || '').trim();
@@ -1415,7 +1415,24 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
         pendingClarifications.delete(chatId);
       }
     }
-    await sendBotMessage(chat, buildClarifyReply(action, { messageText, replyContext }));
+    let reply = buildClarifyReply(action, { messageText, replyContext });
+    // A no-context clarify is the agent's banter channel. Let a dedicated
+    // language agent polish it, while factual clarifications remain untouched.
+    if (!action.clarification && typeof polishBanterReplyFn === 'function') {
+      try {
+        const polished = await polishBanterReplyFn({
+          baseUrl: config.llmBaseUrl,
+          apiKey: config.llmApiKey,
+          model: config.llmModel,
+          messageText,
+          draftReply: reply
+        });
+        if (polished) reply = polished;
+      } catch (error) {
+        console.warn(`[agent] banter_polish_failed: ${error.message}`);
+      }
+    }
+    await sendBotMessage(chat, reply);
     return;
   }
 
@@ -1801,6 +1818,7 @@ async function handleAgentMessage({
   unknownSongInfoFn = interpretUnknownSongInfo,
   resolveSongReferenceFn,
   plainFallbackReplyFn = interpretPlainFallbackReply,
+  polishBanterReplyFn = polishBanterReply,
   prepareSongsForReplyFn = prepareSongsForReply,
   estimateSongDurationsFn
 }) {
@@ -1889,7 +1907,8 @@ async function handleAgentMessage({
       pendingAdditions,
       pendingClarifications,
       reviewSongDifficultyFn,
-      unknownSongInfoFn
+      unknownSongInfoFn,
+      polishBanterReplyFn
     });
     return true;
   }
@@ -1995,7 +2014,8 @@ async function handleAgentMessage({
       pendingAdditions,
       pendingClarifications,
       reviewSongDifficultyFn,
-      unknownSongInfoFn
+      unknownSongInfoFn,
+      polishBanterReplyFn
     });
   } catch (error) {
     console.error('[agent] failed:', error);

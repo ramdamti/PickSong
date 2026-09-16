@@ -84,6 +84,14 @@ const PLAIN_FALLBACK_SYSTEM_PROMPT = [
   'Return only the reply text, with no label or markdown.'
 ].join('\n');
 
+const BANTER_POLISH_SYSTEM_PROMPT = [
+  'You are the final Hebrew copy editor for a sarcastic WhatsApp band bot.',
+  'Rewrite the draft reply as one short, sharp, natural Hebrew line that responds to the user message.',
+  'Fix all grammar, gender, agreement, word order, and punctuation. Preserve the intended bite, but make a real punchline rather than a literal command or paraphrase.',
+  'Never ask a question, explain yourself, mention songs unless natural, invent facts, or use slurs, threats, or protected-trait insults.',
+  'Return only the final reply text, with no label or markdown.'
+].join('\n');
+
 const UNKNOWN_SONG_INFO_SYSTEM_PROMPT = [
   'You answer a narrow factual question about a song that is not in the local band catalog.',
   'Answer only the requested property in short Hebrew, based on your knowledge. If unsure, say that briefly.',
@@ -557,6 +565,19 @@ async function interpretPlainFallbackReply({ baseUrl, apiKey, model, messageText
   }));
   const reply = String(parsed?.text || '').trim();
   return reply || null;
+}
+
+async function polishBanterReply({ baseUrl, apiKey, model, messageText, draftReply, requestFn }) {
+  const prompt = JSON.stringify({
+    user_message: String(messageText || '').trim(),
+    draft_reply: String(draftReply || '').trim()
+  });
+  const { parsed } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
+    baseUrl, apiKey, model, prompt, systemPrompt: BANTER_POLISH_SYSTEM_PROMPT,
+    requestFn, maxCompletionTokens: 160, responseFormat: 'text'
+  }));
+  const reply = String(parsed?.text || '').trim();
+  return reply && reply !== 'ACTION_UNAVAILABLE' ? reply : null;
 }
 
 async function interpretUnknownSongInfo({ baseUrl, apiKey, model, songTitle, artist, question, catalogSong, requestFn }) {
@@ -1679,6 +1700,7 @@ module.exports = {
   ADDITION_CONFIRMATION_SYSTEM_PROMPT,
   SONG_DIFFICULTY_SYSTEM_PROMPT,
   PLAIN_FALLBACK_SYSTEM_PROMPT,
+  BANTER_POLISH_SYSTEM_PROMPT,
   UNKNOWN_SONG_INFO_SYSTEM_PROMPT,
   SONG_REFERENCE_RESOLUTION_SYSTEM_PROMPT,
   MAX_CONCURRENT_AGENT_CALLS,
@@ -1692,6 +1714,7 @@ module.exports = {
   interpretSongDifficulty,
   reviewAgentActionExecution,
   interpretPlainFallbackReply,
+  polishBanterReply,
   interpretUnknownSongInfo,
   resolveSongReference,
   callOpenAiCompatibleChat,

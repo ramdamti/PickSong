@@ -10,6 +10,7 @@ const {
   interpretAdditionConfirmation,
   interpretSongDifficulty,
   interpretPlainFallbackReply,
+  polishBanterReply,
   getAgentUsageStats
 } = require('../src/llm');
 
@@ -187,6 +188,21 @@ test('interpretPlainFallbackReply uses text mode for conversational recovery', a
   });
 
   assert.equal(reply, 'יש לי ערך, פשוט הוא במינוס.');
+});
+
+test('polishBanterReply uses text mode to produce the final Hebrew reply', async () => {
+  const reply = await polishBanterReply({
+    baseUrl: 'https://api.example.com', apiKey: 'test', model: 'test-model',
+    messageText: 'תגיד לזאביק להפסיק לשגע אותך',
+    draftReply: 'זאביק, תפסיק לשגע אותי.',
+    requestFn: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      assert.equal(body.response_format, undefined);
+      assert.match(body.messages[0].content, /final Hebrew copy editor/);
+      return { ok: true, async json() { return { choices: [{ message: { content: 'זאביק, גם למטרונום יש יותר מודעות עצמית.' } }], usage: {} }; } };
+    }
+  });
+  assert.equal(reply, 'זאביק, גם למטרונום יש יותר מודעות עצמית.');
 });
 
 test('buildFallbackAgentPrompt keeps only compact context', () => {
