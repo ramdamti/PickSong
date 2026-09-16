@@ -2257,8 +2257,17 @@ async function bootstrap() {
     console.error('[fatal]', error);
     void destroyClient('ready failure').finally(() => process.exit(1));
   });
-  client.initialize();
-  console.log('[whatsapp] initialize called');
+  // whatsapp-web.js initializes Puppeteer asynchronously. Await it so a browser
+  // crash (for example "Navigating frame was detached") is handled by the
+  // normal startup cleanup path instead of becoming an unhandled rejection.
+  try {
+    await client.initialize();
+    console.log('[whatsapp] initialize called');
+  } catch (error) {
+    console.error('[whatsapp] initialize failed:', error);
+    await destroyClient('initialize failure');
+    throw error;
+  }
   console.log('[whatsapp] waiting for ready');
 
   await Promise.race([
