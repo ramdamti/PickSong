@@ -23,8 +23,10 @@ test('SYSTEM_PROMPT stays compact and stable', () => {
   assert.match(SYSTEM_PROMPT, /never redirect to songs/i);
   assert.match(SYSTEM_PROMPT, /supported_search_fields/);
   assert.match(SYSTEM_PROMPT, /closest supported query parameters/);
-  assert.match(SYSTEM_PROMPT, /never use \? and never echo\/parrot the user/);
-  assert.match(SYSTEM_PROMPT, /Music\/rehearsal riffs are optional/);
+  assert.match(SYSTEM_PROMPT, /never use \? or echo\/parrot the user/);
+  assert.match(SYSTEM_PROMPT, /Music\/rehearsal riffs only when natural/);
+  assert.match(SYSTEM_PROMPT, /fluent, idiomatic casual Hebrew/);
+  assert.match(SYSTEM_PROMPT, /fresh punchline/);
 });
 
 test('buildAgentPrompt includes reply context without full database payloads', () => {

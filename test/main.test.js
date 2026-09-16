@@ -660,6 +660,45 @@ test('handleAgentMessage answers metadata questions about an added song reply wi
   assert.doesNotMatch(sentMessages[0], /\u05e9\u05e4\u05d4:/);
 });
 
+test('handleAgentMessage answers a missing catalog song with the knowledge fallback', async () => {
+  const sentMessages = [];
+  let agentCalls = 0;
+  const stateStore = {
+    getSongs() { return []; },
+    findSongsByNormalizedName() { return []; },
+    getResultMessage() { return null; },
+    getLastResults() { return null; }
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+      return { id: { _serialized: 'wamid-missing-info-1' } };
+    }
+  };
+
+  const handled = await handleAgentMessage({
+    chat,
+    stateStore,
+    config: { triggerText: 'בוט', llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model' },
+    record: { text: 'בוט האם השיר נגעה בשמיים של משינה קשה?', quoted: { fromMe: false }, chatId: 'chat-1' },
+    interpretMessageFn: async () => {
+      agentCalls += 1;
+      throw new Error('the direct song-info route must not call the action agent');
+    },
+    unknownSongInfoFn: async ({ songTitle, artist, question }) => {
+      assert.equal(songTitle, 'נגעה בשמיים');
+      assert.equal(artist, 'משינה');
+      assert.match(question, /קשה/);
+      return 'רמת הקושי כנראה בינונית.';
+    }
+  });
+
+  assert.equal(handled, true);
+  assert.equal(agentCalls, 0);
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /השיר לא קיים במאגר שלנו, אבל לפי מה שאני יודע: רמת הקושי כנראה בינונית\./);
+});
+
 test('handleAgentMessage returns reply-context songs with chords without calling the agent', async () => {
   let agentCalls = 0;
   let saved = 0;

@@ -1664,6 +1664,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
   if (action.action === 'get_song_info') {
     const { song, reason } = resolveSongFromAction(stateStore, action, activeContext);
     if (!song) {
+      console.log(`[song_info] catalog_lookup=${reason} title=${JSON.stringify(action.song_title || null)} artist=${JSON.stringify(action.artist || null)} knowledge_handler=${typeof unknownSongInfoFn === 'function'}`);
       if (reason === 'missing' && typeof unknownSongInfoFn === 'function' && action.song_title) {
         try {
           const answer = await unknownSongInfoFn({
@@ -1679,9 +1680,16 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
             await sendBotMessage(chat, `השיר לא קיים במאגר שלנו, אבל לפי מה שאני יודע: ${answer}`);
             return;
           }
+          console.warn(`[song_info] agent_knowledge_empty catalog=missing title=${JSON.stringify(action.song_title)} artist=${JSON.stringify(action.artist || null)}`);
         } catch (error) {
           console.warn(`[agent] unknown_song_info_failed: ${error.message}`);
         }
+      }
+      // We already have an unambiguous song identity. Do not claim otherwise
+      // merely because the catalog and the optional knowledge lookup lack it.
+      if (reason === 'missing' && action.song_title) {
+        await sendBotMessage(chat, 'השיר לא קיים במאגר שלנו, ואין לי כרגע מידע אמין יותר עליו.');
+        return;
       }
       await sendBotMessage(chat,
         reason === 'ambiguous'
@@ -1717,7 +1725,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
         console.warn(`[agent] known_song_info_gap_failed: ${error.message}`);
       }
     }
-    await sendBotMessage(chat, 'אין לי מידע מדויק על זה במאגר.');
+    await sendBotMessage(chat, `על ${song.song_title}${song.artist ? ` - ${song.artist}` : ''} אין לי מידע מדויק על זה במאגר.`);
     return;
   }
 
