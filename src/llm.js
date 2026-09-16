@@ -96,6 +96,7 @@ const BANTER_POLISH_SYSTEM_PROMPT = [
 const EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT = [
   'Recommend one real, well-known song for a band, based on the user request and compact search constraints.',
   'The requested song must be outside the local catalog. Do not invent songs, artists, facts, or links.',
+  'Unless the search constraints or user request explicitly ask for a demanding, virtuoso, or specifically hard song, prefer a low or medium real-world playing difficulty for the full band (vocals, guitar, bass, drums, keys). Avoid notoriously difficult, technically extreme picks by default.',
   'Return the final line immediately; do not spend output on reasoning. Format: title<TAB>artist<TAB>short natural Hebrew reason. If no confident real recommendation exists, return exactly UNKNOWN.',
   'The reason must be specific to playing the song and concise; do not ask a question or suggest adding it.'
 ].join('\n');
@@ -647,7 +648,9 @@ function parseExternalSongRecommendation(text) {
     // Natural text formats are also accepted below.
   }
 
-  const delimited = raw.split(/\t|\s*<tab>\s*|\s*\|\s*/iu).map((part) => part.trim()).filter(Boolean);
+  // Some responses spell the tab as the literal two characters "\t" rather
+  // than an actual tab byte; accept both.
+  const delimited = raw.split(/\t|\\t|\s*<tab>\s*|\s*\|\s*/iu).map((part) => part.trim()).filter(Boolean);
   if (delimited.length === 3) return { song_title: delimited[0], artist: delimited[1], reason: delimited[2] };
 
   const lines = raw.split(/\r?\n/u).map((line) => line.replace(/^[-*]\s*/u, '').trim()).filter(Boolean);
