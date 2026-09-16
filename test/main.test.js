@@ -8,6 +8,8 @@ const {
   buildAgentReplyContext,
   buildAgentFailureReply,
   buildClarifyReply,
+  isRecommendationReasonRequest,
+  buildRecommendationReason,
   buildRecentMessageContext,
   isChordsReplyRequest,
   handleAgentMessage
@@ -18,6 +20,17 @@ test('stripWakeWord removes standalone bot trigger variants', () => {
   assert.equal(stripWakeWord('\u05d1\u05d5\u05d8, \u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7'), '\u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7');
   assert.equal(stripWakeWord('\u05d1\u05d5\u05d8: \u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7'), '\u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7');
   assert.equal(stripWakeWord('\u05d1\u05d5\u05d8 - \u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7'), '\u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7');
+});
+
+test('recommendation reasons are detected and grounded in stored song data', () => {
+  const song = {
+    song_title: 'Exodus', artist: 'Bob Marley and the Wailers', genres: ['reggae'], difficulty: 'medium',
+    ai_metadata: { band_energy: 'medium', crowd_friendly: true }, band_status: { fit: 'unknown' }
+  };
+  assert.equal(isRecommendationReasonRequest('למה בחרת את זה?'), true);
+  assert.equal(isRecommendationReasonRequest('תן לי עוד שיר'), false);
+  assert.match(buildRecommendationReason(song, {}), /Exodus/);
+  assert.match(buildRecommendationReason(song, {}), /ידידותי לקהל/);
 });
 
 test('shouldHandleMessage accepts direct bot requests and ignores raw reply markers', () => {
@@ -898,6 +911,36 @@ test('handleAgentMessage polishes an agent banter reply before sending it', asyn
   });
 
   assert.deepEqual(sentMessages, ['‏🤖 Zvik, even a metronome has more self-awareness.']);
+});
+
+test('handleAgentMessage explains a replied recommendation without invoking the action agent', async () => {
+  const sentMessages = [];
+  const song = {
+    song_id: 'song_exodus', song_title: 'Exodus', artist: 'Bob Marley and the Wailers', genres: ['reggae'], difficulty: 'medium',
+    ai_metadata: { band_energy: 'medium', crowd_friendly: true }, band_status: { fit: 'unknown' }
+  };
+  const stateStore = {
+    getSongs() { return [song]; },
+    getSongById(id) { return id === song.song_id ? song : null; },
+    getResultMessage(id) {
+      return id === 'wamid-recommendation'
+        ? { results: [{ index: 1, song_id: song.song_id, title: song.song_title, artist: song.artist }], query: {} }
+        : null;
+    },
+    getLastResults() { return null; }
+  };
+  const chat = { async sendMessage(text) { sentMessages.push(text); return { id: { _serialized: 'wamid-explanation' } }; } };
+
+  await handleAgentMessage({
+    chat, stateStore,
+    config: { triggerText: 'bot', llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model' },
+    record: { text: 'למה בחרת את זה?', quoted: { id: 'wamid-recommendation', fromMe: false, text: '‏🤖 הבאתי: Exodus - Bob Marley and the Wailers' }, chatId: 'chat-1' },
+    interpretMessageFn: async () => { throw new Error('recommendation explanation must not call the agent'); }
+  });
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /Exodus/);
+  assert.match(sentMessages[0], /ידידותי לקהל/);
 });
 
 test('handleAgentMessage uses the text fallback for a JSON failure on banter', async () => {

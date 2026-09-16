@@ -199,6 +199,38 @@ function buildClarifyReply(action) {
   return action.question;
 }
 
+function isRecommendationReasonRequest(messageText) {
+  const text = String(messageText || '').trim();
+  return /(?:למה\s+(?:בחרת|דווקא)|למה\s+זה|תגיד\s+למה|why\s+(?:did\s+you\s+choose|this|that)|why\s+choose)/iu.test(text);
+}
+
+function hasMeaningfulSongQuery(query) {
+  const sections = [query?.requirements || {}, query?.preferences || {}, query?.exclusions || {}];
+  return sections.some((section) => Object.values(section).some((value) =>
+    Array.isArray(value) ? value.length > 0 : value !== null && value !== undefined && value !== false && value !== ''
+  ));
+}
+
+function buildRecommendationReason(song, query = null) {
+  if (!song) return 'ההמלצה הגיעה מההתאמה למאגר, בלי סיבה מפורטת שנשמרה.';
+  const metadata = song.ai_metadata || {};
+  const facts = [];
+  const genres = (Array.isArray(song.genres) ? song.genres : []).filter((genre) => genre && genre !== 'unknown');
+  if (genres.length) facts.push(`הוא יושב באזור של ${genres.slice(0, 2).join(', ')}`);
+  if (metadata.band_energy === 'high') facts.push('יש לו אנרגיה גבוהה');
+  else if (metadata.band_energy === 'medium') facts.push('הוא נותן אנרגיה טובה בלי להפוך את החזרה לאולימפיאדה');
+  if (metadata.crowd_friendly === true) facts.push('הוא גם ידידותי לקהל');
+  if (song.difficulty === 'low') facts.push('הוא לא אמור לשבור אתכם טכנית');
+  else if (song.difficulty === 'medium') facts.push('הוא מאתגר במידה סבירה');
+  if (song.band_status?.fit === 'good') facts.push('הוא כבר סומן כמתאים להרכב שלכם');
+
+  const identity = `${song.song_title}${song.artist ? ` - ${song.artist}` : ''}`;
+  const intro = hasMeaningfulSongQuery(query)
+    ? `בחרתי ב־${identity} כי הוא התאים לסינון שביקשתם`
+    : `ביקשתם משהו שהחשק כבר מוכן לנגן, בלי פילטר טכני, אז הלכתי על ${identity}`;
+  return facts.length ? `${intro}: ${facts.join(', ')}.` : `${intro}.`;
+}
+
 function querySectionHasContent(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return false;
@@ -1378,13 +1410,16 @@ function rebuildResultListWithReplacements({ context, stateStore, replacementInd
     .filter(Boolean);
 }
 
-async function sendSongsReply({ chat, stateStore, chatId, songs, query = null }) {
+async function sendSongsReply({ chat, stateStore, chatId, songs, query = null, includeRecommendationReason = false }) {
   if (!songs.length) {
     await sendBotMessage(chat, '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd.');
     return;
   }
 
-  const sentMessage = await sendBotMessage(chat, formatSongsReply(songs));
+  const reply = includeRecommendationReason
+    ? `${formatSongsReply(songs)}\nלמה: ${buildRecommendationReason(songs[0], query)}`
+    : formatSongsReply(songs);
+  const sentMessage = await sendBotMessage(chat, reply);
   const botMessageId = extractBotMessageId(sentMessage);
   persistResultContext(stateStore, {
     chatId,
@@ -1508,7 +1543,8 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       stateStore,
       chatId: record.chatId,
       songs: matches,
-      query: sanitizeQueryForResultContext(action.query || {}, matches.length)
+      query: sanitizeQueryForResultContext(action.query || {}, matches.length),
+      includeRecommendationReason: isRecommendationReasonRequest(messageText)
     });
     return;
   }
@@ -1877,6 +1913,17 @@ async function handleAgentMessage({
       discoverChords: config.discoverChords !== false,
       prepareSongsForReplyFn
     });
+  }
+
+  // Explanations of a recommendation are grounded in the stored result and
+  // query, so they should not be turned into a new search or a clarification.
+  if (replyContext?.results?.length && isRecommendationReasonRequest(messageText)) {
+    const selected = replyContext.results[0];
+    const song = selected?.song_id ? stateStore.getSongById(selected.song_id) : null;
+    if (song) {
+      await sendBotMessage(chat, buildRecommendationReason(song, replyContext.query));
+      return true;
+    }
   }
 
   const quotedText = record?.quoted?.text || record?.quotedText || '';
@@ -2316,6 +2363,8 @@ module.exports = {
   buildAgentReplyContext,
   buildAgentFailureReply,
   buildClarifyReply,
+  isRecommendationReasonRequest,
+  buildRecommendationReason,
   buildRecentMessageContext,
   isChordsReplyRequest,
   isAuthorizedAddAction,
