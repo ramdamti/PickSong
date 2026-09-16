@@ -272,7 +272,7 @@ function isSongInfoRequest(messageText) {
     return true;
   }
   const asksQuestion = /(?:^|\s)(?:מה|כמה|האם|איך|what|how|is|are)(?:\s|$)|[?？]$/iu.test(normalized);
-  const mentionsMetadata = /(?:רמת?\s*(?:ה)?קושי|כמה\s+קשה|קושי|ז[׳']?אנר|סגנון|אווירה|feel|שפה|אורך|משך|ווקאל|ווקל|קול|זמר|טווח|אנרגיה|קהל|גרוב|גיטרה|בס|תופים|קלידים|פסנתר|סינת|אורגן|סטטוס|ניסיונות|חזרה|נוגן|difficulty|genre|language|duration|vocal|range|energy|crowd|groove|guitar|bass|drums|keys|piano|synth|organ|status|attempts|rehears)/iu.test(normalized);
+  const mentionsMetadata = /(?:רמת?\s*(?:ה)?קושי|כמה\s+קשה|קשה|קל|קושי|ז[׳']?אנר|סגנון|אווירה|feel|שפה|אורך|משך|ווקאל|ווקל|קול|זמר|טווח|אנרגיה|קהל|גרוב|גיטרה|בס|תופים|קלידים|פסנתר|סינת|אורגן|סטטוס|ניסיונות|חזרה|נוגן|difficulty|genre|language|duration|vocal|range|energy|crowd|groove|guitar|bass|drums|keys|piano|synth|organ|status|attempts|rehears)/iu.test(normalized);
   return asksQuestion && mentionsMetadata;
 }
 
@@ -366,6 +366,22 @@ function extractSongIdentityFromInfoRequest(messageText) {
   return parseSongIdentityText(stripped);
 }
 
+function extractSongIdentityFromMetadataQuestion(messageText) {
+  const source = String(messageText || '').trim();
+  if (!isSongInfoRequest(source)) return null;
+
+  // Handles natural Hebrew questions such as "האם השיר נגעה בשמיים של
+  // משינה קשה?". This is intentionally evaluated locally: the database is
+  // the authority for the answer, so a model should not need to guess the
+  // identity before we can look it up.
+  const candidate = source
+    .replace(/[?？]+$/u, '')
+    .replace(/^(?:מה\s+רמת?\s*(?:ה)?קושי\s+של|האם\s+השיר|השיר)\s+/iu, '')
+    .replace(/\s+(?:קשה|קל|ברמת?\s*(?:ה)?קושי|difficulty|genre|ז[׳']?אנר|שפה|משך|אורך)$/iu, '')
+    .trim();
+  return parseSongIdentityText(candidate);
+}
+
 function inferSongInfoAction(messageText, replyContext, quotedText = '') {
   if (!isSongInfoRequest(messageText)) {
     return null;
@@ -386,6 +402,15 @@ function inferSongInfoAction(messageText, replyContext, quotedText = '') {
       action: 'get_song_info',
       song_title: directSongIdentity.song_title,
       artist: directSongIdentity.artist
+    };
+  }
+
+  const metadataQuestionIdentity = extractSongIdentityFromMetadataQuestion(messageText);
+  if (metadataQuestionIdentity) {
+    return {
+      action: 'get_song_info',
+      song_title: metadataQuestionIdentity.song_title,
+      artist: metadataQuestionIdentity.artist
     };
   }
 
@@ -1752,6 +1777,19 @@ async function handleAgentMessage({
   }
 
   const quotedText = record?.quoted?.text || record?.quotedText || '';
+  // A factual clarification may receive the missing title/artist as a reply.
+  // Resolve it deterministically before asking the agent again.
+  if (pendingClarification?.intent === 'song_metadata') {
+    const pendingIdentity = parseSongIdentityText(messageText);
+    if (pendingIdentity) {
+      await executeAgentAction({
+        action: { action: 'get_song_info', song_title: pendingIdentity.song_title, artist: pendingIdentity.artist },
+        stateStore, chat, config, record, messageText, replyContext,
+        estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn
+      });
+      return true;
+    }
+  }
   const inferredSongInfoAction = inferSongInfoAction(messageText, replyContext, quotedText);
   if (inferredSongInfoAction) {
     await executeAgentAction({
@@ -2130,6 +2168,7 @@ module.exports = {
   buildRecentMessageContext,
   isChordsReplyRequest,
   isAuthorizedAddAction,
+  extractSongIdentityFromMetadataQuestion,
   handleAgentMessage,
   executeAgentAction
 };
