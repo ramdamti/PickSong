@@ -13,6 +13,8 @@ const ACTION_NAMES = new Set([
   'get_band_bad_songs',
   'get_band_maybe_songs',
   'get_band_failure_reasons',
+  'respond',
+  'unsupported',
   'clarify'
 ]);
 
@@ -303,6 +305,16 @@ function validateAgentAction(value) {
           : String(clarification.subject).trim() || null
       };
     }
+    return validated;
+  }
+
+  if (name === 'respond') {
+    validated.reply = ensureString(action.reply, 'agent_action.reply');
+    return validated;
+  }
+
+  if (name === 'unsupported') {
+    validated.requested_capability = String(action.requested_capability || '').trim() || 'the requested capability';
     return validated;
   }
 

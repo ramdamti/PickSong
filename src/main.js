@@ -1,6 +1,6 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
-const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, polishBanterReply, recommendExternalSong, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat } = require('./llm');
+const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, polishBanterReply, recommendExternalSong, composeUnsupportedReply, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat } = require('./llm');
 const { READ_ONLY_SONG_TOOLS, executeReadOnlySongTool } = require('./agent-tools');
 const {
   persistResultContext,
@@ -17,6 +17,7 @@ const BOT_PREFIX = '\u200F🤖 ';
 const DEFAULT_REHEARSAL_DURATION_MINUTES = 180;
 const REHEARSAL_BREAK_MINUTES = 12;
 const DEFAULT_SONG_DURATION_SECONDS = 4 * 60;
+const recentVoiceRepliesByChat = new Map();
 const SONG_TRANSITION_SECONDS = 90;
 const SONG_REHEARSAL_DISCUSSION_SECONDS = 180;
 const HIGH_DIFFICULTY_ADD_CONFIRMATION_TTL_MS = 15 * 60 * 1000;
@@ -197,6 +198,16 @@ function buildAgentFailureReply(error) {
 
 function buildClarifyReply(action) {
   return action.question;
+}
+
+function getRecentVoiceReplies(chatId) {
+  return recentVoiceRepliesByChat.get(String(chatId || '')) || [];
+}
+
+function rememberVoiceReply(chatId, reply) {
+  const key = String(chatId || '');
+  if (!key || !reply) return;
+  recentVoiceRepliesByChat.set(key, [...getRecentVoiceReplies(key), String(reply).trim()].slice(-3));
 }
 
 function isRecommendationReasonRequest(messageText) {
@@ -1437,10 +1448,42 @@ async function sendSongsReply({ chat, stateStore, chatId, songs, query = null, i
   await stateStore.queueSave();
 }
 
-async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn, polishBanterReplyFn, recommendExternalSongFn }) {
+async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn, polishBanterReplyFn, recommendExternalSongFn, composeUnsupportedReplyFn }) {
   const activeContext = resolveActiveResultContext(stateStore, record);
   const songs = stateStore.getSongs();
   const chatId = String(record?.chatId || '').trim();
+
+  if (action.action === 'respond') {
+    let reply = action.reply;
+    if (typeof polishBanterReplyFn === 'function') {
+      try {
+        reply = await polishBanterReplyFn({ baseUrl: config.llmBaseUrl, apiKey: config.llmApiKey, model: config.llmModel, messageText, draftReply: reply }) || reply;
+      } catch (error) {
+        console.warn(`[agent] respond_polish_failed: ${error.message}`);
+      }
+    }
+    rememberVoiceReply(chatId, reply);
+    await sendBotMessage(chat, reply);
+    return;
+  }
+
+  if (action.action === 'unsupported') {
+    let reply = null;
+    if (typeof composeUnsupportedReplyFn === 'function') {
+      try {
+        reply = await composeUnsupportedReplyFn({
+          baseUrl: config.llmBaseUrl, apiKey: config.llmApiKey, model: config.llmModel,
+          messageText, requestedCapability: action.requested_capability, recentReplies: getRecentVoiceReplies(chatId)
+        });
+      } catch (error) {
+        console.warn(`[agent] unsupported_reply_failed: ${error.message}`);
+      }
+    }
+    reply = reply || 'היכולת הזו עדיין עושה פרצופים בחדר החזרות.';
+    rememberVoiceReply(chatId, reply);
+    await sendBotMessage(chat, reply);
+    return;
+  }
 
   if (action.action === 'clarify') {
     if (pendingClarifications instanceof Map && chatId) {
@@ -1886,6 +1929,7 @@ async function handleAgentMessage({
   plainFallbackReplyFn = interpretPlainFallbackReply,
   polishBanterReplyFn = polishBanterReply,
   recommendExternalSongFn = recommendExternalSong,
+  composeUnsupportedReplyFn = composeUnsupportedReply,
   prepareSongsForReplyFn = prepareSongsForReply,
   estimateSongDurationsFn
 }) {
@@ -1987,7 +2031,8 @@ async function handleAgentMessage({
       reviewSongDifficultyFn,
       unknownSongInfoFn,
       polishBanterReplyFn,
-      recommendExternalSongFn
+      recommendExternalSongFn,
+      composeUnsupportedReplyFn
     });
     return true;
   }
@@ -2095,7 +2140,8 @@ async function handleAgentMessage({
       reviewSongDifficultyFn,
       unknownSongInfoFn,
       polishBanterReplyFn,
-      recommendExternalSongFn
+      recommendExternalSongFn,
+      composeUnsupportedReplyFn
     });
   } catch (error) {
     console.error('[agent] failed:', error);
