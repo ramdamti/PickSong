@@ -215,6 +215,10 @@ test('parseExternalSongRecommendation accepts natural text alternatives to tabs'
     parseExternalSongRecommendation('Hysteria | Muse | קו בס בולט ואנרגיה גבוהה.'),
     { song_title: 'Hysteria', artist: 'Muse', reason: 'קו בס בולט ואנרגיה גבוהה.' }
   );
+  assert.deepEqual(
+    parseExternalSongRecommendation('Hysteria<TAB>Muse<TAB>קו בס בולט ואנרגיה גבוהה.'),
+    { song_title: 'Hysteria', artist: 'Muse', reason: 'קו בס בולט ואנרגיה גבוהה.' }
+  );
 });
 
 test('buildFallbackAgentPrompt keeps only compact context', () => {

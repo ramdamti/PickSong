@@ -629,7 +629,7 @@ function parseExternalSongRecommendation(text) {
     // Natural text formats are also accepted below.
   }
 
-  const delimited = raw.split(/\t|\s*\|\s*/u).map((part) => part.trim()).filter(Boolean);
+  const delimited = raw.split(/\t|\s*<tab>\s*|\s*\|\s*/iu).map((part) => part.trim()).filter(Boolean);
   if (delimited.length === 3) return { song_title: delimited[0], artist: delimited[1], reason: delimited[2] };
 
   const lines = raw.split(/\r?\n/u).map((line) => line.replace(/^[-*]\s*/u, '').trim()).filter(Boolean);
