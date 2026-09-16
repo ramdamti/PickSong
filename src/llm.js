@@ -137,6 +137,12 @@ const SUPPORTED_SEARCH_FIELDS = {
 const MAX_CONCURRENT_AGENT_CALLS = 1;
 const DEFAULT_MAX_COMPLETION_TOKENS = 800;
 const DEFAULT_MAX_RETRIES = 1;
+// A provider rate-limit response can carry a retry-after far longer than a
+// chat user will ever wait (observed: ~591s). Sleeping that long inline would
+// hang this message, and every other queued one behind MAX_CONCURRENT_AGENT_CALLS,
+// with no reply at all. Past this cap, fail fast so the caller's existing
+// error handling sends the immediate "system is busy" reply instead.
+const MAX_INLINE_RATE_LIMIT_SLEEP_MS = 8000;
 
 let activeAgentCalls = 0;
 const pendingAgentCalls = [];
@@ -334,6 +340,10 @@ async function retryShortRateLimit(task, label) {
   } catch (error) {
     if (!error?.rateLimited) throw error;
     const delayMs = Math.max(50, error.retryAfterMs ?? 1000);
+    if (delayMs > MAX_INLINE_RATE_LIMIT_SLEEP_MS) {
+      console.warn(`[agent] ${label}_rate_limited retry_in=${delayMs}ms exceeds inline cap, failing fast`);
+      throw error;
+    }
     console.warn(`[agent] ${label}_rate_limited retry_in=${delayMs}ms`);
     await sleep(delayMs);
     return task();
@@ -1722,8 +1732,13 @@ async function interpretMessage({
           throw error;
         }
 
+        const retryDelayMs = error.retryAfterMs ?? 1000 * (attempt + 1);
+        if (retryDelayMs > MAX_INLINE_RATE_LIMIT_SLEEP_MS) {
+          console.warn(`[agent] rate_limited retry_in=${retryDelayMs}ms exceeds inline cap, failing fast`);
+          throw error;
+        }
+
         attempt += 1;
-        const retryDelayMs = error.retryAfterMs ?? 1000 * attempt;
         console.warn(`[agent] rate_limited retry_in=${retryDelayMs}ms attempt=${attempt}`);
         await sleep(retryDelayMs);
       }
