@@ -185,10 +185,23 @@ function classifyAgentFailure(error) {
   return 'generic_failure';
 }
 
+function formatRetryDelay(retryAfterMs) {
+  const totalSeconds = Math.ceil(Number(retryAfterMs) / 1000);
+  if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return null;
+  if (totalSeconds < 60) {
+    return `${totalSeconds} שניות`;
+  }
+  const minutes = Math.ceil(totalSeconds / 60);
+  return `${minutes} דקות`;
+}
+
 function buildAgentFailureReply(error) {
   const failureType = classifyAgentFailure(error);
   if (failureType === 'rate_limited') {
-    return 'יש עכשיו עומס על המנוע. נסו שוב עוד רגע.';
+    const retryDelay = formatRetryDelay(error?.retryAfterMs);
+    return retryDelay
+      ? `יש עכשיו עומס על המנוע. נסו שוב בעוד כ-${retryDelay}.`
+      : 'יש עכשיו עומס על המנוע. נסו שוב עוד רגע.';
   }
   if (failureType === 'invalid_agent_output') {
     return 'לא הבנתי עד הסוף את הבקשה. נסו לנסח שוב במשפט קצר.';

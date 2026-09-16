@@ -1703,6 +1703,12 @@ async function interpretMessage({
           model,
           prompt: usedJsonValidateFallback ? fallbackPrompt : prompt,
           systemPrompt: usedJsonValidateFallback ? FALLBACK_SYSTEM_PROMPT : SYSTEM_PROMPT,
+          // This is a single structured classification against an explicit
+          // action schema, not open-ended reasoning. Reasoning-model providers
+          // (e.g. Groq's gpt-oss) default to 'medium' effort, which burns
+          // hidden reasoning tokens on every message and is the main drain on
+          // a free-tier daily token budget; 'low' is plenty for this task.
+          reasoningEffort: 'low',
           requestFn
         });
         const action = validateAgentAction(
@@ -1790,6 +1796,7 @@ async function interpretMessageWithTools({
           messages,
           tools,
           responseFormat: 'text',
+          reasoningEffort: 'low',
           requestFn
         });
         if (result.toolCalls.length === 0) {
