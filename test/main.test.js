@@ -656,8 +656,8 @@ test('handleAgentMessage answers metadata questions about an added song reply wi
   assert.equal(handled, true);
   assert.equal(agentCalls, 0);
   assert.equal(sentMessages.length, 1);
-  assert.match(sentMessages[0], /Wish You Were Here - Pink Floyd/);
   assert.match(sentMessages[0], /\u05e8\u05de\u05ea \u05e7\u05d5\u05e9\u05d9: medium/);
+  assert.doesNotMatch(sentMessages[0], /\u05e9\u05e4\u05d4:/);
 });
 
 test('handleAgentMessage returns reply-context songs with chords without calling the agent', async () => {

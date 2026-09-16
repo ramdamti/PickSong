@@ -88,6 +88,19 @@ const PLAIN_FALLBACK_SYSTEM_PROMPT = [
   'Return only the reply text, with no label or markdown.'
 ].join('\n');
 
+const UNKNOWN_SONG_INFO_SYSTEM_PROMPT = [
+  'You answer a narrow factual question about a song that is not in the local band catalog.',
+  'Answer only the requested property in short Hebrew, based on your knowledge. If unsure, say that briefly.',
+  'Do not claim to have browsed the web, accessed the catalog, or verified a source.',
+  'Do not suggest adding the song and do not use markdown.'
+].join('\n');
+
+const SONG_REFERENCE_RESOLUTION_SYSTEM_PROMPT = [
+  'Extract the referenced song title and artist from a user question about a song.',
+  'Return exactly one line in this format: title<TAB>artist. Use an empty artist field when unknown.',
+  'Do not answer the question, add songs, or use markdown. If no specific song is identifiable, return exactly UNKNOWN.'
+].join('\n');
+
 const SUPPORTED_SEARCH_FIELDS = {
   requirements: ['artist', 'language', 'genres', 'feel', 'difficulty', 'keys_type_any', 'has_keys', 'excludeRejected', 'excludePlayed'],
   preferences: ['genres', 'feel', 'difficulty', 'original_vocal', 'singer_fit', 'vocal_range', 'vocal_energy', 'band_energy', 'groove_level', 'guitar_difficulty', 'bass_difficulty', 'drums_difficulty', 'keys_difficulty', 'keys_role', 'keys_type_any', 'bass_interest', 'crowd_friendly', 'untried'],
@@ -548,6 +561,34 @@ async function interpretPlainFallbackReply({ baseUrl, apiKey, model, messageText
   }));
   const reply = String(parsed?.text || '').trim();
   return reply || null;
+}
+
+async function interpretUnknownSongInfo({ baseUrl, apiKey, model, songTitle, artist, question, catalogSong, requestFn }) {
+  const prompt = JSON.stringify({
+    song_title: String(songTitle || '').trim(),
+    artist: String(artist || '').trim() || null,
+    user_question: String(question || '').trim(),
+    local_catalog_data: catalogSong || null
+  });
+  const { parsed } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
+    baseUrl, apiKey, model, prompt, systemPrompt: UNKNOWN_SONG_INFO_SYSTEM_PROMPT,
+    requestFn, maxCompletionTokens: 256, responseFormat: 'text'
+  }));
+  return String(parsed?.text || '').trim() || null;
+}
+
+async function resolveSongReference({ baseUrl, apiKey, model, messageText, quotedText, requestFn }) {
+  const prompt = JSON.stringify({ user_question: String(messageText || '').trim(), quoted_message: String(quotedText || '').trim() || null });
+  const { parsed } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
+    baseUrl, apiKey, model, prompt, systemPrompt: SONG_REFERENCE_RESOLUTION_SYSTEM_PROMPT,
+    requestFn, maxCompletionTokens: 256, responseFormat: 'text'
+  }));
+  const line = String(parsed?.text || '').trim();
+  if (!line || line.toUpperCase() === 'UNKNOWN') return null;
+  const [rawTitle, rawArtist = ''] = line.split('\t');
+  const songTitle = String(rawTitle || '').trim();
+  const artist = String(rawArtist || '').trim();
+  return songTitle ? { song_title: songTitle, artist: artist || null } : null;
 }
 
 function isRehearsalPlanRequest(messageText) {
@@ -1641,6 +1682,8 @@ module.exports = {
   ADDITION_CONFIRMATION_SYSTEM_PROMPT,
   SONG_DIFFICULTY_SYSTEM_PROMPT,
   PLAIN_FALLBACK_SYSTEM_PROMPT,
+  UNKNOWN_SONG_INFO_SYSTEM_PROMPT,
+  SONG_REFERENCE_RESOLUTION_SYSTEM_PROMPT,
   MAX_CONCURRENT_AGENT_CALLS,
   DEFAULT_MAX_COMPLETION_TOKENS,
   extractJsonBlock,
@@ -1652,6 +1695,8 @@ module.exports = {
   interpretSongDifficulty,
   reviewAgentActionExecution,
   interpretPlainFallbackReply,
+  interpretUnknownSongInfo,
+  resolveSongReference,
   callOpenAiCompatibleChat,
   getAgentUsageStats
 };

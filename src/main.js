@@ -1,6 +1,6 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
-const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, callOpenAiCompatibleChat } = require('./llm');
+const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat } = require('./llm');
 const { READ_ONLY_SONG_TOOLS, executeReadOnlySongTool } = require('./agent-tools');
 const {
   persistResultContext,
@@ -376,8 +376,10 @@ function extractSongIdentityFromMetadataQuestion(messageText) {
   // identity before we can look it up.
   const candidate = source
     .replace(/[?？]+$/u, '')
-    .replace(/^(?:מה\s+רמת?\s*(?:ה)?קושי\s+של|האם\s+השיר|השיר)\s+/iu, '')
-    .replace(/\s+(?:קשה|קל|ברמת?\s*(?:ה)?קושי|difficulty|genre|ז[׳']?אנר|שפה|משך|אורך)$/iu, '')
+    .replace(/^מה\s+רמת?\s*(?:ה)?קושי\s+של\s+/iu, '')
+    .replace(/^האם\s+/iu, '')
+    .replace(/^השיר\s+/iu, '')
+    .replace(/\s+(?:קשה|קל|ברמת?\s*(?:ה)?קושי|מתאים\s+לזמר(?:ת)?|difficulty|genre|ז[׳']?אנר|שפה|משך|אורך)$/iu, '')
     .trim();
   return parseSongIdentityText(candidate);
 }
@@ -648,6 +650,34 @@ function formatSongInfo(song) {
     `\u05e0\u05d5\u05d2\u05df \u05dc\u05d0\u05d7\u05e8\u05d5\u05e0\u05d4: ${played}`,
     notes ? `\u05d4\u05e2\u05e8\u05d5\u05ea: ${notes}` : null
   ].filter(Boolean).join('\n');
+}
+
+function formatRequestedSongInfo(song, messageText) {
+  const text = String(messageText || '').trim();
+  // Full metadata is intentionally opt-in. A normal question about one field
+  // should be answer-sized, not a dump of every stored property.
+  if (/(?:מידע|פרטים|כל הנתונים|כל המידע|full\s+(?:info|metadata)|all\s+(?:info|metadata)|details)/iu.test(text)) {
+    return formatSongInfo(song);
+  }
+
+  const metadata = song?.ai_metadata || {};
+  const fields = [
+    [/קושי\s*(?:גיטרה|לגיטרה)|גיטרה.*(?:קשה|קל)/iu, 'קושי גיטרה', metadata.guitar_difficulty],
+    [/קושי\s*(?:בס)|בס.*(?:קשה|קל)/iu, 'קושי בס', metadata.bass_difficulty],
+    [/קושי\s*(?:תופים)|תופים.*(?:קשה|קל)/iu, 'קושי תופים', metadata.drums_difficulty],
+    [/קושי\s*(?:קלידים|פסנתר|סינת|אורגן)|(?:קלידים|פסנתר|סינת|אורגן).*(?:קשה|קל)/iu, 'קושי קלידים', metadata.keys_difficulty],
+    [/(?:רמת?\s*(?:ה)?קושי|כמה\s+קשה|קשה|קל|difficulty)/iu, 'רמת קושי', song.difficulty],
+    [/(?:ז[׳']?אנר|סגנון|genre)/iu, "ז'אנרים", Array.isArray(song.genres) ? song.genres.join(', ') : null],
+    [/(?:שפה|language)/iu, 'שפה', song.language],
+    [/(?:אווירה|feel)/iu, 'אווירה', song.feel],
+    [/(?:אורך|משך|duration)/iu, 'אורך', song.duration_seconds ? `${song.duration_seconds} שניות` : null],
+    [/(?:טווח\s*(?:ווקאלי|קול)|vocal\s*range)/iu, 'טווח ווקאלי', metadata.vocal_range],
+    [/(?:קהל|crowd)/iu, 'ידידותי לקהל', metadata.crowd_friendly === true ? 'כן' : metadata.crowd_friendly === false ? 'לא' : null]
+  ];
+  const match = fields.find(([pattern]) => pattern.test(text));
+  if (!match) return null;
+  const [, label, value] = match;
+  return value ? `${label}: ${value}` : null;
 }
 
 function explainSongStatus(song) {
@@ -1372,7 +1402,7 @@ async function sendSongsReply({ chat, stateStore, chatId, songs, query = null })
   await stateStore.queueSave();
 }
 
-async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn }) {
+async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn }) {
   const activeContext = resolveActiveResultContext(stateStore, record);
   const songs = stateStore.getSongs();
   const chatId = String(record?.chatId || '').trim();
@@ -1634,6 +1664,24 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
   if (action.action === 'get_song_info') {
     const { song, reason } = resolveSongFromAction(stateStore, action, activeContext);
     if (!song) {
+      if (reason === 'missing' && typeof unknownSongInfoFn === 'function' && action.song_title) {
+        try {
+          const answer = await unknownSongInfoFn({
+            baseUrl: config.llmBaseUrl,
+            apiKey: config.llmApiKey,
+            model: config.llmModel,
+            songTitle: action.song_title,
+            artist: action.artist,
+            question: messageText
+          });
+          if (answer) {
+            await sendBotMessage(chat, `השיר לא קיים במאגר שלנו, אבל לפי מה שאני יודע: ${answer}`);
+            return;
+          }
+        } catch (error) {
+          console.warn(`[agent] unknown_song_info_failed: ${error.message}`);
+        }
+      }
       await sendBotMessage(chat,
         reason === 'ambiguous'
           ? '\u05d9\u05e9 \u05db\u05de\u05d4 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd. \u05ea\u05db\u05d5\u05d5\u05df \u05d1\u05e9\u05dd \u05d4\u05d0\u05d5\u05de\u05df \u05d0\u05d5 \u05d1\u05de\u05e1\u05e4\u05e8 \u05de\u05d4\u05e8\u05e9\u05d9\u05de\u05d4.'
@@ -1642,7 +1690,31 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       return;
     }
 
-    await sendBotMessage(chat, formatSongInfo(song));
+    const localAnswer = formatRequestedSongInfo(song, messageText);
+    if (localAnswer) {
+      await sendBotMessage(chat, localAnswer);
+      return;
+    }
+    if (typeof unknownSongInfoFn === 'function') {
+      try {
+        const answer = await unknownSongInfoFn({
+          baseUrl: config.llmBaseUrl,
+          apiKey: config.llmApiKey,
+          model: config.llmModel,
+          songTitle: song.song_title,
+          artist: song.artist,
+          question: messageText,
+          catalogSong: song
+        });
+        if (answer) {
+          await sendBotMessage(chat, `במאגר אין לי נתון מדויק לזה, אבל לפי מה שאני יודע: ${answer}`);
+          return;
+        }
+      } catch (error) {
+        console.warn(`[agent] known_song_info_gap_failed: ${error.message}`);
+      }
+    }
+    await sendBotMessage(chat, 'אין לי מידע מדויק על זה במאגר.');
     return;
   }
 
@@ -1715,6 +1787,8 @@ async function handleAgentMessage({
   interpretAdditionConfirmationFn = interpretAdditionConfirmation,
   reviewSongDifficultyFn,
   reviewActionExecutionFn,
+  unknownSongInfoFn = interpretUnknownSongInfo,
+  resolveSongReferenceFn,
   plainFallbackReplyFn = interpretPlainFallbackReply,
   prepareSongsForReplyFn = prepareSongsForReply,
   estimateSongDurationsFn
@@ -1785,7 +1859,7 @@ async function handleAgentMessage({
       await executeAgentAction({
         action: { action: 'get_song_info', song_title: pendingIdentity.song_title, artist: pendingIdentity.artist },
         stateStore, chat, config, record, messageText, replyContext,
-        estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn
+        estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn
       });
       return true;
     }
@@ -1803,9 +1877,35 @@ async function handleAgentMessage({
       estimateSongDurationsFn,
       pendingAdditions,
       pendingClarifications,
-      reviewSongDifficultyFn
+      reviewSongDifficultyFn,
+      unknownSongInfoFn
     });
     return true;
+  }
+
+  // When local parsing cannot confidently split a song reference, use the
+  // agent only as an identity resolver. The result still goes through the
+  // local catalog resolver and cannot mutate state.
+  if (isSongInfoRequest(messageText) && typeof resolveSongReferenceFn === 'function') {
+    try {
+      const resolvedReference = await resolveSongReferenceFn({
+        baseUrl: config.llmBaseUrl,
+        apiKey: config.llmApiKey,
+        model: config.llmModel,
+        messageText,
+        quotedText
+      });
+      if (resolvedReference?.song_title) {
+        await executeAgentAction({
+          action: { action: 'get_song_info', song_title: resolvedReference.song_title, artist: resolvedReference.artist },
+          stateStore, chat, config, record, messageText, replyContext,
+          estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn
+        });
+        return true;
+      }
+    } catch (error) {
+      console.warn(`[agent] song_reference_resolution_failed: ${error.message}`);
+    }
   }
 
   try {
@@ -1879,7 +1979,8 @@ async function handleAgentMessage({
       estimateSongDurationsFn,
       pendingAdditions,
       pendingClarifications,
-      reviewSongDifficultyFn
+      reviewSongDifficultyFn,
+      unknownSongInfoFn
     });
   } catch (error) {
     console.error('[agent] failed:', error);
@@ -2028,7 +2129,8 @@ async function bootstrap() {
       pendingAdditions,
       pendingClarifications,
       reviewSongDifficultyFn: interpretSongDifficulty,
-      reviewActionExecutionFn: reviewAgentActionExecution
+      reviewActionExecutionFn: reviewAgentActionExecution,
+      resolveSongReferenceFn: resolveSongReference
     });
   }
 
@@ -2169,6 +2271,7 @@ module.exports = {
   isChordsReplyRequest,
   isAuthorizedAddAction,
   extractSongIdentityFromMetadataQuestion,
+  formatRequestedSongInfo,
   handleAgentMessage,
   executeAgentAction
 };
