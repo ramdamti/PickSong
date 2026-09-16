@@ -294,7 +294,9 @@ async function callOpenAiCompatibleChat({
   systemPrompt = SYSTEM_PROMPT,
   requestFn = fetch,
   maxCompletionTokens = DEFAULT_MAX_COMPLETION_TOKENS,
-  responseFormat = 'json_object'
+  responseFormat = 'json_object',
+  tools,
+  messages
 }) {
   const endpoint = `${String(baseUrl || '').replace(/\/$/, '')}/chat/completions`;
   const startedAt = Date.now();
@@ -307,18 +309,15 @@ async function callOpenAiCompatibleChat({
     body: JSON.stringify({
       model,
       temperature: 0,
-      ...(responseFormat === 'json_object' ? { response_format: { type: 'json_object' } } : {}),
+      ...(responseFormat === 'json_object' && !Array.isArray(tools) ? { response_format: { type: 'json_object' } } : {}),
+      ...(Array.isArray(tools) ? { tools, tool_choice: 'auto' } : {}),
       max_completion_tokens: maxCompletionTokens,
-      messages: [
-        {
-          role: 'system',
-          content: systemPrompt
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ]
+      messages: Array.isArray(messages) && messages.length > 0
+        ? messages
+        : [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: prompt }
+          ]
     })
   });
 
@@ -331,10 +330,19 @@ async function callOpenAiCompatibleChat({
   }
 
   const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content || '';
-  const parsed = responseFormat === 'json_object'
-    ? extractJsonBlock(content)
-    : { text: String(content || '').trim() };
+  const message = data?.choices?.[0]?.message || {};
+  const content = message.content || '';
+  const parsed = Array.isArray(tools) && Array.isArray(message.tool_calls) && message.tool_calls.length > 0
+    ? {
+        tool_calls: message.tool_calls.map((call) => ({
+          id: String(call?.id || ''),
+          name: String(call?.function?.name || ''),
+          arguments: String(call?.function?.arguments || '{}')
+        }))
+      }
+    : responseFormat === 'json_object'
+      ? extractJsonBlock(content)
+      : { text: String(content || '').trim() };
   if (!parsed || typeof parsed !== 'object') {
     throw new Error(`Could not parse agent JSON response: ${content}`);
   }
@@ -351,6 +359,8 @@ async function callOpenAiCompatibleChat({
 
   return {
     parsed,
+    content: String(content || '').trim(),
+    toolCalls: Array.isArray(message.tool_calls) ? message.tool_calls : [],
     usage: {
       promptTokens,
       completionTokens,
@@ -1554,6 +1564,77 @@ async function interpretMessage({
   });
 }
 
+async function interpretMessageWithTools({
+  provider,
+  baseUrl,
+  apiKey,
+  model,
+  messageText,
+  quotedText,
+  replyContext,
+  recentMessages,
+  pendingClarification,
+  currentDate,
+  tools,
+  executeToolCall,
+  requestFn
+}) {
+  // Tool use is an enhancement, not a new dependency. If the configured
+  // OpenAI-compatible provider does not support it, retain the proven JSON
+  // interpreter and its recovery behavior.
+  const useTools = Array.isArray(tools) && tools.length > 0 && typeof executeToolCall === 'function';
+  const selectedProvider = String(provider || '').trim().toLowerCase();
+  if (!useTools || (selectedProvider !== 'groq' && selectedProvider !== 'openai_compatible')) {
+    return interpretMessage({ provider, baseUrl, apiKey, model, messageText, quotedText, replyContext, recentMessages, pendingClarification, currentDate, requestFn });
+  }
+
+  const prompt = buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate, pendingClarification });
+  const messages = [
+    {
+      role: 'system',
+      content: `${SYSTEM_PROMPT}\nYou may call the supplied local read-only tools before deciding. For a named-song metadata question, call lookup_song first. For catalog recommendations, call search_catalog first. Tool results are authoritative: never claim a song exists when lookup_song returns not_found, and never turn a lookup into an add.`
+    },
+    { role: 'user', content: prompt }
+  ];
+
+  try {
+    return await runWithAgentConcurrencyLimit(async () => {
+      for (let turn = 0; turn < 4; turn += 1) {
+        const result = await callOpenAiCompatibleChat({
+          baseUrl,
+          apiKey,
+          model,
+          prompt: '',
+          messages,
+          tools,
+          responseFormat: 'text',
+          requestFn
+        });
+        if (result.toolCalls.length === 0) {
+          const parsed = extractJsonBlock(result.content);
+          const action = validateAgentAction(normalizeAgentAction(parsed, { messageText, replyContext, quotedText }));
+          console.log(`[agent] action=${estimateActionName(action)} tools=${turn} input=${result.usage.promptTokens} cached=${result.usage.cachedTokens} output=${result.usage.completionTokens} total=${result.usage.totalTokens} latency=${result.usage.latencyMs}ms`);
+          return action;
+        }
+
+        messages.push({ role: 'assistant', content: result.content || null, tool_calls: result.toolCalls });
+        for (const call of result.toolCalls) {
+          const toolResult = await executeToolCall({
+            id: String(call?.id || ''),
+            name: String(call?.function?.name || ''),
+            arguments: String(call?.function?.arguments || '{}')
+          });
+          messages.push({ role: 'tool', tool_call_id: String(call?.id || ''), content: JSON.stringify(toolResult) });
+        }
+      }
+      throw new Error('Agent exceeded the maximum number of tool calls');
+    });
+  } catch (error) {
+    console.warn(`[agent] tool_loop_fallback: ${error.message}`);
+    return interpretMessage({ provider, baseUrl, apiKey, model, messageText, quotedText, replyContext, recentMessages, pendingClarification, currentDate, requestFn });
+  }
+}
+
 module.exports = {
   SYSTEM_PROMPT,
   FALLBACK_SYSTEM_PROMPT,
@@ -1566,6 +1647,7 @@ module.exports = {
   buildAgentPrompt,
   buildFallbackAgentPrompt,
   interpretMessage,
+  interpretMessageWithTools,
   interpretAdditionConfirmation,
   interpretSongDifficulty,
   reviewAgentActionExecution,

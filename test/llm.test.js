@@ -59,6 +59,58 @@ test('buildAgentPrompt includes reply context without full database payloads', (
   assert.doesNotMatch(prompt, /history/i);
 });
 
+test('callOpenAiCompatibleChat accepts standard tool calls without JSON mode', async () => {
+  const { callOpenAiCompatibleChat } = require('../src/llm');
+  let requestBody;
+  const result = await callOpenAiCompatibleChat({
+    baseUrl: 'https://example.com', apiKey: 'test', model: 'test-model', prompt: 'find this song',
+    tools: [{ type: 'function', function: { name: 'lookup_song', parameters: { type: 'object' } } }],
+    requestFn: async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        async json() {
+          return { choices: [{ message: { tool_calls: [{ id: 'call-1', function: { name: 'lookup_song', arguments: '{"song_title":"Naga"}' } }] } }] };
+        }
+      };
+    }
+  });
+  assert.equal(requestBody.response_format, undefined);
+  assert.equal(requestBody.tools[0].function.name, 'lookup_song');
+  assert.deepEqual(result.parsed.tool_calls, [{ id: 'call-1', name: 'lookup_song', arguments: '{"song_title":"Naga"}' }]);
+});
+
+test('interpretMessageWithTools executes a local lookup before choosing the final action', async () => {
+  const { interpretMessageWithTools } = require('../src/llm');
+  const requestBodies = [];
+  const toolCalls = [];
+  const responses = [
+    { choices: [{ message: { tool_calls: [{ id: 'call-1', function: { name: 'lookup_song', arguments: '{"song_title":"Naga Bashamayim","artist":"Mashina"}' } }] } }] },
+    { choices: [{ message: { content: '{"action":"get_song_info","song_title":"Naga Bashamayim","artist":"Mashina"}' } }] }
+  ];
+  const action = await interpretMessageWithTools({
+    provider: 'groq', baseUrl: 'https://example.com', apiKey: 'test', model: 'test-model',
+    messageText: 'what is the difficulty of Naga Bashamayim by Mashina?', quotedText: '', replyContext: null,
+    recentMessages: [], pendingClarification: null, currentDate: '2026-09-16',
+    tools: [{ type: 'function', function: { name: 'lookup_song', parameters: { type: 'object' } } }],
+    executeToolCall: async (call) => {
+      toolCalls.push(call);
+      return { ok: true, status: 'found', songs: [{ song_title: 'Naga Bashamayim', artist: 'Mashina', difficulty: 'medium' }] };
+    },
+    requestFn: async (_url, options) => {
+      requestBodies.push(JSON.parse(options.body));
+      return { ok: true, async json() { return responses.shift(); } };
+    }
+  });
+
+  assert.equal(action.action, 'get_song_info');
+  assert.equal(toolCalls.length, 1);
+  assert.equal(toolCalls[0].name, 'lookup_song');
+  assert.equal(requestBodies.length, 2);
+  assert.equal(requestBodies[1].messages.at(-1).role, 'tool');
+  assert.match(requestBodies[1].messages.at(-1).content, /"found"/);
+});
+
 test('interpretAdditionConfirmation lets the agent classify a natural negative reply', async () => {
   const decision = await interpretAdditionConfirmation({
     baseUrl: 'https://api.example.com',

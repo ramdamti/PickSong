@@ -86,7 +86,9 @@ test('handleAgentMessage accepts stored reply context even when quoted.fromMe is
   });
 
   assert.equal(handled, true);
-  assert.equal(agentCalls, 1);
+  // A numbered metadata reply can now be resolved locally from the stored
+  // result context, without spending an agent call.
+  assert.equal(agentCalls, 0);
   assert.equal(sentMessages.length, 1);
   assert.match(sentMessages[0], /Zombie/);
 });

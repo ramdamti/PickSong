@@ -1,6 +1,7 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
-const { interpretMessage, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, callOpenAiCompatibleChat } = require('./llm');
+const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, callOpenAiCompatibleChat } = require('./llm');
+const { READ_ONLY_SONG_TOOLS, executeReadOnlySongTool } = require('./agent-tools');
 const {
   persistResultContext,
   resolveActiveResultContext,
@@ -1685,7 +1686,7 @@ async function handleAgentMessage({
   recentMessages = [],
   pendingAdditions,
   pendingClarifications,
-  interpretMessageFn = interpretMessage,
+  interpretMessageFn = interpretMessageWithTools,
   interpretAdditionConfirmationFn = interpretAdditionConfirmation,
   reviewSongDifficultyFn,
   reviewActionExecutionFn,
@@ -1785,7 +1786,13 @@ async function handleAgentMessage({
       replyContext,
       recentMessages,
       pendingClarification,
-      currentDate: CURRENT_DATE
+      currentDate: CURRENT_DATE,
+      tools: READ_ONLY_SONG_TOOLS,
+      executeToolCall: ({ name, arguments: rawArguments }) => executeReadOnlySongTool({
+        stateStore,
+        name,
+        arguments: rawArguments
+      })
     });
 
     // Adding a song is a durable mutation. Do not let an LLM turn a metadata
