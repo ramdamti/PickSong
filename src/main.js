@@ -2170,6 +2170,7 @@ async function handleAgentMessage({
 async function bootstrap() {
   const {
     createWhatsAppClient,
+    clearStaleSingletonLocks,
     waitForReady,
     messageToRecord,
     readQuotedMessage
@@ -2186,6 +2187,7 @@ async function bootstrap() {
     throw new Error('At least one target group is required for live listening');
   }
 
+  clearStaleSingletonLocks(config.authDir);
   const client = createWhatsAppClient({
     headless: config.headless,
     executablePath: config.executablePath,
@@ -2201,11 +2203,27 @@ async function bootstrap() {
   async function destroyClient(reason) {
     if (clientDestroyed) return;
     clientDestroyed = true;
+    console.log(`[shutdown] destroying WhatsApp client (${reason})`);
+    // client.destroy() can hang if Chromium's CDP connection is already dead.
+    // Left unguarded, that stalls shutdown() until systemd's stop timeout
+    // force-kills the whole cgroup, which can leave Chromium's profile lock
+    // files behind and make the next launch hang waiting on that lock.
+    const DESTROY_TIMEOUT_MS = 10000;
     try {
-      console.log(`[shutdown] destroying WhatsApp client (${reason})`);
-      await client.destroy();
+      await Promise.race([
+        client.destroy(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('client.destroy timed out')), DESTROY_TIMEOUT_MS))
+      ]);
     } catch (error) {
       console.error('[shutdown] client destroy failed:', error);
+      try {
+        const browserProcess = client.pupBrowser?.process?.();
+        if (browserProcess && browserProcess.exitCode === null) {
+          browserProcess.kill('SIGKILL');
+        }
+      } catch (killError) {
+        console.error('[shutdown] force-killing browser process failed:', killError);
+      }
     }
   }
 

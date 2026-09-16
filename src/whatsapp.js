@@ -5,6 +5,32 @@ function normalizeName(value) {
     .replace(/\s+/g, ' ');
 }
 
+// If the previous process's Chromium was not shut down cleanly (e.g. it was
+// still closing when systemd force-killed the service on restart), these
+// singleton files survive and make the next Chromium launch hang forever
+// waiting on the profile lock, so "waiting for ready" never resolves. They
+// only guard against two Chromium instances sharing one profile at the same
+// time, so it is safe to clear them before this process launches its own.
+function clearStaleSingletonLocks(authDir, clientId = 'picksong') {
+  const fs = require('fs');
+  const path = require('path');
+  const profileDir = path.join(authDir || '.wwebjs_auth', `session-${clientId}`);
+  for (const name of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+    const target = path.join(profileDir, name);
+    try {
+      fs.lstatSync(target);
+    } catch (error) {
+      continue;
+    }
+    try {
+      fs.rmSync(target, { force: true });
+      console.log(`[whatsapp] removed stale ${name} left over from a previous run`);
+    } catch (error) {
+      console.warn(`[whatsapp] failed to remove stale ${name}: ${error.message}`);
+    }
+  }
+}
+
 function createWhatsAppClient({ headless, executablePath, authDir }) {
   const { Client, LocalAuth } = require('whatsapp-web.js');
   const qrcode = require('qrcode-terminal');
@@ -195,6 +221,7 @@ async function readQuotedMessage(message) {
 
 module.exports = {
   createWhatsAppClient,
+  clearStaleSingletonLocks,
   waitForReady,
   findGroupChat,
   messageToRecord,
