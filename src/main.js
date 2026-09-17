@@ -1580,7 +1580,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       })
       : null;
     if (sourceCandidates && sourceCandidates.length === 0) {
-      await sendBotMessage(chat, 'לא מצאתי כרגע מועמדים מאומתים ב־MusicBrainz שמתאימים לבקשה מחוץ למאגר.');
+      await sendBotMessage(chat, 'לא מצאתי כרגע שירים מאומתים שמתאימים לבקשה מחוץ למאגר.');
       return;
     }
     const sourceCandidateByIdentity = new Map((sourceCandidates || []).map((candidate) => [

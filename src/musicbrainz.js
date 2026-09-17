@@ -95,24 +95,34 @@ function buildDiscoveryQuery({ language, genres = [], releaseYearFrom, releaseYe
 
 async function searchMusicBrainzRecordings({ language, genres, releaseYearFrom, releaseYearTo, limit = 30, userAgent, fetchFn = fetch }) {
   const query = buildDiscoveryQuery({ language, genres, releaseYearFrom, releaseYearTo });
+  const broadQuery = Array.isArray(genres) && genres.length > 0
+    ? buildDiscoveryQuery({ language, genres: [], releaseYearFrom, releaseYearTo })
+    : null;
   const resultLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 30, 1), 100);
-  const cacheKey = `${query}::${resultLimit}`;
+  const cacheKey = `${query}::${broadQuery || ''}::${resultLimit}`;
   if (discoveryCache.has(cacheKey)) return discoveryCache.get(cacheKey);
-  const url = `${MUSICBRAINZ_BASE_URL}/recording/?${new URLSearchParams({ query, fmt: 'json', limit: String(resultLimit) }).toString()}`;
   try {
-    let response = null;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      response = await queuedFetch(url, {
-        headers: { Accept: 'application/json', 'User-Agent': String(userAgent || 'PickSong/1.0') }
-      }, fetchFn);
-      if (response.ok || (response.status !== 429 && response.status < 500)) break;
-      console.warn(`[musicbrainz] discovery_retrying status=${response.status} attempt=${attempt + 1}`);
+    const search = async (searchQuery) => {
+      const url = `${MUSICBRAINZ_BASE_URL}/recording/?${new URLSearchParams({ query: searchQuery, fmt: 'json', limit: String(resultLimit) }).toString()}`;
+      let response = null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        response = await queuedFetch(url, {
+          headers: { Accept: 'application/json', 'User-Agent': String(userAgent || 'PickSong/1.0') }
+        }, fetchFn);
+        if (response.ok || (response.status !== 429 && response.status < 500)) break;
+        console.warn(`[musicbrainz] discovery_retrying status=${response.status} attempt=${attempt + 1}`);
+      }
+      if (!response?.ok) throw new Error(`MusicBrainz ${response?.status || 'request failed'}`);
+      return response.json();
+    };
+    const bodies = [await search(query)];
+    if (broadQuery && (Array.isArray(bodies[0]?.recordings) ? bodies[0].recordings.length : 0) < 15) {
+      console.log(`[musicbrainz] discovery_broadening strict_results=${Array.isArray(bodies[0]?.recordings) ? bodies[0].recordings.length : 0}`);
+      bodies.push(await search(broadQuery));
     }
-    if (!response?.ok) throw new Error(`MusicBrainz ${response?.status || 'request failed'}`);
-    const body = await response.json();
     const results = [];
     const seen = new Set();
-    for (const recording of Array.isArray(body?.recordings) ? body.recordings : []) {
+    for (const body of bodies) for (const recording of Array.isArray(body?.recordings) ? body.recordings : []) {
       const songTitle = String(recording?.title || '').trim();
       const artist = getArtistCredit(recording);
       const identity = `${normalizeMusicText(songTitle)}::${normalizeMusicText(artist)}`;
@@ -120,6 +130,7 @@ async function searchMusicBrainzRecordings({ language, genres, releaseYearFrom, 
       seen.add(identity);
       results.push({ song_title: songTitle, artist, release_date: recording['first-release-date'] || null });
     }
+    console.log(`[musicbrainz] discovery_results count=${results.length} query=${JSON.stringify(query)}`);
     discoveryCache.set(cacheKey, results);
     return results;
   } catch (error) {
