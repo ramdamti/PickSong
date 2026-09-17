@@ -33,7 +33,7 @@ test('executeAgentAction retries once to fill missing external recommendations a
     record: { chatId: 'chat-1' },
     messageText: 'תביא 3 שירים מחוץ למאגר',
     replyContext: null,
-    config: { llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model', musicBrainzEnabled: false },
+    config: { llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model', catalogSearchEnabled: false },
     stateStore: {
       getResultMessage() { return null; },
       getLastResults() { return null; },
@@ -81,7 +81,7 @@ test('executeAgentAction rejects foreign identities for Hebrew external recommen
     action: { action: 'recommend_external_song', query: { limit: 1, requirements: { language: 'he' } } },
     chat: { sendMessage: async (message) => sentMessages.push(message) },
     record: { chatId: 'chat-1' }, messageText: 'תביא שיר ישראלי', replyContext: null,
-    config: { llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model', musicBrainzEnabled: false },
+    config: { llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model', catalogSearchEnabled: false },
     stateStore: {
       getResultMessage() { return null; }, getLastResults() { return null; }, getSongs() { return []; },
       findSongsByNormalizedName() { return []; }, async queueSave() {}
@@ -100,21 +100,20 @@ test('executeAgentAction rejects foreign identities for Hebrew external recommen
   assert.doesNotMatch(sentMessages[0], /Dream On/);
 });
 
-test('executeAgentAction accepts only MusicBrainz-discovered external identities', async () => {
+test('executeAgentAction accepts only catalog-discovered external identities', async () => {
   const sentMessages = [];
   await executeAgentAction({
     action: { action: 'recommend_external_song', query: { limit: 1, requirements: { language: 'en', genres: ['rock'] } } },
     chat: { sendMessage: async (message) => sentMessages.push(message) },
-    record: { chatId: 'chat-musicbrainz' }, messageText: '×ª×ž×œ×™×¥ ×¢×œ ×¨×•×§ ×™×©×¨××œ×™', replyContext: null,
-    config: { musicBrainzEnabled: true, musicBrainzUserAgent: 'PickSongTest/1.0' },
+    record: { chatId: 'chat-catalog' }, messageText: '×ª×ž×œ×™×¥ ×¢×œ ×¨×•×§ ×™×©×¨××œ×™', replyContext: null,
+    config: { catalogSearchEnabled: true },
     stateStore: {
       getResultMessage() { return null; }, getLastResults() { return null; }, getSongs() { return []; },
       findSongsByNormalizedName() { return []; }, async queueSave() {}
     },
     discoverExternalSongsFn: async () => [{ song_title: '×©×™×¨ ××ž™×ª™', artist: '××ž™×Ÿ ××ž™×ª™', release_date: '1994-06-01' }],
-    verifyExternalSongFn: async () => { throw new Error('a discovered candidate must not be re-verified'); },
-    recommendExternalSongsFn: async ({ musicBrainzCandidates }) => {
-      assert.equal(musicBrainzCandidates.length, 1);
+    recommendExternalSongsFn: async ({ catalogCandidates }) => {
+      assert.equal(catalogCandidates.length, 1);
       return [
         { song_title: '×©×™×¨ ×ž×•×ž×¦×', artist: '××ž™×Ÿ ×ž×•×ž×¦×', difficulty: 'low', reason: '×œ× ×ž×”×ž×§×•×¨.' },
         { song_title: '×©×™×¨ ××ž™×ª™', artist: '××ž™×Ÿ ××ž™×ª™', difficulty: 'low', reason: '× ×•×— ×œ×©×™×¨×” ×•×œ×—×œ×•×§×”.' }

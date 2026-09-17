@@ -139,8 +139,9 @@ function loadConfig(env = process.env, options = {}) {
     openAiCompatibleApiKey,
     openAiCompatibleModel,
     openAiCompatibleBaseUrl,
-    musicBrainzEnabled: readBool(mergedEnv.MUSICBRAINZ_ENABLED, true),
-    musicBrainzUserAgent: (mergedEnv.MUSICBRAINZ_USER_AGENT || 'PickSong/1.0').trim(),
+    catalogSearchEnabled: readBool(mergedEnv.CATALOG_SEARCH_ENABLED, true),
+    spotifyClientId: (mergedEnv.SPOTIFY_CLIENT_ID || '').trim(),
+    spotifyClientSecret: (mergedEnv.SPOTIFY_CLIENT_SECRET || '').trim(),
     executablePath: resolveExecutablePath(mergedEnv.PUPPETEER_EXECUTABLE_PATH || mergedEnv.CHROME_PATH || ''),
     headless: readBool(mergedEnv.HEADLESS, true)
   };

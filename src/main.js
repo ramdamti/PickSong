@@ -10,7 +10,7 @@ const {
 const { searchSongs, countHardFilterMatches } = require('./song-search');
 const { formatSongsReply, prepareSongsForReply } = require('./chords');
 const { ALLOWED_UPDATE_FIELDS } = require('./schemas');
-const { verifyMusicBrainzSong, searchMusicBrainzRecordings } = require('./musicbrainz');
+const { discoverCatalogSongs } = require('./song-catalog');
 
 const CURRENT_DATE = '2026-08-08';
 const MUTABLE_SONG_FIELDS = new Set(ALLOWED_UPDATE_FIELDS);
@@ -1462,7 +1462,7 @@ async function sendSongsReply({ chat, stateStore, chatId, songs, query = null, i
   await stateStore.queueSave();
 }
 
-async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn, polishBanterReplyFn, recommendExternalSongsFn, verifyExternalSongFn = verifyMusicBrainzSong, discoverExternalSongsFn = searchMusicBrainzRecordings, composeUnsupportedReplyFn }) {
+async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn, polishBanterReplyFn, recommendExternalSongsFn, discoverExternalSongsFn = discoverCatalogSongs, composeUnsupportedReplyFn }) {
   const activeContext = resolveActiveResultContext(stateStore, record);
   const songs = stateStore.getSongs();
   const chatId = String(record?.chatId || '').trim();
@@ -1548,7 +1548,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
     const requestedEnglish = requestedLanguage === 'en';
     const releaseYearFrom = Number.parseInt(action.query?.requirements?.release_year_from, 10);
     const releaseYearTo = Number.parseInt(action.query?.requirements?.release_year_to, 10);
-    const discoveredCandidates = config.musicBrainzEnabled === false
+    const discoveredCandidates = config.catalogSearchEnabled === false
       ? null
       : await discoverExternalSongsFn({
         language: requestedLanguage,
@@ -1556,7 +1556,8 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
         releaseYearFrom,
         releaseYearTo,
         limit: 50,
-        userAgent: config.musicBrainzUserAgent
+        spotifyClientId: config.spotifyClientId,
+        spotifyClientSecret: config.spotifyClientSecret
       });
     const sourceCandidates = Array.isArray(discoveredCandidates)
       ? discoveredCandidates.filter((candidate) => {
@@ -1606,16 +1607,10 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       }
       const sourceCandidate = sourceCandidateByIdentity.get(`${normalizeText(recommendation.song_title)}::${normalizeText(recommendation.artist)}`);
       if (sourceCandidates && !sourceCandidate) {
-        console.warn(`[external_recommendation] rejected_not_from_musicbrainz title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
+        console.warn(`[external_recommendation] rejected_not_from_catalog title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
         continue;
       }
-      const verified = sourceCandidate || (config.musicBrainzEnabled === false
-        ? { song_title: recommendation.song_title, artist: recommendation.artist }
-        : await verifyExternalSongFn({
-          songTitle: recommendation.song_title,
-          artist: recommendation.artist,
-          userAgent: config.musicBrainzUserAgent
-        }));
+      const verified = sourceCandidate || { song_title: recommendation.song_title, artist: recommendation.artist };
       if (!verified?.song_title || !verified?.artist) {
         console.warn(`[external_recommendation] rejected_unverified title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
         continue;
@@ -1647,7 +1642,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       messageText,
       query: action.query || {},
       excludedCandidates: Array.from(consideredCandidates),
-      musicBrainzCandidates: sourceCandidates || [],
+      catalogCandidates: sourceCandidates || [],
       limit
     });
     await collectRecommendations(await requestRecommendations(requestedLimit));
