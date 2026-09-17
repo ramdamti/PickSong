@@ -100,6 +100,32 @@ test('executeAgentAction rejects foreign identities for Hebrew external recommen
   assert.doesNotMatch(sentMessages[0], /Dream On/);
 });
 
+test('executeAgentAction excludes Latin-only iTunes results for an Israeli request', async () => {
+  const sentMessages = [];
+  await executeAgentAction({
+    action: { action: 'recommend_external_song', query: { limit: 1, requirements: { language: 'he' } } },
+    chat: { sendMessage: async (message) => sentMessages.push(message) },
+    record: { chatId: 'chat-israeli-catalog' }, messageText: '\u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8 \u05d9\u05e9\u05e8\u05d0\u05dc\u05d9', replyContext: null,
+    config: { catalogSearchEnabled: true },
+    stateStore: {
+      getResultMessage() { return null; }, getLastResults() { return null; }, getSongs() { return []; },
+      findSongsByNormalizedName() { return []; }, async queueSave() {}
+    },
+    discoverExternalSongsFn: async () => [
+      { song_title: 'Dream On', artist: 'Aerosmith', catalog_source: 'itunes' },
+      { song_title: '\u05e9\u05d9\u05e8 \u05d1\u05d3\u05d9\u05e7\u05d4', artist: '\u05d0\u05de\u05df \u05d1\u05d3\u05d9\u05e7\u05d4', catalog_source: 'itunes' }
+    ],
+    recommendExternalSongsFn: async ({ catalogCandidates }) => {
+      assert.deepEqual(catalogCandidates.map((song) => song.song_title), ['\u05e9\u05d9\u05e8 \u05d1\u05d3\u05d9\u05e7\u05d4']);
+      return [{ song_title: '\u05e9\u05d9\u05e8 \u05d1\u05d3\u05d9\u05e7\u05d4', artist: '\u05d0\u05de\u05df \u05d1\u05d3\u05d9\u05e7\u05d4', difficulty: 'low', reason: '\u05de\u05ea\u05d0\u05d9\u05dd.' }];
+    }
+  });
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /\u05e9\u05d9\u05e8 \u05d1\u05d3\u05d9\u05e7\u05d4 - \u05d0\u05de\u05df \u05d1\u05d3\u05d9\u05e7\u05d4/);
+  assert.doesNotMatch(sentMessages[0], /Dream On/);
+});
+
 test('executeAgentAction accepts only catalog-discovered external identities', async () => {
   const sentMessages = [];
   await executeAgentAction({

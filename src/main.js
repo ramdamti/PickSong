@@ -1570,6 +1570,11 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
         return candidate?.song_title && candidate?.artist &&
           !excludedCandidates.includes(candidateKey) &&
           !alreadyInCatalog &&
+          // The Israeli iTunes storefront also contains international music.
+          // A Hebrew/Israeli request therefore needs an actual Hebrew catalog
+          // identity, rather than merely a result returned by an Israeli-store
+          // search term.
+          !(requestedHebrew && !hasHebrewIdentity) &&
           !(requestedEnglish && hasHebrewIdentity) &&
           (candidate.catalog_source === 'itunes' || (!Number.isInteger(releaseYearFrom) && !Number.isInteger(releaseYearTo)) ||
             (Number.isInteger(releaseYear) &&

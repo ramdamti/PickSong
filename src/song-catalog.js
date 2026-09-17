@@ -14,7 +14,7 @@ function normalizeCatalogSong(song) {
 
 function buildItunesTerm({ language, genres = [] }) {
   const genre = Array.isArray(genres) ? String(genres[0] || '').trim() : '';
-  if (String(language || '').toLowerCase() === 'he') return genre.toLowerCase() === 'rock' ? 'רוק ישראלי' : 'ישראלי';
+  if (String(language || '').toLowerCase() === 'he') return genre.toLowerCase() === 'rock' || !genre ? 'רוק ישראלי' : 'ישראלי';
   return genre || 'rock';
 }
 

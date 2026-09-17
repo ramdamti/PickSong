@@ -17,4 +17,5 @@ test('iTunes catalog search needs no token and uses the Israeli store', async ()
   assert.match(decodeURIComponent(requestUrl), /term=רוק\+ישראלי/);
   assert.deepEqual(songs, [{ song_title: 'Real Song', artist: 'Real Artist', release_date: '1994-06-01T00:00:00Z', catalog_source: 'itunes' }]);
   assert.equal(buildItunesTerm({ language: 'he', genres: ['rock'] }), 'רוק ישראלי');
+  assert.equal(buildItunesTerm({ language: 'he', genres: [] }), 'רוק ישראלי');
 });
