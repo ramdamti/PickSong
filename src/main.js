@@ -1571,13 +1571,13 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
           !excludedCandidates.includes(candidateKey) &&
           !alreadyInCatalog &&
           !(requestedEnglish && hasHebrewIdentity) &&
-          !(requestedHebrew && (!hasHebrewIdentity || hasLatinIdentity)) &&
           (candidate.catalog_source === 'itunes' || (!Number.isInteger(releaseYearFrom) && !Number.isInteger(releaseYearTo)) ||
             (Number.isInteger(releaseYear) &&
               (!Number.isInteger(releaseYearFrom) || releaseYear >= releaseYearFrom) &&
               (!Number.isInteger(releaseYearTo) || releaseYear <= releaseYearTo)));
       })
       : null;
+    console.log(`[catalog] eligible_candidates raw=${Array.isArray(discoveredCandidates) ? discoveredCandidates.length : 0} eligible=${sourceCandidates?.length ?? 0} language=${JSON.stringify(requestedLanguage || null)}`);
     if (sourceCandidates && sourceCandidates.length === 0) {
       await sendBotMessage(chat, 'לא מצאתי כרגע שירים מאומתים שמתאימים לבקשה מחוץ למאגר.');
       return;
@@ -1595,7 +1595,9 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       const identity = `${recommendation.song_title} ${recommendation.artist}`;
       const hasHebrewIdentity = /[\u0590-\u05ff]/u.test(identity);
       const hasLatinIdentity = /[A-Za-z]/u.test(identity);
-      if ((requestedEnglish && hasHebrewIdentity) || (requestedHebrew && !hasHebrewIdentity) || (hasHebrewIdentity && hasLatinIdentity)) {
+      const sourceCandidate = sourceCandidateByIdentity.get(`${normalizeText(recommendation.song_title)}::${normalizeText(recommendation.artist)}`);
+      const usesCatalogHebrewIdentity = requestedHebrew && sourceCandidate?.catalog_source === 'itunes';
+      if ((requestedEnglish && hasHebrewIdentity) || (!usesCatalogHebrewIdentity && requestedHebrew && !hasHebrewIdentity) || (!usesCatalogHebrewIdentity && hasHebrewIdentity && hasLatinIdentity)) {
         console.warn(`[external_recommendation] rejected_noncanonical_identity title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
         continue;
       }
@@ -1603,7 +1605,6 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
         console.warn(`[external_recommendation] rejected_high_difficulty title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
         continue;
       }
-      const sourceCandidate = sourceCandidateByIdentity.get(`${normalizeText(recommendation.song_title)}::${normalizeText(recommendation.artist)}`);
       if (sourceCandidates && !sourceCandidate) {
         console.warn(`[external_recommendation] rejected_not_from_catalog title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
         continue;
