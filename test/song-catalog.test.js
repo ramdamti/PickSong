@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { searchItunesSongs, buildItunesTerm } = require('../src/song-catalog');
+const { searchItunesSongs, buildItunesTerm, buildItunesTerms } = require('../src/song-catalog');
 
 test('iTunes catalog search needs no token and uses the Israeli store', async () => {
   let requestUrl;
@@ -18,4 +18,8 @@ test('iTunes catalog search needs no token and uses the Israeli store', async ()
   assert.deepEqual(songs, [{ song_title: 'Real Song', artist: 'Real Artist', release_date: '1994-06-01T00:00:00Z', catalog_source: 'itunes' }]);
   assert.equal(buildItunesTerm({ language: 'he', genres: ['rock'] }), 'רוק ישראלי');
   assert.equal(buildItunesTerm({ language: 'he', genres: [] }), 'רוק ישראלי');
+});
+
+test('iTunes discovery expands a generic request across the band styles', () => {
+  assert.deepEqual(buildItunesTerms({ language: 'en', genres: [] }), ['rock', 'blues', 'funk']);
 });

@@ -1542,6 +1542,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       : [];
     const requestedLimit = Math.min(Math.max(Number.parseInt(action.query?.limit, 10) || 1, 1), 10);
     const accepted = [];
+    const acceptedArtists = new Set();
     const consideredCandidates = new Set(excludedCandidates);
     const requestedLanguage = String(action.query?.requirements?.language || '').toLowerCase();
     const requestedHebrew = requestedLanguage === 'he';
@@ -1619,6 +1620,11 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
         console.warn(`[external_recommendation] rejected_unverified title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
         continue;
       }
+      const artistKey = normalizeText(verified.artist);
+      if (sourceCandidates && acceptedArtists.has(artistKey)) {
+        console.warn(`[external_recommendation] rejected_duplicate_artist artist=${JSON.stringify(verified.artist)}`);
+        continue;
+      }
       const releaseYear = Number.parseInt(String(verified.release_date || '').slice(0, 4), 10);
       if (
         verified.catalog_source !== 'itunes' &&
@@ -1636,6 +1642,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       if (!existing.length) {
         console.log(`[external_recommendation] title=${JSON.stringify(verified.song_title)} artist=${JSON.stringify(verified.artist)}`);
         accepted.push({ ...recommendation, song_title: verified.song_title, artist: verified.artist });
+        acceptedArtists.add(artistKey);
         if (accepted.length >= requestedLimit) return;
       }
     }

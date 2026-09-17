@@ -18,8 +18,16 @@ function buildItunesTerm({ language, genres = [] }) {
   return genre || 'rock';
 }
 
-async function searchItunesSongs({ language, genres, limit, fetchFn = fetch }) {
-  const url = `${ITUNES_SEARCH_URL}?${new URLSearchParams({ term: buildItunesTerm({ language, genres }), country: 'il', media: 'music', entity: 'song', limit: String(Math.min(limit, 200)) })}`;
+function buildItunesTerms({ language, genres = [] }) {
+  const requestedGenres = Array.isArray(genres) ? genres.map((genre) => String(genre || '').trim().toLowerCase()).filter(Boolean) : [];
+  const terms = requestedGenres.length ? requestedGenres : ['rock', 'blues', 'funk'];
+  const hebrewTerms = { rock: 'רוק ישראלי', blues: 'בלוז ישראלי', funk: 'פאנק ישראלי' };
+  const isHebrew = String(language || '').toLowerCase() === 'he';
+  return [...new Set(terms.map((genre) => isHebrew ? (hebrewTerms[genre] || 'ישראלי') : genre))];
+}
+
+async function searchItunesSongs({ language, genres, term, limit, fetchFn = fetch }) {
+  const url = `${ITUNES_SEARCH_URL}?${new URLSearchParams({ term: term || buildItunesTerm({ language, genres }), country: 'il', media: 'music', entity: 'song', limit: String(Math.min(limit, 200)) })}`;
   const response = await fetchFn(url);
   if (!response.ok) throw new Error(`iTunes search ${response.status}`);
   const body = await response.json();
@@ -38,7 +46,9 @@ function uniqueSongs(songs) {
 
 async function discoverCatalogSongs({ language, genres, limit = 50, fetchFn = fetch }) {
   try {
-    const songs = uniqueSongs(await searchItunesSongs({ language, genres, limit, fetchFn }));
+    const terms = buildItunesTerms({ language, genres });
+    const resultSets = await Promise.all(terms.map((term) => searchItunesSongs({ language, genres, term, limit, fetchFn })));
+    const songs = uniqueSongs(resultSets.flat());
     console.log(`[catalog] discovery_results itunes=${songs.length}`);
     return songs;
   } catch (error) {
@@ -47,4 +57,4 @@ async function discoverCatalogSongs({ language, genres, limit = 50, fetchFn = fe
   }
 }
 
-module.exports = { discoverCatalogSongs, searchItunesSongs, buildItunesTerm };
+module.exports = { discoverCatalogSongs, searchItunesSongs, buildItunesTerm, buildItunesTerms };

@@ -97,7 +97,7 @@ const EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT = [
   'Recommend real songs for a band, based on the user request and compact search constraints.',
   'The requested song must be outside the local catalog. Do not invent songs, artists, facts, or links.',
   'Difficulty is a hard constraint: unless the user explicitly asks for a demanding, virtuoso, or hard song, recommend only a low or medium real-world difficulty song for the full band (vocals, guitar, bass, drums, keys). Never suggest a high-difficulty song in that case.',
-  'Band profile: two capable but non-professional singers, one also plays guitar and one also plays keys. Make vocal comfort the top default constraint: favor singable melodies, practical ranges, manageable sustained notes, and arrangements that can divide lead, harmony, or verses between them. Avoid songs known for extreme range, relentless high belts, or demanding vocal acrobatics unless explicitly requested. Prefer rock, blues, and ballads when no genre is specified; this is a hard default, so do not choose pop, dance, electronic, hip-hop, or other stylistically unrelated material merely because it is present in catalog_candidates.',
+  'Band profile: two capable but non-professional singers, one also plays guitar and one also plays keys. Make vocal comfort the top default constraint: favor singable melodies, practical ranges, manageable sustained notes, and arrangements that can divide lead, harmony, or verses between them. Avoid songs known for extreme range, relentless high belts, or demanding vocal acrobatics unless explicitly requested. Prefer rock, blues, and funk when no genre is specified; this is a hard default, so do not choose pop, dance, electronic, hip-hop, or other stylistically unrelated material merely because it is present in catalog_candidates. Diversify artists: never choose more than one song by the same artist in one recommendation list unless the user explicitly asks for that artist.',
   'Choose a distinct, less-obvious fitting song instead of a default canonical answer. Never recommend Bohemian Rhapsody by Queen unless the user explicitly asks for it.',
   'For an English-language song, title and artist must use their official canonical English/Latin spelling only. Never translate, transliterate, or mix Hebrew into either identity field; Hebrew is for the reason only.',
   'When search_constraints require language "he" or the user asks for Hebrew/Israeli songs, treat that as a hard constraint: recommend only real Israeli Hebrew-language songs. Preserve the exact catalog identity even if iTunes returns it in Latin letters; never translate, transliterate, or substitute a foreign song.',
@@ -780,7 +780,13 @@ async function recommendExternalSongs({ baseUrl, apiKey, model, messageText, que
     console.warn(`[external_recommendation] unrecognized_response=${JSON.stringify(String(parsed?.text || '').slice(0, 300))}`);
     if (Array.isArray(catalogCandidates) && catalogCandidates.length > 0) {
       console.warn('[external_recommendation] using_catalog_fallback_after_empty_model_response');
-      return catalogCandidates.slice(0, candidateCount).map((candidate) => ({
+      const distinctArtists = new Set();
+      return catalogCandidates.filter((candidate) => {
+        const artistKey = String(candidate?.artist || '').trim().toLocaleLowerCase();
+        if (!artistKey || distinctArtists.has(artistKey)) return false;
+        distinctArtists.add(artistKey);
+        return true;
+      }).slice(0, candidateCount).map((candidate) => ({
         song_title: candidate.song_title,
         artist: candidate.artist,
         difficulty: 'medium',
@@ -1540,7 +1546,7 @@ function normalizeAgentAction(action, { messageText, replyContext, quotedText })
       // The band's default lane is rock/blues/ballads. Use rock as the
       // discovery anchor unless the user explicitly asks for another genre;
       // a generic Israeli-store search otherwise returns mostly unrelated pop.
-      requirements.genres = inferredGenres.length > 0 ? inferredGenres : ['rock'];
+      requirements.genres = inferredGenres.length > 0 ? inferredGenres : ['rock', 'blues', 'funk'];
     }
     const releaseYearRange = inferRequestedReleaseYearRange(messageText);
     if (releaseYearRange) Object.assign(requirements, releaseYearRange);

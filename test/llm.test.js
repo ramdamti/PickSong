@@ -71,7 +71,7 @@ test('external recommendation reasons are grounded in the band arrangement', () 
   assert.match(EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT, /keys, drums, two guitars, and bass/i);
   assert.match(EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT, /do not give generic mood-only praise/i);
   assert.match(EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT, /vocal comfort the top default constraint/i);
-  assert.match(EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT, /Prefer rock, blues, and ballads/i);
+  assert.match(EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT, /Prefer rock, blues, and funk/i);
 });
 
 test('inferRequestedReleaseYearRange supports decades, ranges, and relative periods', () => {
