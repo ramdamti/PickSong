@@ -1555,9 +1555,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
         genres: action.query?.requirements?.genres,
         releaseYearFrom,
         releaseYearTo,
-        limit: 50,
-        spotifyClientId: config.spotifyClientId,
-        spotifyClientSecret: config.spotifyClientSecret
+        limit: 50
       });
     const sourceCandidates = Array.isArray(discoveredCandidates)
       ? discoveredCandidates.filter((candidate) => {
@@ -2465,19 +2463,14 @@ async function bootstrap() {
     }
 
     if (record.chat && record.chat.isGroup === false) {
-      console.log(`[message] ignored non-group source=${source} chatId=${chatId} text=${JSON.stringify(text)}`);
       return;
     }
     if (!record.chat && chatId && !String(chatId).endsWith('@g.us')) {
-      console.log(`[message] ignored non-group source=${source} chatId=${chatId} text=${JSON.stringify(text)}`);
       return;
     }
 
     const routing = summarizeMessageRouting(record, config);
     if (!routing.inTargetGroup) {
-      console.log(
-        `[message] ignored group_mismatch source=${source} chatId=${chatId} actualGroup=${JSON.stringify(routing.chatName)} targetGroups=${JSON.stringify(config.groupNames)} targetGroupIds=${JSON.stringify(config.groupIds)} text=${JSON.stringify(text)}`
-      );
       return;
     }
 

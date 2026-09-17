@@ -140,8 +140,6 @@ function loadConfig(env = process.env, options = {}) {
     openAiCompatibleModel,
     openAiCompatibleBaseUrl,
     catalogSearchEnabled: readBool(mergedEnv.CATALOG_SEARCH_ENABLED, true),
-    spotifyClientId: (mergedEnv.SPOTIFY_CLIENT_ID || '').trim(),
-    spotifyClientSecret: (mergedEnv.SPOTIFY_CLIENT_SECRET || '').trim(),
     executablePath: resolveExecutablePath(mergedEnv.PUPPETEER_EXECUTABLE_PATH || mergedEnv.CHROME_PATH || ''),
     headless: readBool(mergedEnv.HEADLESS, true)
   };

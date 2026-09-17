@@ -102,7 +102,7 @@ const EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT = [
   'For an English-language song, title and artist must use their official canonical English/Latin spelling only. Never translate, transliterate, or mix Hebrew into either identity field; Hebrew is for the reason only.',
   'When search_constraints require language "he" or the user asks for Hebrew/Israeli songs, treat that as a hard constraint: recommend only real Israeli Hebrew-language songs, with canonical Hebrew song and artist identities. Never substitute foreign songs.',
   'When search_constraints include release_year_from and release_year_to, strongly prefer that release-year range. A catalog candidate from iTunes may show a remaster or digital reissue date, so do not reject a clearly fitting original song solely because its displayed catalog date is newer.',
-  'When catalog_candidates is supplied, it is the only allowed source of song and artist identities. Select only exact title/artist pairs from that list. Never alter, translate, transliterate, combine, or add identities. If the list cannot satisfy the request, return exactly UNKNOWN.',
+  'When catalog_candidates is supplied, it is the only allowed source of song and artist identities. Select only exact title/artist pairs from that list. Never alter, translate, transliterate, combine, or add identities. When that list is non-empty, always return the closest fitting candidates; do not return UNKNOWN merely because a preference (including an approximate era) is imperfect.',
   'Return exactly candidate_count distinct candidates, one per line, immediately, even when the user asks for only one song; do not spend output on reasoning. Format per line: title<TAB>artist<TAB>difficulty (low, medium, or high)<TAB>short natural Hebrew reason. The artist field must contain only the canonical artist name: no cover credit, parenthetical note, role, or extra explanation. If no confident real recommendation exists, return exactly UNKNOWN.',
   'The reason must be concise and specific to arranging and performing it for this band: keys, drums, two guitars, and bass, plus the two singers. Explain the vocal comfort or possible vocal split as well as useful musical roles or arrangement choices; do not give generic mood-only praise, discuss the listener, or invent a keys part when the song has none. Do not ask a question or suggest adding it.'
 ].join('\n');
@@ -778,6 +778,15 @@ async function recommendExternalSongs({ baseUrl, apiKey, model, messageText, que
     .slice(0, candidateCount);
   if (!recommendations.length) {
     console.warn(`[external_recommendation] unrecognized_response=${JSON.stringify(String(parsed?.text || '').slice(0, 300))}`);
+    if (Array.isArray(catalogCandidates) && catalogCandidates.length > 0) {
+      console.warn('[external_recommendation] using_catalog_fallback_after_empty_model_response');
+      return catalogCandidates.slice(0, candidateCount).map((candidate) => ({
+        song_title: candidate.song_title,
+        artist: candidate.artist,
+        difficulty: 'medium',
+        reason: 'נמצא בקטלוג החיצוני; בסיס טוב לעיבוד רוק עם חלוקת שירה בין הגיטריסט לקלידן.'
+      }));
+    }
     return [];
   }
   return recommendations;

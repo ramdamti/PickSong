@@ -105,7 +105,7 @@ Operational rules:
 - the runtime prompt sends only `current_date`, `user_message`, and minimal `reply_context`
 - the full song database is never sent to the model
 - local formatting and state writes never trigger extra LLM calls
-- external-song candidates come from Spotify, with iTunes Search as a token-free fallback; the model may select only an exact returned identity
+- external-song candidates come from iTunes Search; the model may select only an exact returned identity
 
 Groq-specific notes:
 
@@ -127,7 +127,7 @@ Observability:
 1. Install dependencies.
 2. Set one or more target groups with `GROUP_NAME`, `GROUP_NAMES`, `GROUP_ID`, or `GROUP_IDS`.
 3. Set `GROQ_API_KEY`.
-4. Set `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` for the primary catalog search. iTunes Search is enabled automatically as a token-free fallback.
+4. iTunes Search is used automatically for external-song discovery and needs no account or token.
 5. Adjust `STATE_FILE`, `SEEN_FILE`, and `AUTH_DIR` if you want them outside the workspace.
 6. Run `npm start`.
 
