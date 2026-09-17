@@ -100,6 +100,33 @@ test('executeAgentAction rejects foreign identities for Hebrew external recommen
   assert.doesNotMatch(sentMessages[0], /Dream On/);
 });
 
+test('executeAgentAction accepts only MusicBrainz-discovered external identities', async () => {
+  const sentMessages = [];
+  await executeAgentAction({
+    action: { action: 'recommend_external_song', query: { limit: 1, requirements: { language: 'en', genres: ['rock'] } } },
+    chat: { sendMessage: async (message) => sentMessages.push(message) },
+    record: { chatId: 'chat-musicbrainz' }, messageText: '×ª×ž×œ×™×¥ ×¢×œ ×¨×•×§ ×™×©×¨××œ×™', replyContext: null,
+    config: { musicBrainzEnabled: true, musicBrainzUserAgent: 'PickSongTest/1.0' },
+    stateStore: {
+      getResultMessage() { return null; }, getLastResults() { return null; }, getSongs() { return []; },
+      findSongsByNormalizedName() { return []; }, async queueSave() {}
+    },
+    discoverExternalSongsFn: async () => [{ song_title: '×©×™×¨ ××ž™×ª™', artist: '××ž™×Ÿ ××ž™×ª™', release_date: '1994-06-01' }],
+    verifyExternalSongFn: async () => { throw new Error('a discovered candidate must not be re-verified'); },
+    recommendExternalSongsFn: async ({ musicBrainzCandidates }) => {
+      assert.equal(musicBrainzCandidates.length, 1);
+      return [
+        { song_title: '×©×™×¨ ×ž×•×ž×¦×', artist: '××ž™×Ÿ ×ž×•×ž×¦×', difficulty: 'low', reason: '×œ× ×ž×”×ž×§×•×¨.' },
+        { song_title: '×©×™×¨ ××ž™×ª™', artist: '××ž™×Ÿ ××ž™×ª™', difficulty: 'low', reason: '× ×•×— ×œ×©×™×¨×” ×•×œ×—×œ×•×§×”.' }
+      ];
+    }
+  });
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /×©×™×¨ ××ž™×ª™ - ××ž™×Ÿ ××ž™×ª™/);
+  assert.doesNotMatch(sentMessages[0], /×©×™×¨ ×ž×•×ž×¦×/);
+});
+
 test('recommendation reasons are detected and grounded in stored song data', () => {
   const song = {
     song_title: 'Exodus', artist: 'Bob Marley and the Wailers', genres: ['reggae'], difficulty: 'medium',

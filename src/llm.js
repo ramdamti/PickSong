@@ -94,7 +94,7 @@ const BANTER_POLISH_SYSTEM_PROMPT = [
 ].join('\n');
 
 const EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT = [
-  'Recommend one real, well-known song for a band, based on the user request and compact search constraints.',
+  'Recommend real songs for a band, based on the user request and compact search constraints.',
   'The requested song must be outside the local catalog. Do not invent songs, artists, facts, or links.',
   'Difficulty is a hard constraint: unless the user explicitly asks for a demanding, virtuoso, or hard song, recommend only a low or medium real-world difficulty song for the full band (vocals, guitar, bass, drums, keys). Never suggest a high-difficulty song in that case.',
   'Band profile: two capable but non-professional singers, one also plays guitar and one also plays keys. Make vocal comfort the top default constraint: favor singable melodies, practical ranges, manageable sustained notes, and arrangements that can divide lead, harmony, or verses between them. Avoid songs known for extreme range, relentless high belts, or demanding vocal acrobatics unless explicitly requested. Prefer rock, blues, and ballads when no genre is specified.',
@@ -102,6 +102,7 @@ const EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT = [
   'For an English-language song, title and artist must use their official canonical English/Latin spelling only. Never translate, transliterate, or mix Hebrew into either identity field; Hebrew is for the reason only.',
   'When search_constraints require language "he" or the user asks for Hebrew/Israeli songs, treat that as a hard constraint: recommend only real Israeli Hebrew-language songs, with canonical Hebrew song and artist identities. Never substitute foreign songs.',
   'When search_constraints include release_year_from and release_year_to, treat the release-year range as a hard constraint.',
+  'When musicbrainz_candidates is supplied, it is the only allowed source of song and artist identities. Select only exact title/artist pairs from that list. Never alter, translate, transliterate, combine, or add identities. If the list cannot satisfy the request, return exactly UNKNOWN.',
   'Return exactly candidate_count distinct candidates, one per line, immediately, even when the user asks for only one song; do not spend output on reasoning. Format per line: title<TAB>artist<TAB>difficulty (low, medium, or high)<TAB>short natural Hebrew reason. The artist field must contain only the canonical artist name: no cover credit, parenthetical note, role, or extra explanation. If no confident real recommendation exists, return exactly UNKNOWN.',
   'The reason must be concise and specific to arranging and performing it for this band: keys, drums, two guitars, and bass, plus the two singers. Explain the vocal comfort or possible vocal split as well as useful musical roles or arrangement choices; do not give generic mood-only praise, discuss the listener, or invent a keys part when the song has none. Do not ask a question or suggest adding it.'
 ].join('\n');
@@ -751,7 +752,7 @@ function parseExternalSongRecommendations(text) {
   return recommendations.length > 0 ? recommendations : [parseExternalSongRecommendation(raw)].filter(Boolean);
 }
 
-async function recommendExternalSongs({ baseUrl, apiKey, model, messageText, query, excludedCandidates = [], limit = 1, requestFn }) {
+async function recommendExternalSongs({ baseUrl, apiKey, model, messageText, query, excludedCandidates = [], musicBrainzCandidates = [], limit = 1, requestFn }) {
   const requestedCount = Math.min(Math.max(Number.parseInt(limit, 10) || 1, 1), 10);
   const candidateCount = Math.min(requestedCount + 3, 10);
   const prompt = JSON.stringify({
@@ -759,7 +760,10 @@ async function recommendExternalSongs({ baseUrl, apiKey, model, messageText, que
     search_constraints: query || {},
     requested_result_count: requestedCount,
     candidate_count: candidateCount,
-    do_not_repeat_candidates: excludedCandidates
+    do_not_repeat_candidates: excludedCandidates,
+    musicbrainz_candidates: Array.isArray(musicBrainzCandidates)
+      ? musicBrainzCandidates.map((candidate) => ({ title: candidate.song_title, artist: candidate.artist, release_date: candidate.release_date || null })).slice(0, 50)
+      : []
   });
   const { parsed } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
     baseUrl, apiKey, model, prompt, systemPrompt: EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT,

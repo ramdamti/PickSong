@@ -10,7 +10,7 @@ const {
 const { searchSongs, countHardFilterMatches } = require('./song-search');
 const { formatSongsReply, prepareSongsForReply } = require('./chords');
 const { ALLOWED_UPDATE_FIELDS } = require('./schemas');
-const { verifyMusicBrainzSong } = require('./musicbrainz');
+const { verifyMusicBrainzSong, searchMusicBrainzRecordings } = require('./musicbrainz');
 
 const CURRENT_DATE = '2026-08-08';
 const MUTABLE_SONG_FIELDS = new Set(ALLOWED_UPDATE_FIELDS);
@@ -1462,7 +1462,7 @@ async function sendSongsReply({ chat, stateStore, chatId, songs, query = null, i
   await stateStore.queueSave();
 }
 
-async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn, polishBanterReplyFn, recommendExternalSongsFn, verifyExternalSongFn = verifyMusicBrainzSong, composeUnsupportedReplyFn }) {
+async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn, polishBanterReplyFn, recommendExternalSongsFn, verifyExternalSongFn = verifyMusicBrainzSong, discoverExternalSongsFn = searchMusicBrainzRecordings, composeUnsupportedReplyFn }) {
   const activeContext = resolveActiveResultContext(stateStore, record);
   const songs = stateStore.getSongs();
   const chatId = String(record?.chatId || '').trim();
@@ -1543,6 +1543,50 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
     const requestedLimit = Math.min(Math.max(Number.parseInt(action.query?.limit, 10) || 1, 1), 10);
     const accepted = [];
     const consideredCandidates = new Set(excludedCandidates);
+    const requestedLanguage = String(action.query?.requirements?.language || '').toLowerCase();
+    const requestedHebrew = requestedLanguage === 'he';
+    const requestedEnglish = requestedLanguage === 'en';
+    const releaseYearFrom = Number.parseInt(action.query?.requirements?.release_year_from, 10);
+    const releaseYearTo = Number.parseInt(action.query?.requirements?.release_year_to, 10);
+    const discoveredCandidates = config.musicBrainzEnabled === false
+      ? null
+      : await discoverExternalSongsFn({
+        language: requestedLanguage,
+        genres: action.query?.requirements?.genres,
+        releaseYearFrom,
+        releaseYearTo,
+        limit: 50,
+        userAgent: config.musicBrainzUserAgent
+      });
+    const sourceCandidates = Array.isArray(discoveredCandidates)
+      ? discoveredCandidates.filter((candidate) => {
+        const identity = `${candidate?.song_title || ''} ${candidate?.artist || ''}`;
+        const hasHebrewIdentity = /[\u0590-\u05ff]/u.test(identity);
+        const hasLatinIdentity = /[A-Za-z]/u.test(identity);
+        const candidateKey = `${candidate?.song_title || ''} - ${candidate?.artist || ''}`;
+        const releaseYear = Number.parseInt(String(candidate?.release_date || '').slice(0, 4), 10);
+        const alreadyInCatalog = candidate?.song_title && candidate?.artist && (typeof stateStore.findSongsByNormalizedName === 'function'
+          ? stateStore.findSongsByNormalizedName(candidate.song_title, candidate.artist).length > 0
+          : songs.some((song) => normalizeText(song.song_title) === normalizeText(candidate.song_title) && normalizeText(song.artist) === normalizeText(candidate.artist)));
+        return candidate?.song_title && candidate?.artist &&
+          !excludedCandidates.includes(candidateKey) &&
+          !alreadyInCatalog &&
+          !(requestedEnglish && hasHebrewIdentity) &&
+          !(requestedHebrew && (!hasHebrewIdentity || hasLatinIdentity)) &&
+          (!Number.isInteger(releaseYearFrom) && !Number.isInteger(releaseYearTo) ||
+            (Number.isInteger(releaseYear) &&
+              (!Number.isInteger(releaseYearFrom) || releaseYear >= releaseYearFrom) &&
+              (!Number.isInteger(releaseYearTo) || releaseYear <= releaseYearTo)));
+      })
+      : null;
+    if (sourceCandidates && sourceCandidates.length === 0) {
+      await sendBotMessage(chat, 'לא מצאתי כרגע מועמדים מאומתים ב־MusicBrainz שמתאימים לבקשה מחוץ למאגר.');
+      return;
+    }
+    const sourceCandidateByIdentity = new Map((sourceCandidates || []).map((candidate) => [
+      `${normalizeText(candidate.song_title)}::${normalizeText(candidate.artist)}`,
+      candidate
+    ]));
     const collectRecommendations = async (recommendations) => {
       for (const recommendation of Array.isArray(recommendations) ? recommendations : []) {
       if (!recommendation?.song_title || !recommendation?.artist) continue;
@@ -1552,8 +1596,6 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       const identity = `${recommendation.song_title} ${recommendation.artist}`;
       const hasHebrewIdentity = /[\u0590-\u05ff]/u.test(identity);
       const hasLatinIdentity = /[A-Za-z]/u.test(identity);
-      const requestedEnglish = String(action.query?.requirements?.language || '').toLowerCase() === 'en';
-      const requestedHebrew = String(action.query?.requirements?.language || '').toLowerCase() === 'he';
       if ((requestedEnglish && hasHebrewIdentity) || (requestedHebrew && !hasHebrewIdentity) || (hasHebrewIdentity && hasLatinIdentity)) {
         console.warn(`[external_recommendation] rejected_noncanonical_identity title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
         continue;
@@ -1562,20 +1604,23 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
         console.warn(`[external_recommendation] rejected_high_difficulty title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
         continue;
       }
-      const verified = config.musicBrainzEnabled === false
+      const sourceCandidate = sourceCandidateByIdentity.get(`${normalizeText(recommendation.song_title)}::${normalizeText(recommendation.artist)}`);
+      if (sourceCandidates && !sourceCandidate) {
+        console.warn(`[external_recommendation] rejected_not_from_musicbrainz title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
+        continue;
+      }
+      const verified = sourceCandidate || (config.musicBrainzEnabled === false
         ? { song_title: recommendation.song_title, artist: recommendation.artist }
         : await verifyExternalSongFn({
           songTitle: recommendation.song_title,
           artist: recommendation.artist,
           userAgent: config.musicBrainzUserAgent
-        });
+        }));
       if (!verified?.song_title || !verified?.artist) {
         console.warn(`[external_recommendation] rejected_unverified title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
         continue;
       }
       const releaseYear = Number.parseInt(String(verified.release_date || '').slice(0, 4), 10);
-      const releaseYearFrom = Number.parseInt(action.query?.requirements?.release_year_from, 10);
-      const releaseYearTo = Number.parseInt(action.query?.requirements?.release_year_to, 10);
       if (
         (Number.isInteger(releaseYearFrom) || Number.isInteger(releaseYearTo)) &&
         (!Number.isInteger(releaseYear) ||
@@ -1602,6 +1647,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       messageText,
       query: action.query || {},
       excludedCandidates: Array.from(consideredCandidates),
+      musicBrainzCandidates: sourceCandidates || [],
       limit
     });
     await collectRecommendations(await requestRecommendations(requestedLimit));
