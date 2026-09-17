@@ -98,8 +98,9 @@ const EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT = [
   'The requested song must be outside the local catalog. Do not invent songs, artists, facts, or links.',
   'Difficulty is a hard constraint: unless the user explicitly asks for a demanding, virtuoso, or hard song, recommend only a low or medium real-world difficulty song for the full band (vocals, guitar, bass, drums, keys). Never suggest a high-difficulty song in that case.',
   'Choose a distinct, less-obvious fitting song instead of a default canonical answer. Never recommend Bohemian Rhapsody by Queen unless the user explicitly asks for it.',
+  'For an English-language song, title and artist must use their official canonical English/Latin spelling only. Never translate, transliterate, or mix Hebrew into either identity field; Hebrew is for the reason only.',
   'Return the requested number of candidates, one candidate per line, immediately; do not spend output on reasoning. Format per line: title<TAB>artist<TAB>difficulty (low, medium, or high)<TAB>short natural Hebrew reason. If no confident real recommendation exists, return exactly UNKNOWN.',
-  'The reason must be specific to playing the song and concise; do not ask a question or suggest adding it.'
+  'The reason must be concise and specific to arranging and performing it for this band: keys, drums, two guitars, and bass. Name the useful musical roles or arrangement choices for those players; do not give generic mood-only praise, discuss the listener, or invent a keys part when the song has none. Do not ask a question or suggest adding it.'
 ].join('\n');
 
 const UNSUPPORTED_REPLY_SYSTEM_PROMPT = [

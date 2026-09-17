@@ -1552,6 +1552,14 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
     const accepted = [];
     for (const recommendation of Array.isArray(recommendations) ? recommendations : []) {
       if (!recommendation?.song_title || !recommendation?.artist) continue;
+      const identity = `${recommendation.song_title} ${recommendation.artist}`;
+      const hasHebrewIdentity = /[\u0590-\u05ff]/u.test(identity);
+      const hasLatinIdentity = /[A-Za-z]/u.test(identity);
+      const requestedEnglish = String(action.query?.requirements?.language || '').toLowerCase() === 'en';
+      if ((requestedEnglish && hasHebrewIdentity) || (hasHebrewIdentity && hasLatinIdentity)) {
+        console.warn(`[external_recommendation] rejected_noncanonical_identity title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
+        continue;
+      }
       if (recommendation.difficulty === 'high') {
         console.warn(`[external_recommendation] rejected_high_difficulty title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
         continue;

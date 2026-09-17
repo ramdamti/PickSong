@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   SYSTEM_PROMPT,
+  EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT,
   FALLBACK_SYSTEM_PROMPT,
   buildAgentPrompt,
   buildFallbackAgentPrompt,
@@ -62,6 +63,11 @@ test('buildAgentPrompt includes reply context without full database payloads', (
   assert.match(SYSTEM_PROMPT, /remove_song/);
   assert.doesNotMatch(prompt, /"songs":\s*\[/);
   assert.doesNotMatch(prompt, /history/i);
+});
+
+test('external recommendation reasons are grounded in the band arrangement', () => {
+  assert.match(EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT, /keys, drums, two guitars, and bass/i);
+  assert.match(EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT, /do not give generic mood-only praise/i);
 });
 
 test('callOpenAiCompatibleChat accepts standard tool calls without JSON mode', async () => {

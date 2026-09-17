@@ -48,6 +48,7 @@ test('executeAgentAction returns multiple external recommendations from one requ
       assert.deepEqual(excludedCandidates, ['Already Suggested - Artist']);
       return [
         { song_title: 'Hard Song', artist: 'Artist', difficulty: 'high', reason: 'קשה מדי.' },
+        { song_title: 'שיר מתורגם', artist: 'English Artist', difficulty: 'low', reason: 'זהות מעורבת.' },
         { song_title: 'Easy Song', artist: 'Artist', difficulty: 'low', reason: 'קל לנגן.' },
         { song_title: 'Medium Song', artist: 'Artist', difficulty: 'medium', reason: 'מתאים ללהקה.' }
       ];
@@ -59,6 +60,7 @@ test('executeAgentAction returns multiple external recommendations from one requ
   assert.match(sentMessages[0], /Easy Song - Artist/);
   assert.match(sentMessages[0], /Medium Song - Artist/);
   assert.doesNotMatch(sentMessages[0], /Hard Song/);
+  assert.doesNotMatch(sentMessages[0], /English Artist/);
   assert.deepEqual(recordedCandidates, [
     ['chat-1', 'Easy Song - Artist'],
     ['chat-1', 'Medium Song - Artist']
