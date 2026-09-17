@@ -4,6 +4,8 @@ const { KEYS_TYPES } = require('./schemas');
 
 const MAX_SEEN_MESSAGE_IDS = 50;
 const MAX_RECENT_RECOMMENDATION_IDS = 25;
+const MAX_RECENT_EXTERNAL_RECOMMENDATIONS = 25;
+const RECENT_EXTERNAL_RECOMMENDATION_TTL_MS = 24 * 60 * 60 * 1000;
 const CURRENT_SCHEMA_VERSION = 3;
 const REQUIRED_AI_METADATA_FIELDS = [
   'original_vocal',
@@ -306,11 +308,27 @@ function normalizeChats(value) {
       result_messages: resultMessages,
       recent_recommendations: Array.isArray(chatValue.recent_recommendations)
         ? Array.from(new Set(chatValue.recent_recommendations.map((item) => String(item || '').trim()).filter(Boolean))).slice(-MAX_RECENT_RECOMMENDATION_IDS)
-        : []
+        : [],
+      recent_external_recommendations: normalizeRecentExternalRecommendations(chatValue.recent_external_recommendations)
     };
   }
 
   return chats;
+}
+
+function normalizeRecentExternalRecommendations(value, now = Date.now()) {
+  if (!Array.isArray(value)) return [];
+  const cutoff = now - RECENT_EXTERNAL_RECOMMENDATION_TTL_MS;
+  const latestByCandidate = new Map();
+  for (const item of value) {
+    const candidate = typeof item === 'object' && item !== null ? String(item.candidate || '').trim() : String(item || '').trim();
+    const createdAt = typeof item === 'object' && item !== null ? Number(item.created_at) : 0;
+    if (!candidate || !Number.isFinite(createdAt) || createdAt < cutoff || createdAt > now + 60 * 1000) continue;
+    latestByCandidate.set(candidate, { candidate, created_at: createdAt });
+  }
+  return Array.from(latestByCandidate.values())
+    .sort((left, right) => left.created_at - right.created_at)
+    .slice(-MAX_RECENT_EXTERNAL_RECOMMENDATIONS);
 }
 
 function normalizeTopLevelResultMessages(value) {
@@ -722,7 +740,7 @@ function createStateStore(stateFilePath, seenFilePath, initialState, initialSeen
     if (!normalizedSongIds.length) return false;
 
     if (!state.chats[normalizedChatId]) {
-      state.chats[normalizedChatId] = { last_results: null, result_messages: {}, recent_recommendations: [] };
+      state.chats[normalizedChatId] = { last_results: null, result_messages: {}, recent_recommendations: [], recent_external_recommendations: [] };
     }
 
     const existing = Array.isArray(state.chats[normalizedChatId].recent_recommendations)
@@ -730,6 +748,30 @@ function createStateStore(stateFilePath, seenFilePath, initialState, initialSeen
       : [];
     const merged = Array.from(new Set([...existing, ...normalizedSongIds]));
     state.chats[normalizedChatId].recent_recommendations = merged.slice(-MAX_RECENT_RECOMMENDATION_IDS);
+    return true;
+  }
+
+  function getRecentExternalRecommendations(chatId) {
+    const normalizedChatId = String(chatId || '').trim();
+    const chat = state.chats[normalizedChatId];
+    if (!chat) return [];
+    chat.recent_external_recommendations = normalizeRecentExternalRecommendations(chat.recent_external_recommendations);
+    return chat.recent_external_recommendations.map((item) => item.candidate);
+  }
+
+  function recordExternalRecommendation(chatId, candidate) {
+    const normalizedChatId = String(chatId || '').trim();
+    const normalizedCandidate = String(candidate || '').trim();
+    if (!normalizedChatId || !normalizedCandidate) return false;
+    if (!state.chats[normalizedChatId]) {
+      state.chats[normalizedChatId] = { last_results: null, result_messages: {}, recent_recommendations: [], recent_external_recommendations: [] };
+    }
+    const existing = normalizeRecentExternalRecommendations(state.chats[normalizedChatId].recent_external_recommendations)
+      .filter((item) => item.candidate !== normalizedCandidate);
+    state.chats[normalizedChatId].recent_external_recommendations = [
+      ...existing,
+      { candidate: normalizedCandidate, created_at: Date.now() }
+    ].slice(-MAX_RECENT_EXTERNAL_RECOMMENDATIONS);
     return true;
   }
 
@@ -760,6 +802,8 @@ function createStateStore(stateFilePath, seenFilePath, initialState, initialSeen
     getLastResults,
     getRecentRecommendations,
     recordRecommendations,
+    getRecentExternalRecommendations,
+    recordExternalRecommendation,
     storeResultMessage,
     getResultMessage,
     setBootstrapComplete,

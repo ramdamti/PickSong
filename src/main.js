@@ -1,6 +1,6 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
-const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, polishBanterReply, recommendExternalSong, composeUnsupportedReply, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat } = require('./llm');
+const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, polishBanterReply, recommendExternalSongs, composeUnsupportedReply, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat } = require('./llm');
 const { READ_ONLY_SONG_TOOLS, executeReadOnlySongTool } = require('./agent-tools');
 const {
   persistResultContext,
@@ -1461,7 +1461,7 @@ async function sendSongsReply({ chat, stateStore, chatId, songs, query = null, i
   await stateStore.queueSave();
 }
 
-async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn, polishBanterReplyFn, recommendExternalSongFn, composeUnsupportedReplyFn }) {
+async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn, polishBanterReplyFn, recommendExternalSongsFn, composeUnsupportedReplyFn }) {
   const activeContext = resolveActiveResultContext(stateStore, record);
   const songs = stateStore.getSongs();
   const chatId = String(record?.chatId || '').trim();
@@ -1532,30 +1532,51 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
   }
 
   if (action.action === 'recommend_external_song') {
-    if (typeof recommendExternalSongFn !== 'function') {
+    if (typeof recommendExternalSongsFn !== 'function') {
       await sendBotMessage(chat, 'אין לי כרגע דרך למצוא המלצה מחוץ למאגר.');
       return;
     }
-    const excludedCandidates = [];
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const recommendation = await recommendExternalSongFn({
-        baseUrl: config.llmBaseUrl,
-        apiKey: config.llmApiKey,
-        model: config.llmModel,
-        messageText,
-        query: action.query || {},
-        excludedCandidates
-      });
-      if (!recommendation?.song_title || !recommendation?.artist) break;
+    const excludedCandidates = typeof stateStore.getRecentExternalRecommendations === 'function'
+      ? stateStore.getRecentExternalRecommendations(chatId)
+      : [];
+    const requestedLimit = Math.min(Math.max(Number.parseInt(action.query?.limit, 10) || 1, 1), 10);
+    const recommendations = await recommendExternalSongsFn({
+      baseUrl: config.llmBaseUrl,
+      apiKey: config.llmApiKey,
+      model: config.llmModel,
+      messageText,
+      query: action.query || {},
+      excludedCandidates,
+      limit: requestedLimit
+    });
+    const accepted = [];
+    for (const recommendation of Array.isArray(recommendations) ? recommendations : []) {
+      if (!recommendation?.song_title || !recommendation?.artist) continue;
+      if (recommendation.difficulty === 'high') {
+        console.warn(`[external_recommendation] rejected_high_difficulty title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
+        continue;
+      }
       const existing = typeof stateStore.findSongsByNormalizedName === 'function'
         ? stateStore.findSongsByNormalizedName(recommendation.song_title, recommendation.artist)
         : songs.filter((song) => normalizeText(song.song_title) === normalizeText(recommendation.song_title) && normalizeText(song.artist) === normalizeText(recommendation.artist));
       if (!existing.length) {
         console.log(`[external_recommendation] title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
-        await sendBotMessage(chat, `מצאתי מחוץ למאגר: ${recommendation.song_title} - ${recommendation.artist}\nלמה: ${recommendation.reason}`);
-        return;
+        accepted.push(recommendation);
+        if (accepted.length >= requestedLimit) break;
       }
-      excludedCandidates.push(`${recommendation.song_title} - ${recommendation.artist}`);
+    }
+    if (accepted.length) {
+      const reply = accepted.length === 1
+        ? `מצאתי מחוץ למאגר: ${accepted[0].song_title} - ${accepted[0].artist}\nלמה: ${accepted[0].reason}`
+        : `מצאתי מחוץ למאגר:\n${accepted.map((song, index) => `${index + 1}. ${song.song_title} - ${song.artist}\nלמה: ${song.reason}`).join('\n\n')}`;
+      await sendBotMessage(chat, reply);
+      if (typeof stateStore.recordExternalRecommendation === 'function') {
+        for (const recommendation of accepted) {
+          stateStore.recordExternalRecommendation(chatId, `${recommendation.song_title} - ${recommendation.artist}`);
+        }
+        await stateStore.queueSave();
+      }
+      return;
     }
     await sendBotMessage(chat, 'לא מצאתי כרגע המלצה בטוחה מחוץ למאגר.');
     return;
@@ -1941,7 +1962,7 @@ async function handleAgentMessage({
   resolveSongReferenceFn,
   plainFallbackReplyFn = interpretPlainFallbackReply,
   polishBanterReplyFn = polishBanterReply,
-  recommendExternalSongFn = recommendExternalSong,
+  recommendExternalSongsFn = recommendExternalSongs,
   composeUnsupportedReplyFn = composeUnsupportedReply,
   prepareSongsForReplyFn = prepareSongsForReply,
   estimateSongDurationsFn
@@ -2044,7 +2065,7 @@ async function handleAgentMessage({
       reviewSongDifficultyFn,
       unknownSongInfoFn,
       polishBanterReplyFn,
-      recommendExternalSongFn,
+      recommendExternalSongsFn,
       composeUnsupportedReplyFn
     });
     return true;
@@ -2153,7 +2174,7 @@ async function handleAgentMessage({
       reviewSongDifficultyFn,
       unknownSongInfoFn,
       polishBanterReplyFn,
-      recommendExternalSongFn,
+      recommendExternalSongsFn,
       composeUnsupportedReplyFn
     });
   } catch (error) {

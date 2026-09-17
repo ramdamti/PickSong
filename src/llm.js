@@ -96,8 +96,9 @@ const BANTER_POLISH_SYSTEM_PROMPT = [
 const EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT = [
   'Recommend one real, well-known song for a band, based on the user request and compact search constraints.',
   'The requested song must be outside the local catalog. Do not invent songs, artists, facts, or links.',
-  'Unless the search constraints or user request explicitly ask for a demanding, virtuoso, or specifically hard song, prefer a low or medium real-world playing difficulty for the full band (vocals, guitar, bass, drums, keys). Avoid notoriously difficult, technically extreme picks by default.',
-  'Return the final line immediately; do not spend output on reasoning. Format: title<TAB>artist<TAB>short natural Hebrew reason. If no confident real recommendation exists, return exactly UNKNOWN.',
+  'Difficulty is a hard constraint: unless the user explicitly asks for a demanding, virtuoso, or hard song, recommend only a low or medium real-world difficulty song for the full band (vocals, guitar, bass, drums, keys). Never suggest a high-difficulty song in that case.',
+  'Choose a distinct, less-obvious fitting song instead of a default canonical answer. Never recommend Bohemian Rhapsody by Queen unless the user explicitly asks for it.',
+  'Return the requested number of candidates, one candidate per line, immediately; do not spend output on reasoning. Format per line: title<TAB>artist<TAB>difficulty (low, medium, or high)<TAB>short natural Hebrew reason. If no confident real recommendation exists, return exactly UNKNOWN.',
   'The reason must be specific to playing the song and concise; do not ask a question or suggest adding it.'
 ].join('\n');
 
@@ -452,6 +453,11 @@ function inferRequestedLimit(messageText) {
     const parsed = Number.parseInt(digitMatch[1] || digitMatch[2], 10);
     if (Number.isInteger(parsed) && parsed > 0) return parsed;
   }
+  const genericDigitMatch = source.match(/(?:^|\s)(\d{1,2})\s*(?:\u05e9\u05d9\u05e8\u05d9\u05dd?|\u05d3\u05d1\u05e8\u05d9\u05dd?|\u05d4\u05de\u05dc\u05e6\u05d5\u05ea|songs?|recommendations?)(?:\s|$)/iu);
+  if (genericDigitMatch) {
+    const parsed = Number.parseInt(genericDigitMatch[1], 10);
+    if (Number.isInteger(parsed) && parsed > 0) return parsed;
+  }
 
   const hebrewWordLimits = [
     { limit: 1, values: ['אחד', 'אחת'] },
@@ -642,7 +648,12 @@ function parseExternalSongRecommendation(text) {
   try {
     const json = JSON.parse(raw);
     if (json?.song_title && json?.artist && json?.reason) {
-      return { song_title: String(json.song_title).trim(), artist: String(json.artist).trim(), reason: String(json.reason).trim() };
+      return {
+        song_title: String(json.song_title).trim(),
+        artist: String(json.artist).trim(),
+        difficulty: /^(low|medium|high)$/i.test(String(json.difficulty || '').trim()) ? String(json.difficulty).trim().toLowerCase() : null,
+        reason: String(json.reason).trim()
+      };
     }
   } catch (error) {
     // Natural text formats are also accepted below.
@@ -651,32 +662,68 @@ function parseExternalSongRecommendation(text) {
   // Some responses spell the tab as the literal two characters "\t" rather
   // than an actual tab byte; accept both.
   const delimited = raw.split(/\t|\\t|\s*<tab>\s*|\s*\|\s*/iu).map((part) => part.trim()).filter(Boolean);
-  if (delimited.length === 3) return { song_title: delimited[0], artist: delimited[1], reason: delimited[2] };
+  if (delimited.length === 4 && /^(low|medium|high)$/i.test(delimited[2])) {
+    return { song_title: delimited[0], artist: delimited[1], difficulty: delimited[2].toLowerCase(), reason: delimited[3] };
+  }
+  if (delimited.length === 3) return { song_title: delimited[0], artist: delimited[1], difficulty: null, reason: delimited[2] };
 
   const lines = raw.split(/\r?\n/u).map((line) => line.replace(/^[-*]\s*/u, '').trim()).filter(Boolean);
-  if (lines.length === 3) return { song_title: lines[0], artist: lines[1], reason: lines[2] };
+  if (lines.length === 4 && /^(low|medium|high)$/i.test(lines[2])) {
+    return { song_title: lines[0], artist: lines[1], difficulty: lines[2].toLowerCase(), reason: lines[3] };
+  }
+  if (lines.length === 3) return { song_title: lines[0], artist: lines[1], difficulty: null, reason: lines[2] };
 
   const natural = raw.replace(/\s+/gu, ' ').match(/^(.+?)\s+-\s+(.+?)\s*(?:[:—–]\s*)(.+)$/u);
-  if (natural) return { song_title: natural[1].trim(), artist: natural[2].trim(), reason: natural[3].trim() };
+  if (natural) return { song_title: natural[1].trim(), artist: natural[2].trim(), difficulty: null, reason: natural[3].trim() };
   return null;
 }
 
-async function recommendExternalSong({ baseUrl, apiKey, model, messageText, query, excludedCandidates = [], requestFn }) {
+function parseExternalSongRecommendations(text) {
+  const raw = String(text || '').trim().replace(/^```(?:text|json)?\s*|\s*```$/giu, '');
+  if (!raw || /^unknown$/i.test(raw)) return [];
+  try {
+    const json = JSON.parse(raw);
+    const candidates = Array.isArray(json) ? json : json?.recommendations;
+    if (Array.isArray(candidates)) {
+      return candidates.map((candidate) => parseExternalSongRecommendation(JSON.stringify(candidate))).filter(Boolean);
+    }
+  } catch (error) {
+    // Delimited lines are handled below.
+  }
+  const lines = raw.split(/\r?\n/u).map((line) => line.replace(/^[-*]\s*/u, '').trim()).filter(Boolean);
+  const recommendations = lines.map(parseExternalSongRecommendation).filter(Boolean);
+  return recommendations.length > 0 ? recommendations : [parseExternalSongRecommendation(raw)].filter(Boolean);
+}
+
+async function recommendExternalSongs({ baseUrl, apiKey, model, messageText, query, excludedCandidates = [], limit = 1, requestFn }) {
+  const requestedCount = Math.min(Math.max(Number.parseInt(limit, 10) || 1, 1), 10);
   const prompt = JSON.stringify({
     user_request: String(messageText || '').trim(),
     search_constraints: query || {},
+    requested_count: requestedCount,
     do_not_repeat_candidates: excludedCandidates
   });
   const { parsed } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
     baseUrl, apiKey, model, prompt, systemPrompt: EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT,
-    requestFn, maxCompletionTokens: 300, reasoningEffort: 'low', responseFormat: 'text'
+    requestFn, maxCompletionTokens: Math.max(160, requestedCount * 80), reasoningEffort: 'low', temperature: 0.7, responseFormat: 'text'
   }));
-  const recommendation = parseExternalSongRecommendation(parsed?.text);
-  if (!recommendation || !recommendation.song_title || !recommendation.artist || !recommendation.reason) {
+  const recommendations = parseExternalSongRecommendations(parsed?.text)
+    .filter((recommendation) => recommendation.song_title && recommendation.artist && recommendation.reason)
+    .filter((recommendation, index, all) => all.findIndex((other) =>
+      other.song_title.toLowerCase() === recommendation.song_title.toLowerCase() &&
+      other.artist.toLowerCase() === recommendation.artist.toLowerCase()
+    ) === index)
+    .slice(0, requestedCount);
+  if (!recommendations.length) {
     console.warn(`[external_recommendation] unrecognized_response=${JSON.stringify(String(parsed?.text || '').slice(0, 300))}`);
-    return null;
+    return [];
   }
-  return recommendation;
+  return recommendations;
+}
+
+async function recommendExternalSong(options) {
+  const recommendations = await recommendExternalSongs({ ...options, limit: 1 });
+  return recommendations[0] || null;
 }
 
 async function composeUnsupportedReply({ baseUrl, apiKey, model, messageText, requestedCapability, recentReplies = [], requestFn }) {
@@ -730,9 +777,14 @@ function isRehearsalPlanRequest(messageText) {
 }
 
 function isExternalCatalogRecommendationRequest(messageText) {
-  const source = String(messageText || '').trim();
-  return /(?:לא\s*(?:קיים|נמצא)\s*במאגר|מחוץ\s*למאגר|outside\s+(?:the\s+)?catalog|not\s+in\s+(?:the\s+)?catalog)/iu.test(source) &&
-    /(?:תן|תביא|המלץ|שיר|song|recommend|give|find)/iu.test(source);
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return false;
+  const explicitExternal = /(?:\u05dc\u05d0\s*(?:\u05e7\u05d9\u05d9\u05dd|\u05e7\u05d9\u05d9\u05de\u05d9\u05dd|\u05e7\u05d9\u05d9\u05de\u05d5\u05ea|\u05e0\u05de\u05e6\u05d0|\u05e0\u05de\u05e6\u05d0\u05d9\u05dd|\u05e0\u05de\u05e6\u05d0\u05d5\u05ea)\s*(?:\u05d1\u05de\u05d0\u05d2\u05e8|\u05d0\u05e6\u05dc\u05e0\u05d5)|\u05de\u05d7\u05d5\u05e5\s*\u05dc\u05de\u05d0\u05d2\u05e8|outside\s+(?:the\s+)?catalog|not\s+in\s+(?:the\s+)?catalog)/iu;
+  const externalRecommendation = /(?:\u05ea\u05de\u05dc\u05d9\u05e5|\u05d4\u05de\u05dc\u05e5|\u05ea\u05d1\u05d9\u05d0|\u05ea\u05df|recommend|give|find)/iu;
+  const noveltyRequest = /(?:\u05e9\u05d9\u05e8\u05d9\u05dd?\s+\u05d7\u05d3\u05e9(?:\u05d9\u05dd|\u05d5\u05ea)?|\u05d3\u05d1\u05e8\u05d9\u05dd?\s+\u05d7\u05d3\u05e9(?:\u05d9\u05dd|\u05d5\u05ea)?|new\s+(?:songs?|stuff|recommendations?))/iu;
+  return (explicitExternal.test(source) && externalRecommendation.test(source)) ||
+    (externalRecommendation.test(source) && noveltyRequest.test(source)) ||
+    /(?:\u05ea\u05de\u05dc\u05d9\u05e5|\u05d4\u05de\u05dc\u05e5)\s*(?:\u05dc\u05e0\u05d5)?\s*(?:\u05e2\u05dc)?\s*\u05e9\u05d9\u05e8\u05d9\u05dd/iu.test(source);
 }
 
 function inferRequestedDurationMinutes(messageText) {
@@ -1399,6 +1451,17 @@ function normalizeAgentAction(action, { messageText, replyContext, quotedText })
   if (artistReplyAdd) {
     return { action: 'add_song', song: artistReplyAdd };
   }
+  if (isExternalCatalogRecommendationRequest(messageText)) {
+    const query = action.query && typeof action.query === 'object' && !Array.isArray(action.query) ? { ...action.query } : {};
+    const inferredLimit = inferRequestedLimit(messageText);
+    if (!Number.isInteger(Number.parseInt(query.limit, 10)) && inferredLimit) {
+      query.limit = inferredLimit;
+    }
+    return {
+      action: 'recommend_external_song',
+      query
+    };
+  }
   const rehearsalRequest = isRehearsalPlanRequest(messageText);
   const inferredDurationMinutes = inferRequestedDurationMinutes(messageText);
   if (action.action === 'update_song_feedback') {
@@ -1851,7 +1914,9 @@ module.exports = {
   interpretPlainFallbackReply,
   polishBanterReply,
   parseExternalSongRecommendation,
+  parseExternalSongRecommendations,
   recommendExternalSong,
+  recommendExternalSongs,
   composeUnsupportedReply,
   interpretUnknownSongInfo,
   resolveSongReference,

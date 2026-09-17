@@ -12,6 +12,7 @@ const {
   interpretPlainFallbackReply,
   polishBanterReply,
   parseExternalSongRecommendation,
+  parseExternalSongRecommendations,
   getAgentUsageStats
 } = require('../src/llm');
 
@@ -209,15 +210,26 @@ test('polishBanterReply uses text mode to produce the final Hebrew reply', async
 test('parseExternalSongRecommendation accepts natural text alternatives to tabs', () => {
   assert.deepEqual(
     parseExternalSongRecommendation('Hysteria - Muse: קו בס בולט ואנרגיה גבוהה.'),
-    { song_title: 'Hysteria', artist: 'Muse', reason: 'קו בס בולט ואנרגיה גבוהה.' }
+    { song_title: 'Hysteria', artist: 'Muse', difficulty: null, reason: 'קו בס בולט ואנרגיה גבוהה.' }
   );
   assert.deepEqual(
     parseExternalSongRecommendation('Hysteria | Muse | קו בס בולט ואנרגיה גבוהה.'),
-    { song_title: 'Hysteria', artist: 'Muse', reason: 'קו בס בולט ואנרגיה גבוהה.' }
+    { song_title: 'Hysteria', artist: 'Muse', difficulty: null, reason: 'קו בס בולט ואנרגיה גבוהה.' }
   );
   assert.deepEqual(
     parseExternalSongRecommendation('Hysteria<TAB>Muse<TAB>קו בס בולט ואנרגיה גבוהה.'),
-    { song_title: 'Hysteria', artist: 'Muse', reason: 'קו בס בולט ואנרגיה גבוהה.' }
+    { song_title: 'Hysteria', artist: 'Muse', difficulty: null, reason: 'קו בס בולט ואנרגיה גבוהה.' }
+  );
+  assert.deepEqual(
+    parseExternalSongRecommendation('The Joker<TAB>Steve Miller Band<TAB>low<TAB>גרוב פשוט וכיפי ללהקה.'),
+    { song_title: 'The Joker', artist: 'Steve Miller Band', difficulty: 'low', reason: 'גרוב פשוט וכיפי ללהקה.' }
+  );
+  assert.deepEqual(
+    parseExternalSongRecommendations('The Joker<TAB>Steve Miller Band<TAB>low<TAB>גרוב פשוט וכיפי ללהקה.\nUse Somebody<TAB>Kings of Leon<TAB>medium<TAB>שיר להקה ישיר ומוכר.'),
+    [
+      { song_title: 'The Joker', artist: 'Steve Miller Band', difficulty: 'low', reason: 'גרוב פשוט וכיפי ללהקה.' },
+      { song_title: 'Use Somebody', artist: 'Kings of Leon', difficulty: 'medium', reason: 'שיר להקה ישיר ומוכר.' }
+    ]
   );
 });
 
@@ -1911,4 +1923,28 @@ test('interpretMessage rewrites replacement follow-ups into replacement search q
   assert.deepEqual(action.query.replace_result_indexes, [2, 5, 7]);
   assert.equal(action.query.avoid_previous_results, true);
   assert.equal(action.query.limit, 3);
+});
+
+test('interpretMessage routes external-catalog cues to external recommendations', async () => {
+  const requests = [
+    '\u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8 \u05de\u05d7\u05d5\u05e5 \u05dc\u05de\u05d0\u05d2\u05e8',
+    '\u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8\u05d9\u05dd \u05e9\u05dc\u05d0 \u05e7\u05d9\u05d9\u05de\u05d9\u05dd \u05d0\u05e6\u05dc\u05e0\u05d5',
+    '\u05ea\u05de\u05dc\u05d9\u05e5 \u05dc\u05e0\u05d5 \u05e2\u05dc \u05e9\u05d9\u05e8\u05d9\u05dd',
+    '\u05ea\u05d1\u05d9\u05d0 5 \u05d3\u05d1\u05e8\u05d9\u05dd \u05d7\u05d3\u05e9\u05d9\u05dd'
+  ];
+
+  for (const messageText of requests) {
+    const action = await interpretMessage({
+      provider: 'groq', baseUrl: 'https://api.example.com', apiKey: 'test', model: 'test-model',
+      messageText, replyContext: null, recentMessages: [], currentDate: '2026-08-08',
+      requestFn: async () => ({
+        ok: true,
+        async json() {
+          return { choices: [{ message: { content: JSON.stringify({ action: 'search_songs', query: {} }) } }] };
+        }
+      })
+    });
+    assert.equal(action.action, 'recommend_external_song');
+    if (/5/u.test(messageText)) assert.equal(action.query.limit, 5);
+  }
 });

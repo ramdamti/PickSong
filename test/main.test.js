@@ -12,7 +12,8 @@ const {
   buildRecommendationReason,
   buildRecentMessageContext,
   isChordsReplyRequest,
-  handleAgentMessage
+  handleAgentMessage,
+  executeAgentAction
 } = require('../src/main');
 
 test('stripWakeWord removes standalone bot trigger variants', () => {
@@ -20,6 +21,48 @@ test('stripWakeWord removes standalone bot trigger variants', () => {
   assert.equal(stripWakeWord('\u05d1\u05d5\u05d8, \u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7'), '\u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7');
   assert.equal(stripWakeWord('\u05d1\u05d5\u05d8: \u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7'), '\u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7');
   assert.equal(stripWakeWord('\u05d1\u05d5\u05d8 - \u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7'), '\u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7');
+});
+
+test('executeAgentAction returns multiple external recommendations from one request and filters hard songs', async () => {
+  const sentMessages = [];
+  const recordedCandidates = [];
+  let receivedLimit = null;
+  await executeAgentAction({
+    action: { action: 'recommend_external_song', query: { limit: 3 } },
+    chat: { sendMessage: async (message) => sentMessages.push(message) },
+    record: { chatId: 'chat-1' },
+    messageText: 'תביא 3 שירים מחוץ למאגר',
+    replyContext: null,
+    config: { llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model' },
+    stateStore: {
+      getResultMessage() { return null; },
+      getLastResults() { return null; },
+      getSongs() { return []; },
+      getRecentExternalRecommendations() { return ['Already Suggested - Artist']; },
+      findSongsByNormalizedName() { return []; },
+      recordExternalRecommendation(chatId, candidate) { recordedCandidates.push([chatId, candidate]); },
+      async queueSave() {}
+    },
+    recommendExternalSongsFn: async ({ excludedCandidates, limit }) => {
+      receivedLimit = limit;
+      assert.deepEqual(excludedCandidates, ['Already Suggested - Artist']);
+      return [
+        { song_title: 'Hard Song', artist: 'Artist', difficulty: 'high', reason: 'קשה מדי.' },
+        { song_title: 'Easy Song', artist: 'Artist', difficulty: 'low', reason: 'קל לנגן.' },
+        { song_title: 'Medium Song', artist: 'Artist', difficulty: 'medium', reason: 'מתאים ללהקה.' }
+      ];
+    }
+  });
+
+  assert.equal(receivedLimit, 3);
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /Easy Song - Artist/);
+  assert.match(sentMessages[0], /Medium Song - Artist/);
+  assert.doesNotMatch(sentMessages[0], /Hard Song/);
+  assert.deepEqual(recordedCandidates, [
+    ['chat-1', 'Easy Song - Artist'],
+    ['chat-1', 'Medium Song - Artist']
+  ]);
 });
 
 test('recommendation reasons are detected and grounded in stored song data', () => {

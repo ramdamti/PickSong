@@ -236,3 +236,35 @@ test('createStateStore tracks recent recommendations per chat', () => {
   assert.equal(recorded, true);
   assert.deepEqual(store.getRecentRecommendations('chat-1'), ['song_a', 'song_b']);
 });
+
+test('createStateStore tracks recent external recommendations per chat', () => {
+  const store = createStateStore('state.json', 'seen.json', createCanonicalState(), {
+    seenMessageIds: [],
+    lastBootstrapAt: null
+  });
+
+  assert.equal(store.recordExternalRecommendation('chat-1', 'Bohemian Rhapsody - Queen'), true);
+  assert.equal(store.recordExternalRecommendation('chat-1', 'Bohemian Rhapsody - Queen'), true);
+  assert.equal(store.recordExternalRecommendation('chat-1', 'Song 2 - Artist 2'), true);
+  assert.deepEqual(store.getRecentExternalRecommendations('chat-1'), [
+    'Bohemian Rhapsody - Queen',
+    'Song 2 - Artist 2'
+  ]);
+});
+
+test('normalizeState expires external recommendations after one day', () => {
+  const state = createCanonicalState();
+  state.chats['chat-1'] = {
+    last_results: null,
+    result_messages: {},
+    recent_recommendations: [],
+    recent_external_recommendations: [
+      { candidate: 'Fresh Song - Artist', created_at: Date.now() - (23 * 60 * 60 * 1000) },
+      { candidate: 'Expired Song - Artist', created_at: Date.now() - (25 * 60 * 60 * 1000) }
+    ]
+  };
+
+  const normalized = normalizeState(state);
+
+  assert.deepEqual(normalized.chats['chat-1'].recent_external_recommendations.map((item) => item.candidate), ['Fresh Song - Artist']);
+});
