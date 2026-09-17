@@ -14,6 +14,7 @@ const {
   polishBanterReply,
   parseExternalSongRecommendation,
   parseExternalSongRecommendations,
+  recommendExternalSongs,
   getAgentUsageStats
 } = require('../src/llm');
 
@@ -68,6 +69,42 @@ test('buildAgentPrompt includes reply context without full database payloads', (
 test('external recommendation reasons are grounded in the band arrangement', () => {
   assert.match(EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT, /keys, drums, two guitars, and bass/i);
   assert.match(EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT, /do not give generic mood-only praise/i);
+  assert.match(EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT, /vocal comfort the top default constraint/i);
+  assert.match(EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT, /Prefer rock, blues, and ballads/i);
+});
+
+test('recommendExternalSongs requests backup candidates for local filtering', async () => {
+  let requestBody;
+  const recommendations = await recommendExternalSongs({
+    baseUrl: 'https://api.example.com', apiKey: 'test', model: 'test-model',
+    messageText: 'תביא 4 שירים מחוץ למאגר', query: {}, limit: 4,
+    requestFn: async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        async json() {
+          return {
+            choices: [{
+              message: {
+                content: [
+                  'Song 1\tArtist 1\tlow\tסיבה 1', 'Song 2\tArtist 2\tlow\tסיבה 2',
+                  'Song 3\tArtist 3\tmedium\tסיבה 3', 'Song 4\tArtist 4\tlow\tסיבה 4',
+                  'Song 5\tArtist 5\tlow\tסיבה 5', 'Song 6\tArtist 6\tmedium\tסיבה 6',
+                  'Song 7\tArtist 7\tlow\tסיבה 7'
+                ].join('\n')
+              }
+            }]
+          };
+        }
+      };
+    }
+  });
+
+  const prompt = JSON.parse(requestBody.messages[1].content);
+  assert.equal(prompt.requested_result_count, 4);
+  assert.equal(prompt.candidate_count, 7);
+  assert.equal(requestBody.max_completion_tokens, 560);
+  assert.equal(recommendations.length, 7);
 });
 
 test('callOpenAiCompatibleChat accepts standard tool calls without JSON mode', async () => {

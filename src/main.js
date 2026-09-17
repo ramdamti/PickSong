@@ -1540,18 +1540,14 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       ? stateStore.getRecentExternalRecommendations(chatId)
       : [];
     const requestedLimit = Math.min(Math.max(Number.parseInt(action.query?.limit, 10) || 1, 1), 10);
-    const recommendations = await recommendExternalSongsFn({
-      baseUrl: config.llmBaseUrl,
-      apiKey: config.llmApiKey,
-      model: config.llmModel,
-      messageText,
-      query: action.query || {},
-      excludedCandidates,
-      limit: requestedLimit
-    });
     const accepted = [];
-    for (const recommendation of Array.isArray(recommendations) ? recommendations : []) {
+    const consideredCandidates = new Set(excludedCandidates);
+    const collectRecommendations = (recommendations) => {
+      for (const recommendation of Array.isArray(recommendations) ? recommendations : []) {
       if (!recommendation?.song_title || !recommendation?.artist) continue;
+      const candidate = `${recommendation.song_title} - ${recommendation.artist}`;
+      if (consideredCandidates.has(candidate)) continue;
+      consideredCandidates.add(candidate);
       const identity = `${recommendation.song_title} ${recommendation.artist}`;
       const hasHebrewIdentity = /[\u0590-\u05ff]/u.test(identity);
       const hasLatinIdentity = /[A-Za-z]/u.test(identity);
@@ -1570,8 +1566,23 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       if (!existing.length) {
         console.log(`[external_recommendation] title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
         accepted.push(recommendation);
-        if (accepted.length >= requestedLimit) break;
+        if (accepted.length >= requestedLimit) return;
       }
+    }
+    };
+    const requestRecommendations = async (limit) => recommendExternalSongsFn({
+      baseUrl: config.llmBaseUrl,
+      apiKey: config.llmApiKey,
+      model: config.llmModel,
+      messageText,
+      query: action.query || {},
+      excludedCandidates: Array.from(consideredCandidates),
+      limit
+    });
+    collectRecommendations(await requestRecommendations(requestedLimit));
+    if (accepted.length < requestedLimit) {
+      console.warn(`[external_recommendation] retrying_for_missing=${requestedLimit - accepted.length}`);
+      collectRecommendations(await requestRecommendations(requestedLimit - accepted.length));
     }
     if (accepted.length) {
       const reply = accepted.length === 1

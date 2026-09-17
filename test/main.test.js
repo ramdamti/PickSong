@@ -23,10 +23,10 @@ test('stripWakeWord removes standalone bot trigger variants', () => {
   assert.equal(stripWakeWord('\u05d1\u05d5\u05d8 - \u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7'), '\u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7');
 });
 
-test('executeAgentAction returns multiple external recommendations from one request and filters hard songs', async () => {
+test('executeAgentAction retries once to fill missing external recommendations after filtering', async () => {
   const sentMessages = [];
   const recordedCandidates = [];
-  let receivedLimit = null;
+  const receivedCalls = [];
   await executeAgentAction({
     action: { action: 'recommend_external_song', query: { limit: 3 } },
     chat: { sendMessage: async (message) => sentMessages.push(message) },
@@ -44,7 +44,10 @@ test('executeAgentAction returns multiple external recommendations from one requ
       async queueSave() {}
     },
     recommendExternalSongsFn: async ({ excludedCandidates, limit }) => {
-      receivedLimit = limit;
+      receivedCalls.push({ excludedCandidates, limit });
+      if (receivedCalls.length > 1) {
+        return [{ song_title: 'Third Song', artist: 'Artist', difficulty: 'low', reason: 'עוד אפשרות.' }];
+      }
       assert.deepEqual(excludedCandidates, ['Already Suggested - Artist']);
       return [
         { song_title: 'Hard Song', artist: 'Artist', difficulty: 'high', reason: 'קשה מדי.' },
@@ -55,15 +58,19 @@ test('executeAgentAction returns multiple external recommendations from one requ
     }
   });
 
-  assert.equal(receivedLimit, 3);
+  assert.deepEqual(receivedCalls.map((call) => call.limit), [3, 1]);
+  assert.ok(receivedCalls[1].excludedCandidates.includes('Hard Song - Artist'));
+  assert.ok(receivedCalls[1].excludedCandidates.includes('Easy Song - Artist'));
   assert.equal(sentMessages.length, 1);
   assert.match(sentMessages[0], /Easy Song - Artist/);
   assert.match(sentMessages[0], /Medium Song - Artist/);
+  assert.match(sentMessages[0], /Third Song - Artist/);
   assert.doesNotMatch(sentMessages[0], /Hard Song/);
   assert.doesNotMatch(sentMessages[0], /English Artist/);
   assert.deepEqual(recordedCandidates, [
     ['chat-1', 'Easy Song - Artist'],
-    ['chat-1', 'Medium Song - Artist']
+    ['chat-1', 'Medium Song - Artist'],
+    ['chat-1', 'Third Song - Artist']
   ]);
 });
 
