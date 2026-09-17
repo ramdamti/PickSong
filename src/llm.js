@@ -100,6 +100,7 @@ const EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT = [
   'Band profile: two capable but non-professional singers, one also plays guitar and one also plays keys. Make vocal comfort the top default constraint: favor singable melodies, practical ranges, manageable sustained notes, and arrangements that can divide lead, harmony, or verses between them. Avoid songs known for extreme range, relentless high belts, or demanding vocal acrobatics unless explicitly requested. Prefer rock, blues, and ballads when no genre is specified.',
   'Choose a distinct, less-obvious fitting song instead of a default canonical answer. Never recommend Bohemian Rhapsody by Queen unless the user explicitly asks for it.',
   'For an English-language song, title and artist must use their official canonical English/Latin spelling only. Never translate, transliterate, or mix Hebrew into either identity field; Hebrew is for the reason only.',
+  'When search_constraints require language "he" or the user asks for Hebrew/Israeli songs, treat that as a hard constraint: recommend only real Israeli Hebrew-language songs, with canonical Hebrew song and artist identities. Never substitute foreign songs.',
   'Return exactly candidate_count distinct candidates, one per line, immediately; do not spend output on reasoning. Format per line: title<TAB>artist<TAB>difficulty (low, medium, or high)<TAB>short natural Hebrew reason. The artist field must contain only the canonical artist name: no cover credit, parenthetical note, role, or extra explanation. If no confident real recommendation exists, return exactly UNKNOWN.',
   'The reason must be concise and specific to arranging and performing it for this band: keys, drums, two guitars, and bass, plus the two singers. Explain the vocal comfort or possible vocal split as well as useful musical roles or arrangement choices; do not give generic mood-only praise, discuss the listener, or invent a keys part when the song has none. Do not ask a question or suggest adding it.'
 ].join('\n');
@@ -508,7 +509,7 @@ function inferRequestedLanguage(messageText) {
   const source = String(messageText || '').trim().toLowerCase();
   if (!source) return null;
 
-  if (/(?:בעברית|עברית|שירים עבריים|שיר עברי|hebrew)/iu.test(source)) {
+  if (/(?:בעברית|עברית|שירים עבריים|שיר עברי|ישראלי(?:ת|ים|ות)?|ישראלית|hebrew)/iu.test(source)) {
     return 'he';
   }
 
@@ -1457,6 +1458,23 @@ function normalizeAgentAction(action, { messageText, replyContext, quotedText })
   }
   if (isExternalCatalogRecommendationRequest(messageText)) {
     const query = action.query && typeof action.query === 'object' && !Array.isArray(action.query) ? { ...action.query } : {};
+    const requirements = query.requirements && typeof query.requirements === 'object' && !Array.isArray(query.requirements)
+      ? { ...query.requirements }
+      : {};
+    const preferences = query.preferences && typeof query.preferences === 'object' && !Array.isArray(query.preferences)
+      ? { ...query.preferences }
+      : {};
+    if (!requirements.language) {
+      const inferredLanguage = inferRequestedLanguage(messageText);
+      if (inferredLanguage) requirements.language = inferredLanguage;
+    }
+    if (!Array.isArray(requirements.genres) || requirements.genres.length === 0) {
+      const inferredGenres = inferRequestedGenres(messageText);
+      if (inferredGenres.length > 0) requirements.genres = inferredGenres;
+    }
+    Object.assign(preferences, inferInstrumentDifficultyPreferences(messageText), inferPerformerFitPreferences(messageText), preferences);
+    query.requirements = requirements;
+    query.preferences = preferences;
     const inferredLimit = inferRequestedLimit(messageText);
     if (!Number.isInteger(Number.parseInt(query.limit, 10)) && inferredLimit) {
       query.limit = inferredLimit;

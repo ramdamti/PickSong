@@ -74,6 +74,32 @@ test('executeAgentAction retries once to fill missing external recommendations a
   ]);
 });
 
+test('executeAgentAction rejects foreign identities for Hebrew external recommendations', async () => {
+  const sentMessages = [];
+  let calls = 0;
+  await executeAgentAction({
+    action: { action: 'recommend_external_song', query: { limit: 1, requirements: { language: 'he' } } },
+    chat: { sendMessage: async (message) => sentMessages.push(message) },
+    record: { chatId: 'chat-1' }, messageText: 'תביא שיר ישראלי', replyContext: null,
+    config: { llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model' },
+    stateStore: {
+      getResultMessage() { return null; }, getLastResults() { return null; }, getSongs() { return []; },
+      findSongsByNormalizedName() { return []; }, async queueSave() {}
+    },
+    recommendExternalSongsFn: async () => {
+      calls += 1;
+      return calls === 1
+        ? [{ song_title: 'Dream On', artist: 'Aerosmith', difficulty: 'low', reason: 'לא ישראלי.' }]
+        : [{ song_title: 'שיר ישראלי', artist: 'אמן ישראלי', difficulty: 'low', reason: 'מתאים להרכב.' }];
+    }
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /שיר ישראלי - אמן ישראלי/);
+  assert.doesNotMatch(sentMessages[0], /Dream On/);
+});
+
 test('recommendation reasons are detected and grounded in stored song data', () => {
   const song = {
     song_title: 'Exodus', artist: 'Bob Marley and the Wailers', genres: ['reggae'], difficulty: 'medium',

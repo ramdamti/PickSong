@@ -1552,7 +1552,8 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       const hasHebrewIdentity = /[\u0590-\u05ff]/u.test(identity);
       const hasLatinIdentity = /[A-Za-z]/u.test(identity);
       const requestedEnglish = String(action.query?.requirements?.language || '').toLowerCase() === 'en';
-      if ((requestedEnglish && hasHebrewIdentity) || (hasHebrewIdentity && hasLatinIdentity)) {
+      const requestedHebrew = String(action.query?.requirements?.language || '').toLowerCase() === 'he';
+      if ((requestedEnglish && hasHebrewIdentity) || (requestedHebrew && !hasHebrewIdentity) || (hasHebrewIdentity && hasLatinIdentity)) {
         console.warn(`[external_recommendation] rejected_noncanonical_identity title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
         continue;
       }

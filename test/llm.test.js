@@ -1991,3 +1991,21 @@ test('interpretMessage routes external-catalog cues to external recommendations'
     if (/5/u.test(messageText)) assert.equal(action.query.limit, 5);
   }
 });
+
+test('interpretMessage preserves Hebrew and Israeli constraints for external recommendations', async () => {
+  const action = await interpretMessage({
+    provider: 'groq', baseUrl: 'https://api.example.com', apiKey: 'test', model: 'test-model',
+    messageText: '\u05ea\u05de\u05dc\u05d9\u05e5 \u05dc\u05e0\u05d5 \u05e2\u05dc 3 \u05e9\u05d9\u05e8\u05d9 \u05e8\u05d5\u05e7 \u05d9\u05e9\u05e8\u05d0\u05dc\u05d9\u05dd \u05de\u05d7\u05d5\u05e5 \u05dc\u05de\u05d0\u05d2\u05e8',
+    replyContext: null, recentMessages: [], currentDate: '2026-08-08',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return { choices: [{ message: { content: JSON.stringify({ action: 'search_songs', query: {} }) } }] };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'recommend_external_song');
+  assert.equal(action.query.limit, 3);
+  assert.equal(action.query.requirements.language, 'he');
+});
