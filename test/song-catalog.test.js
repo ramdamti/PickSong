@@ -17,7 +17,7 @@ test('Spotify catalog search uses a server token and Israeli market', async () =
   assert.equal(requests.length, 2);
   assert.match(requests[1].url, /market=IL/);
   assert.match(decodeURIComponent(requests[1].url), /genre:rock\+year:1990-1999/);
-  assert.deepEqual(songs, [{ song_title: 'Real Song', artist: 'Real Artist', release_date: '1994-06-01' }]);
+  assert.deepEqual(songs, [{ song_title: 'Real Song', artist: 'Real Artist', release_date: '1994-06-01', catalog_source: 'spotify' }]);
 });
 
 test('iTunes catalog search needs no token and uses the Israeli store', async () => {
@@ -33,7 +33,7 @@ test('iTunes catalog search needs no token and uses the Israeli store', async ()
   });
   assert.match(requestUrl, /country=il/);
   assert.match(decodeURIComponent(requestUrl), /term=רוק\+ישראלי/);
-  assert.deepEqual(songs, [{ song_title: 'Real Song', artist: 'Real Artist', release_date: '1994-06-01T00:00:00Z' }]);
+  assert.deepEqual(songs, [{ song_title: 'Real Song', artist: 'Real Artist', release_date: '1994-06-01T00:00:00Z', catalog_source: 'itunes' }]);
   assert.equal(buildSpotifyQuery({ genres: ['rock'] }), 'genre:rock');
   assert.equal(buildItunesTerm({ language: 'he', genres: ['rock'] }), 'רוק ישראלי');
 });

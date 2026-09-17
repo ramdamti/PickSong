@@ -101,7 +101,7 @@ const EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT = [
   'Choose a distinct, less-obvious fitting song instead of a default canonical answer. Never recommend Bohemian Rhapsody by Queen unless the user explicitly asks for it.',
   'For an English-language song, title and artist must use their official canonical English/Latin spelling only. Never translate, transliterate, or mix Hebrew into either identity field; Hebrew is for the reason only.',
   'When search_constraints require language "he" or the user asks for Hebrew/Israeli songs, treat that as a hard constraint: recommend only real Israeli Hebrew-language songs, with canonical Hebrew song and artist identities. Never substitute foreign songs.',
-  'When search_constraints include release_year_from and release_year_to, treat the release-year range as a hard constraint.',
+  'When search_constraints include release_year_from and release_year_to, strongly prefer that release-year range. A catalog candidate from iTunes may show a remaster or digital reissue date, so do not reject a clearly fitting original song solely because its displayed catalog date is newer.',
   'When catalog_candidates is supplied, it is the only allowed source of song and artist identities. Select only exact title/artist pairs from that list. Never alter, translate, transliterate, combine, or add identities. If the list cannot satisfy the request, return exactly UNKNOWN.',
   'Return exactly candidate_count distinct candidates, one per line, immediately, even when the user asks for only one song; do not spend output on reasoning. Format per line: title<TAB>artist<TAB>difficulty (low, medium, or high)<TAB>short natural Hebrew reason. The artist field must contain only the canonical artist name: no cover credit, parenthetical note, role, or extra explanation. If no confident real recommendation exists, return exactly UNKNOWN.',
   'The reason must be concise and specific to arranging and performing it for this band: keys, drums, two guitars, and bass, plus the two singers. Explain the vocal comfort or possible vocal split as well as useful musical roles or arrangement choices; do not give generic mood-only praise, discuss the listener, or invent a keys part when the song has none. Do not ask a question or suggest adding it.'
@@ -762,7 +762,7 @@ async function recommendExternalSongs({ baseUrl, apiKey, model, messageText, que
     candidate_count: candidateCount,
     do_not_repeat_candidates: excludedCandidates,
     catalog_candidates: Array.isArray(catalogCandidates)
-      ? catalogCandidates.map((candidate) => ({ title: candidate.song_title, artist: candidate.artist, release_date: candidate.release_date || null })).slice(0, 50)
+      ? catalogCandidates.map((candidate) => ({ title: candidate.song_title, artist: candidate.artist, release_date: candidate.release_date || null, catalog_source: candidate.catalog_source || null })).slice(0, 50)
       : []
   });
   const { parsed } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({

@@ -1574,7 +1574,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
           !alreadyInCatalog &&
           !(requestedEnglish && hasHebrewIdentity) &&
           !(requestedHebrew && (!hasHebrewIdentity || hasLatinIdentity)) &&
-          (!Number.isInteger(releaseYearFrom) && !Number.isInteger(releaseYearTo) ||
+          (candidate.catalog_source === 'itunes' || (!Number.isInteger(releaseYearFrom) && !Number.isInteger(releaseYearTo)) ||
             (Number.isInteger(releaseYear) &&
               (!Number.isInteger(releaseYearFrom) || releaseYear >= releaseYearFrom) &&
               (!Number.isInteger(releaseYearTo) || releaseYear <= releaseYearTo)));
@@ -1617,6 +1617,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       }
       const releaseYear = Number.parseInt(String(verified.release_date || '').slice(0, 4), 10);
       if (
+        verified.catalog_source !== 'itunes' &&
         (Number.isInteger(releaseYearFrom) || Number.isInteger(releaseYearTo)) &&
         (!Number.isInteger(releaseYear) ||
           (Number.isInteger(releaseYearFrom) && releaseYear < releaseYearFrom) ||

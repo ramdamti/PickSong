@@ -8,7 +8,12 @@ function normalizeCatalogSong(song) {
   const songTitle = String(song?.song_title || song?.name || song?.trackName || '').trim();
   const artist = String(song?.artist || song?.artistName || '').trim();
   if (!songTitle || !artist) return null;
-  return { song_title: songTitle, artist, release_date: song.release_date || song.releaseDate || song?.album?.release_date || null };
+  return {
+    song_title: songTitle,
+    artist,
+    release_date: song.release_date || song.releaseDate || song?.album?.release_date || null,
+    catalog_source: song.catalog_source || null
+  };
 }
 
 async function getSpotifyToken({ clientId, clientSecret, fetchFn = fetch }) {
@@ -46,7 +51,7 @@ async function searchSpotifySongs({ clientId, clientSecret, genres, releaseYearF
   if (!response.ok) throw new Error(`Spotify search ${response.status}`);
   const body = await response.json();
   return (Array.isArray(body?.tracks?.items) ? body.tracks.items : []).map((track) => normalizeCatalogSong({
-    song_title: track.name, artist: track.artists?.map((artist) => artist.name).filter(Boolean).join(', '), release_date: track.album?.release_date
+    song_title: track.name, artist: track.artists?.map((artist) => artist.name).filter(Boolean).join(', '), release_date: track.album?.release_date, catalog_source: 'spotify'
   })).filter(Boolean);
 }
 
@@ -61,7 +66,7 @@ async function searchItunesSongs({ language, genres, limit, fetchFn = fetch }) {
   const response = await fetchFn(url);
   if (!response.ok) throw new Error(`iTunes search ${response.status}`);
   const body = await response.json();
-  return (Array.isArray(body?.results) ? body.results : []).map(normalizeCatalogSong).filter(Boolean);
+  return (Array.isArray(body?.results) ? body.results : []).map((song) => normalizeCatalogSong({ ...song, catalog_source: 'itunes' })).filter(Boolean);
 }
 
 function uniqueSongs(songs) {
