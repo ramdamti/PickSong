@@ -1573,6 +1573,18 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
         console.warn(`[external_recommendation] rejected_unverified title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
         continue;
       }
+      const releaseYear = Number.parseInt(String(verified.release_date || '').slice(0, 4), 10);
+      const releaseYearFrom = Number.parseInt(action.query?.requirements?.release_year_from, 10);
+      const releaseYearTo = Number.parseInt(action.query?.requirements?.release_year_to, 10);
+      if (
+        (Number.isInteger(releaseYearFrom) || Number.isInteger(releaseYearTo)) &&
+        (!Number.isInteger(releaseYear) ||
+          (Number.isInteger(releaseYearFrom) && releaseYear < releaseYearFrom) ||
+          (Number.isInteger(releaseYearTo) && releaseYear > releaseYearTo))
+      ) {
+        console.warn(`[external_recommendation] rejected_release_year title=${JSON.stringify(verified.song_title)} artist=${JSON.stringify(verified.artist)} release_year=${JSON.stringify(verified.release_date || null)}`);
+        continue;
+      }
       const existing = typeof stateStore.findSongsByNormalizedName === 'function'
         ? stateStore.findSongsByNormalizedName(verified.song_title, verified.artist)
         : songs.filter((song) => normalizeText(song.song_title) === normalizeText(verified.song_title) && normalizeText(song.artist) === normalizeText(verified.artist));

@@ -47,10 +47,15 @@ async function verifyMusicBrainzSong({ songTitle, artist, userAgent, fetchFn = f
   const query = `recording:"${String(songTitle).replace(/"/gu, '\\"')}" AND artist:"${String(artist).replace(/"/gu, '\\"')}"`;
   const url = `${MUSICBRAINZ_BASE_URL}/recording/?${new URLSearchParams({ query, fmt: 'json', limit: '5' }).toString()}`;
   try {
-    const response = await queuedFetch(url, {
-      headers: { Accept: 'application/json', 'User-Agent': String(userAgent || 'PickSong/1.0') }
-    }, fetchFn);
-    if (!response.ok) throw new Error(`MusicBrainz ${response.status}`);
+    let response = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      response = await queuedFetch(url, {
+        headers: { Accept: 'application/json', 'User-Agent': String(userAgent || 'PickSong/1.0') }
+      }, fetchFn);
+      if (response.ok || (response.status !== 429 && response.status < 500)) break;
+      console.warn(`[musicbrainz] retrying status=${response.status} attempt=${attempt + 1}`);
+    }
+    if (!response?.ok) throw new Error(`MusicBrainz ${response?.status || 'request failed'}`);
     const body = await response.json();
     const match = (Array.isArray(body?.recordings) ? body.recordings : []).find((recording) =>
       normalizeMusicText(recording?.title) === normalizedTitle &&

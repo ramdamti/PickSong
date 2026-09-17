@@ -14,6 +14,7 @@ const {
   polishBanterReply,
   parseExternalSongRecommendation,
   parseExternalSongRecommendations,
+  inferRequestedReleaseYearRange,
   recommendExternalSongs,
   getAgentUsageStats
 } = require('../src/llm');
@@ -71,6 +72,13 @@ test('external recommendation reasons are grounded in the band arrangement', () 
   assert.match(EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT, /do not give generic mood-only praise/i);
   assert.match(EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT, /vocal comfort the top default constraint/i);
   assert.match(EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT, /Prefer rock, blues, and ballads/i);
+});
+
+test('inferRequestedReleaseYearRange supports decades, ranges, and relative periods', () => {
+  assert.deepEqual(inferRequestedReleaseYearRange('שיר משנות ה-80'), { release_year_from: 1980, release_year_to: 1989 });
+  assert.deepEqual(inferRequestedReleaseYearRange('song from the 10s'), { release_year_from: 2010, release_year_to: 2019 });
+  assert.deepEqual(inferRequestedReleaseYearRange('שיר בין 1992 ל-1998'), { release_year_from: 1992, release_year_to: 1998 });
+  assert.deepEqual(inferRequestedReleaseYearRange('שיר מהמילניום הקודם'), { release_year_to: 1999 });
 });
 
 test('recommendExternalSongs requests backup candidates for local filtering', async () => {
@@ -1995,7 +2003,7 @@ test('interpretMessage routes external-catalog cues to external recommendations'
 test('interpretMessage preserves Hebrew and Israeli constraints for external recommendations', async () => {
   const action = await interpretMessage({
     provider: 'groq', baseUrl: 'https://api.example.com', apiKey: 'test', model: 'test-model',
-    messageText: '\u05ea\u05de\u05dc\u05d9\u05e5 \u05dc\u05e0\u05d5 \u05e2\u05dc 3 \u05e9\u05d9\u05e8\u05d9 \u05e8\u05d5\u05e7 \u05d9\u05e9\u05e8\u05d0\u05dc\u05d9\u05dd \u05de\u05d7\u05d5\u05e5 \u05dc\u05de\u05d0\u05d2\u05e8',
+    messageText: '\u05ea\u05de\u05dc\u05d9\u05e5 \u05dc\u05e0\u05d5 \u05e2\u05dc 3 \u05e9\u05d9\u05e8\u05d9 \u05e8\u05d5\u05e7 \u05d9\u05e9\u05e8\u05d0\u05dc\u05d9\u05dd \u05de\u05e9\u05e0\u05d5\u05ea \u05d4-90 \u05de\u05d7\u05d5\u05e5 \u05dc\u05de\u05d0\u05d2\u05e8',
     replyContext: null, recentMessages: [], currentDate: '2026-08-08',
     requestFn: async () => ({
       ok: true,
@@ -2008,4 +2016,6 @@ test('interpretMessage preserves Hebrew and Israeli constraints for external rec
   assert.equal(action.action, 'recommend_external_song');
   assert.equal(action.query.limit, 3);
   assert.equal(action.query.requirements.language, 'he');
+  assert.equal(action.query.requirements.release_year_from, 1990);
+  assert.equal(action.query.requirements.release_year_to, 1999);
 });

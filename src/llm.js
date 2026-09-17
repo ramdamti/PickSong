@@ -101,6 +101,7 @@ const EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT = [
   'Choose a distinct, less-obvious fitting song instead of a default canonical answer. Never recommend Bohemian Rhapsody by Queen unless the user explicitly asks for it.',
   'For an English-language song, title and artist must use their official canonical English/Latin spelling only. Never translate, transliterate, or mix Hebrew into either identity field; Hebrew is for the reason only.',
   'When search_constraints require language "he" or the user asks for Hebrew/Israeli songs, treat that as a hard constraint: recommend only real Israeli Hebrew-language songs, with canonical Hebrew song and artist identities. Never substitute foreign songs.',
+  'When search_constraints include release_year_from and release_year_to, treat the release-year range as a hard constraint.',
   'Return exactly candidate_count distinct candidates, one per line, immediately; do not spend output on reasoning. Format per line: title<TAB>artist<TAB>difficulty (low, medium, or high)<TAB>short natural Hebrew reason. The artist field must contain only the canonical artist name: no cover credit, parenthetical note, role, or extra explanation. If no confident real recommendation exists, return exactly UNKNOWN.',
   'The reason must be concise and specific to arranging and performing it for this band: keys, drums, two guitars, and bass, plus the two singers. Explain the vocal comfort or possible vocal split as well as useful musical roles or arrangement choices; do not give generic mood-only praise, discuss the listener, or invent a keys part when the song has none. Do not ask a question or suggest adding it.'
 ].join('\n');
@@ -681,6 +682,58 @@ function parseExternalSongRecommendation(text) {
   return null;
 }
 
+function inferRequestedReleaseYearRange(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return null;
+  const yearRange = source.match(/\b((?:19|20)\d{2})\s*(?:-|–|—|to|\u05e2\u05d3|\u05dc[-\s]?)\s*((?:19|20)\d{2})\b/u);
+  if (yearRange) {
+    const from = Number.parseInt(yearRange[1], 10);
+    const to = Number.parseInt(yearRange[2], 10);
+    return from <= to ? { release_year_from: from, release_year_to: to } : { release_year_from: to, release_year_to: from };
+  }
+  const beforeYear = source.match(/(?:before|prior to|\u05dc\u05e4\u05e0\u05d9)\s*((?:19|20)\d{2})/u);
+  if (beforeYear) return { release_year_to: Number.parseInt(beforeYear[1], 10) - 1 };
+  const afterYear = source.match(/(?:after|since|\u05d0\u05d7\u05e8\u05d9|\u05de\u05d0\u05d6)\s*((?:19|20)\d{2})/u);
+  if (afterYear) return { release_year_from: Number.parseInt(afterYear[1], 10) + 1 };
+  if (/(?:previous\s+(?:millennium|century)|\u05d4\u05de\u05d9\u05dc\u05e0\u05d9\u05d5\u05dd\s+\u05d4\u05e7\u05d5\u05d3\u05dd|\u05d4\u05de\u05d0\u05d4\s+\u05d4\u05e7\u05d5\u05d3\u05de\u05ea)/u.test(source)) {
+    return { release_year_to: 1999 };
+  }
+  const explicitYear = source.match(/\b((?:19|20)\d{2})\b/u);
+  if (explicitYear) {
+    const year = Number.parseInt(explicitYear[1], 10);
+    return { release_year_from: year, release_year_to: year };
+  }
+  const englishDecade = source.match(/\b((?:19|20)\d)0s\b/u);
+  if (englishDecade) {
+    const from = Number.parseInt(englishDecade[1], 10) * 10;
+    return { release_year_from: from, release_year_to: from + 9 };
+  }
+  const shortEnglishDecade = source.match(/\b(\d{2})s\b/u);
+  if (shortEnglishDecade) {
+    const twoDigitYear = Number.parseInt(shortEnglishDecade[1], 10);
+    const from = (twoDigitYear >= 30 ? 1900 : 2000) + twoDigitYear;
+    return { release_year_from: from, release_year_to: from + 9 };
+  }
+  const hebrewDecade = source.match(/\u05e9\u05e0\u05d5\u05ea\s+(?:\u05d4[-\s]?)?(?:(19|20))?(\d{2})/u);
+  if (hebrewDecade) {
+    const twoDigitYear = Number.parseInt(hebrewDecade[2], 10);
+    const century = hebrewDecade[1] || (twoDigitYear >= 30 ? '19' : '20');
+    const from = Number.parseInt(`${century}${hebrewDecade[2]}`, 10);
+    return { release_year_from: from, release_year_to: from + 9 };
+  }
+  const namedHebrewDecades = [
+    ['\u05e9\u05d9\u05e9\u05d9\u05dd', 1960], ['\u05e9\u05d1\u05e2\u05d9\u05dd', 1970],
+    ['\u05e9\u05de\u05d5\u05e0\u05d9\u05dd', 1980], ['\u05ea\u05e9\u05e2\u05d9\u05dd', 1990],
+    ['\u05d0\u05dc\u05e4\u05d9\u05d9\u05dd', 2000], ['\u05e2\u05e9\u05e8\u05d9\u05dd', 2010]
+  ];
+  for (const [word, from] of namedHebrewDecades) {
+    if (new RegExp(`\\u05e9\\u05e0\\u05d5\\u05ea\\s+(?:\\u05d4\\s+)?${word}`, 'u').test(source)) {
+      return { release_year_from: from, release_year_to: from + 9 };
+    }
+  }
+  return null;
+}
+
 function parseExternalSongRecommendations(text) {
   const raw = String(text || '').trim().replace(/^```(?:text|json)?\s*|\s*```$/giu, '');
   if (!raw || /^unknown$/i.test(raw)) return [];
@@ -786,10 +839,11 @@ function isExternalCatalogRecommendationRequest(messageText) {
   if (!source) return false;
   const explicitExternal = /(?:\u05dc\u05d0\s*(?:\u05e7\u05d9\u05d9\u05dd|\u05e7\u05d9\u05d9\u05de\u05d9\u05dd|\u05e7\u05d9\u05d9\u05de\u05d5\u05ea|\u05e0\u05de\u05e6\u05d0|\u05e0\u05de\u05e6\u05d0\u05d9\u05dd|\u05e0\u05de\u05e6\u05d0\u05d5\u05ea)\s*(?:\u05d1\u05de\u05d0\u05d2\u05e8|\u05d0\u05e6\u05dc\u05e0\u05d5)|\u05de\u05d7\u05d5\u05e5\s*\u05dc\u05de\u05d0\u05d2\u05e8|outside\s+(?:the\s+)?catalog|not\s+in\s+(?:the\s+)?catalog)/iu;
   const externalRecommendation = /(?:\u05ea\u05de\u05dc\u05d9\u05e5|\u05d4\u05de\u05dc\u05e5|\u05ea\u05d1\u05d9\u05d0|\u05ea\u05df|recommend|give|find)/iu;
+  const recommendVerb = /(?:\u05ea\u05de\u05dc\u05d9\u05e5|\u05d4\u05de\u05dc\u05e5|recommend)/iu;
   const noveltyRequest = /(?:\u05e9\u05d9\u05e8\u05d9\u05dd?\s+\u05d7\u05d3\u05e9(?:\u05d9\u05dd|\u05d5\u05ea)?|\u05d3\u05d1\u05e8\u05d9\u05dd?\s+\u05d7\u05d3\u05e9(?:\u05d9\u05dd|\u05d5\u05ea)?|new\s+(?:songs?|stuff|recommendations?))/iu;
   return (explicitExternal.test(source) && externalRecommendation.test(source)) ||
     (externalRecommendation.test(source) && noveltyRequest.test(source)) ||
-    /(?:\u05ea\u05de\u05dc\u05d9\u05e5|\u05d4\u05de\u05dc\u05e5)\s*(?:\u05dc\u05e0\u05d5)?\s*(?:\u05e2\u05dc)?\s*\u05e9\u05d9\u05e8\u05d9\u05dd/iu.test(source);
+    (recommendVerb.test(source) && /(?:\u05e9\u05d9\u05e8|song)/iu.test(source));
 }
 
 function inferRequestedDurationMinutes(messageText) {
@@ -1472,6 +1526,8 @@ function normalizeAgentAction(action, { messageText, replyContext, quotedText })
       const inferredGenres = inferRequestedGenres(messageText);
       if (inferredGenres.length > 0) requirements.genres = inferredGenres;
     }
+    const releaseYearRange = inferRequestedReleaseYearRange(messageText);
+    if (releaseYearRange) Object.assign(requirements, releaseYearRange);
     Object.assign(preferences, inferInstrumentDifficultyPreferences(messageText), inferPerformerFitPreferences(messageText), preferences);
     query.requirements = requirements;
     query.preferences = preferences;
@@ -1937,6 +1993,7 @@ module.exports = {
   polishBanterReply,
   parseExternalSongRecommendation,
   parseExternalSongRecommendations,
+  inferRequestedReleaseYearRange,
   recommendExternalSong,
   recommendExternalSongs,
   composeUnsupportedReply,
