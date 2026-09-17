@@ -105,6 +105,7 @@ Operational rules:
 - the runtime prompt sends only `current_date`, `user_message`, and minimal `reply_context`
 - the full song database is never sent to the model
 - local formatting and state writes never trigger extra LLM calls
+- external-song candidates are verified against MusicBrainz before they are sent; an unverified candidate is rejected
 
 Groq-specific notes:
 
@@ -126,8 +127,9 @@ Observability:
 1. Install dependencies.
 2. Set one or more target groups with `GROUP_NAME`, `GROUP_NAMES`, `GROUP_ID`, or `GROUP_IDS`.
 3. Set `GROQ_API_KEY`.
-4. Adjust `STATE_FILE`, `SEEN_FILE`, and `AUTH_DIR` if you want them outside the workspace.
-5. Run `npm start`.
+4. Set `MUSICBRAINZ_USER_AGENT` to identify the bot with a real contact email or URL; MusicBrainz requires it and does not require an API key.
+5. Adjust `STATE_FILE`, `SEEN_FILE`, and `AUTH_DIR` if you want them outside the workspace.
+6. Run `npm start`.
 
 On first login, the process prints a QR code in the terminal.
 

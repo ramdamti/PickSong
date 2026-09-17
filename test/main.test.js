@@ -33,7 +33,7 @@ test('executeAgentAction retries once to fill missing external recommendations a
     record: { chatId: 'chat-1' },
     messageText: 'תביא 3 שירים מחוץ למאגר',
     replyContext: null,
-    config: { llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model' },
+    config: { llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model', musicBrainzEnabled: false },
     stateStore: {
       getResultMessage() { return null; },
       getLastResults() { return null; },
@@ -81,7 +81,7 @@ test('executeAgentAction rejects foreign identities for Hebrew external recommen
     action: { action: 'recommend_external_song', query: { limit: 1, requirements: { language: 'he' } } },
     chat: { sendMessage: async (message) => sentMessages.push(message) },
     record: { chatId: 'chat-1' }, messageText: 'תביא שיר ישראלי', replyContext: null,
-    config: { llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model' },
+    config: { llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model', musicBrainzEnabled: false },
     stateStore: {
       getResultMessage() { return null; }, getLastResults() { return null; }, getSongs() { return []; },
       findSongsByNormalizedName() { return []; }, async queueSave() {}

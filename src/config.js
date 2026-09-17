@@ -139,6 +139,8 @@ function loadConfig(env = process.env, options = {}) {
     openAiCompatibleApiKey,
     openAiCompatibleModel,
     openAiCompatibleBaseUrl,
+    musicBrainzEnabled: readBool(mergedEnv.MUSICBRAINZ_ENABLED, true),
+    musicBrainzUserAgent: (mergedEnv.MUSICBRAINZ_USER_AGENT || 'PickSong/1.0').trim(),
     executablePath: resolveExecutablePath(mergedEnv.PUPPETEER_EXECUTABLE_PATH || mergedEnv.CHROME_PATH || ''),
     headless: readBool(mergedEnv.HEADLESS, true)
   };

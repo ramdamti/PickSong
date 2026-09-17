@@ -10,6 +10,7 @@ const {
 const { searchSongs, countHardFilterMatches } = require('./song-search');
 const { formatSongsReply, prepareSongsForReply } = require('./chords');
 const { ALLOWED_UPDATE_FIELDS } = require('./schemas');
+const { verifyMusicBrainzSong } = require('./musicbrainz');
 
 const CURRENT_DATE = '2026-08-08';
 const MUTABLE_SONG_FIELDS = new Set(ALLOWED_UPDATE_FIELDS);
@@ -1461,7 +1462,7 @@ async function sendSongsReply({ chat, stateStore, chatId, songs, query = null, i
   await stateStore.queueSave();
 }
 
-async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn, polishBanterReplyFn, recommendExternalSongsFn, composeUnsupportedReplyFn }) {
+async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn, polishBanterReplyFn, recommendExternalSongsFn, verifyExternalSongFn = verifyMusicBrainzSong, composeUnsupportedReplyFn }) {
   const activeContext = resolveActiveResultContext(stateStore, record);
   const songs = stateStore.getSongs();
   const chatId = String(record?.chatId || '').trim();
@@ -1542,7 +1543,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
     const requestedLimit = Math.min(Math.max(Number.parseInt(action.query?.limit, 10) || 1, 1), 10);
     const accepted = [];
     const consideredCandidates = new Set(excludedCandidates);
-    const collectRecommendations = (recommendations) => {
+    const collectRecommendations = async (recommendations) => {
       for (const recommendation of Array.isArray(recommendations) ? recommendations : []) {
       if (!recommendation?.song_title || !recommendation?.artist) continue;
       const candidate = `${recommendation.song_title} - ${recommendation.artist}`;
@@ -1561,12 +1562,23 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
         console.warn(`[external_recommendation] rejected_high_difficulty title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
         continue;
       }
+      const verified = config.musicBrainzEnabled === false
+        ? { song_title: recommendation.song_title, artist: recommendation.artist }
+        : await verifyExternalSongFn({
+          songTitle: recommendation.song_title,
+          artist: recommendation.artist,
+          userAgent: config.musicBrainzUserAgent
+        });
+      if (!verified?.song_title || !verified?.artist) {
+        console.warn(`[external_recommendation] rejected_unverified title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
+        continue;
+      }
       const existing = typeof stateStore.findSongsByNormalizedName === 'function'
-        ? stateStore.findSongsByNormalizedName(recommendation.song_title, recommendation.artist)
-        : songs.filter((song) => normalizeText(song.song_title) === normalizeText(recommendation.song_title) && normalizeText(song.artist) === normalizeText(recommendation.artist));
+        ? stateStore.findSongsByNormalizedName(verified.song_title, verified.artist)
+        : songs.filter((song) => normalizeText(song.song_title) === normalizeText(verified.song_title) && normalizeText(song.artist) === normalizeText(verified.artist));
       if (!existing.length) {
-        console.log(`[external_recommendation] title=${JSON.stringify(recommendation.song_title)} artist=${JSON.stringify(recommendation.artist)}`);
-        accepted.push(recommendation);
+        console.log(`[external_recommendation] title=${JSON.stringify(verified.song_title)} artist=${JSON.stringify(verified.artist)}`);
+        accepted.push({ ...recommendation, song_title: verified.song_title, artist: verified.artist });
         if (accepted.length >= requestedLimit) return;
       }
     }
@@ -1580,10 +1592,10 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       excludedCandidates: Array.from(consideredCandidates),
       limit
     });
-    collectRecommendations(await requestRecommendations(requestedLimit));
+    await collectRecommendations(await requestRecommendations(requestedLimit));
     if (accepted.length < requestedLimit) {
       console.warn(`[external_recommendation] retrying_for_missing=${requestedLimit - accepted.length}`);
-      collectRecommendations(await requestRecommendations(requestedLimit - accepted.length));
+      await collectRecommendations(await requestRecommendations(requestedLimit - accepted.length));
     }
     if (accepted.length) {
       const reply = accepted.length === 1
