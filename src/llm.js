@@ -1531,10 +1531,10 @@ function normalizeAgentAction(action, { messageText, replyContext, quotedText })
     const preferences = query.preferences && typeof query.preferences === 'object' && !Array.isArray(query.preferences)
       ? { ...query.preferences }
       : {};
-    if (!requirements.language) {
-      const inferredLanguage = inferRequestedLanguage(messageText);
-      if (inferredLanguage) requirements.language = inferredLanguage;
-    }
+    // Explicit wording in the user's message is authoritative. In particular,
+    // do not let a model's mistaken "en" override "Israeli"/"Hebrew".
+    const inferredLanguage = inferRequestedLanguage(messageText);
+    if (inferredLanguage) requirements.language = inferredLanguage;
     if (!Array.isArray(requirements.genres) || requirements.genres.length === 0) {
       const inferredGenres = inferRequestedGenres(messageText);
       // The band's default lane is rock/blues/ballads. Use rock as the
