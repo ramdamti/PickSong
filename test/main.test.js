@@ -62,6 +62,7 @@ test('executeAgentAction retries once to fill missing external recommendations a
   assert.ok(receivedCalls[1].excludedCandidates.includes('Hard Song - Artist'));
   assert.ok(receivedCalls[1].excludedCandidates.includes('Easy Song - Artist'));
   assert.equal(sentMessages.length, 1);
+  assert.ok(sentMessages[0].split('\n').every((line) => !line || line.startsWith('\u200F')));
   assert.match(sentMessages[0], /Easy Song - Artist/);
   assert.match(sentMessages[0], /Medium Song - Artist/);
   assert.match(sentMessages[0], /Third Song - Artist/);
@@ -78,7 +79,7 @@ test('executeAgentAction rejects foreign identities for Hebrew external recommen
   const sentMessages = [];
   let calls = 0;
   await executeAgentAction({
-    action: { action: 'recommend_external_song', query: { limit: 1, requirements: { language: 'he' } } },
+    action: { action: 'recommend_external_song', query: { limit: 1, requirements: { language: 'he', release_year_from: 1980, release_year_to: 1989 } } },
     chat: { sendMessage: async (message) => sentMessages.push(message) },
     record: { chatId: 'chat-1' }, messageText: 'תביא שיר ישראלי', replyContext: null,
     config: { llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model', catalogSearchEnabled: false },
@@ -98,6 +99,27 @@ test('executeAgentAction rejects foreign identities for Hebrew external recommen
   assert.equal(sentMessages.length, 1);
   assert.match(sentMessages[0], /שיר ישראלי - אמן ישראלי/);
   assert.doesNotMatch(sentMessages[0], /Dream On/);
+});
+
+test('handleAgentMessage routes external recommendations without an action-classification model call', async () => {
+  const sentMessages = [];
+  await handleAgentMessage({
+    chat: { sendMessage: async (message) => sentMessages.push(message) },
+    stateStore: {
+      getResultMessage() { return null; }, getLastResults() { return null; }, getSongs() { return []; },
+      findSongsByNormalizedName() { return []; }, async queueSave() {}
+    },
+    config: { triggerText: '\u05d1\u05d5\u05d8', catalogSearchEnabled: false },
+    record: { text: '\u05d1\u05d5\u05d8 \u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8 \u05d9\u05e9\u05e8\u05d0\u05dc\u05d9 \u05de\u05d7\u05d5\u05e5 \u05dc\u05de\u05d0\u05d2\u05e8', quoted: { fromMe: false }, chatId: 'chat-direct-external' },
+    interpretMessageFn: async () => { throw new Error('the action model should not run'); },
+    recommendExternalSongsFn: async ({ query }) => {
+      assert.equal(query.requirements.language, 'he');
+      return [{ song_title: '\u05e9\u05d9\u05e8 \u05d1\u05d3\u05d9\u05e7\u05d4', artist: '\u05d0\u05de\u05df \u05d1\u05d3\u05d9\u05e7\u05d4', difficulty: 'low', reason: '\u05de\u05ea\u05d0\u05d9\u05dd.' }];
+    }
+  });
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /\u05e9\u05d9\u05e8 \u05d1\u05d3\u05d9\u05e7\u05d4/);
 });
 
 test('executeAgentAction excludes Latin-only iTunes results for an Israeli request', async () => {

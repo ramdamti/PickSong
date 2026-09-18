@@ -754,7 +754,9 @@ function parseExternalSongRecommendations(text) {
 
 async function recommendExternalSongs({ baseUrl, apiKey, model, messageText, query, excludedCandidates = [], catalogCandidates = [], limit = 1, requestFn }) {
   const requestedCount = Math.min(Math.max(Number.parseInt(limit, 10) || 1, 1), 10);
-  const candidateCount = Math.min(requestedCount + 3, 10);
+  // One spare choice absorbs a local rejection without paying to generate a
+  // large backup list. A retry remains available when it is actually needed.
+  const candidateCount = Math.min(requestedCount + 1, 10);
   const prompt = JSON.stringify({
     user_request: String(messageText || '').trim(),
     search_constraints: query || {},
@@ -767,7 +769,7 @@ async function recommendExternalSongs({ baseUrl, apiKey, model, messageText, que
   });
   const { parsed } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
     baseUrl, apiKey, model, prompt, systemPrompt: EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT,
-    requestFn, maxCompletionTokens: Math.max(512, candidateCount * 80), reasoningEffort: 'low', temperature: 0.7, responseFormat: 'text'
+    requestFn, maxCompletionTokens: Math.max(384, candidateCount * 64), reasoningEffort: 'low', temperature: 0.7, responseFormat: 'text'
   }));
   const recommendations = parseExternalSongRecommendations(parsed?.text)
     .filter((recommendation) => recommendation.song_title && recommendation.artist && recommendation.reason)
@@ -1744,6 +1746,13 @@ function normalizeAgentAction(action, { messageText, replyContext, quotedText })
   return normalizedAction;
 }
 
+function buildExternalRecommendationAction(messageText) {
+  return normalizeAgentAction(
+    { action: 'recommend_external_song', query: {} },
+    { messageText, replyContext: null, quotedText: '' }
+  );
+}
+
 // Final override with Unicode escapes so Hebrew instrument parsing stays stable for drums/guitar/bass only.
 function inferInstrumentDifficultyPreferences(messageText) {
   const source = String(messageText || '').trim().toLowerCase();
@@ -2015,6 +2024,8 @@ module.exports = {
   polishBanterReply,
   parseExternalSongRecommendation,
   parseExternalSongRecommendations,
+  isExternalCatalogRecommendationRequest,
+  buildExternalRecommendationAction,
   inferRequestedReleaseYearRange,
   recommendExternalSong,
   recommendExternalSongs,

@@ -110,9 +110,9 @@ test('recommendExternalSongs requests backup candidates for local filtering', as
 
   const prompt = JSON.parse(requestBody.messages[1].content);
   assert.equal(prompt.requested_result_count, 4);
-  assert.equal(prompt.candidate_count, 7);
-  assert.equal(requestBody.max_completion_tokens, 560);
-  assert.equal(recommendations.length, 7);
+  assert.equal(prompt.candidate_count, 5);
+  assert.equal(requestBody.max_completion_tokens, 384);
+  assert.equal(recommendations.length, 5);
 });
 
 test('callOpenAiCompatibleChat accepts standard tool calls without JSON mode', async () => {

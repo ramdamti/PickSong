@@ -1,6 +1,6 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
-const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, polishBanterReply, recommendExternalSongs, composeUnsupportedReply, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat } = require('./llm');
+const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, recommendExternalSongs, composeUnsupportedReply, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat, isExternalCatalogRecommendationRequest, buildExternalRecommendationAction } = require('./llm');
 const { READ_ONLY_SONG_TOOLS, executeReadOnlySongTool } = require('./agent-tools');
 const {
   persistResultContext,
@@ -146,9 +146,9 @@ function prefixBotReply(text) {
   const body = String(text || '').trim();
   if (!body) return BOT_PREFIX.trim();
   if (/^\u200f?🤖(?:\s|$)/u.test(body)) {
-    return body;
+    return forceRtlLines(body);
   }
-  return `${BOT_PREFIX}${body}`;
+  return forceRtlLines(`${BOT_PREFIX}${body}`);
 }
 
 async function sendBotMessage(chat, text) {
@@ -925,7 +925,7 @@ function formatSongDuration(seconds) {
 function forceRtlLines(text) {
   return String(text || '')
     .split('\n')
-    .map((line) => (line ? `\u200F${line}` : line))
+    .map((line) => (line && !line.startsWith('\u200F') ? `\u200F${line}` : line))
     .join('\n');
 }
 
@@ -1627,6 +1627,11 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       }
       const releaseYear = Number.parseInt(String(verified.release_date || '').slice(0, 4), 10);
       if (
+        // With catalog discovery disabled, the model has no authoritative
+        // release-date field to attach to its recommendation. The requested
+        // era is still in its prompt, but rejecting an absent date here would
+        // make every era request fail closed.
+        sourceCandidates &&
         verified.catalog_source !== 'itunes' &&
         (Number.isInteger(releaseYearFrom) || Number.isInteger(releaseYearTo)) &&
         (!Number.isInteger(releaseYear) ||
@@ -2058,7 +2063,7 @@ async function handleAgentMessage({
   unknownSongInfoFn = interpretUnknownSongInfo,
   resolveSongReferenceFn,
   plainFallbackReplyFn = interpretPlainFallbackReply,
-  polishBanterReplyFn = polishBanterReply,
+  polishBanterReplyFn,
   recommendExternalSongsFn = recommendExternalSongs,
   composeUnsupportedReplyFn = composeUnsupportedReply,
   prepareSongsForReplyFn = prepareSongsForReply,
@@ -2168,6 +2173,32 @@ async function handleAgentMessage({
     return true;
   }
 
+  // External recommendations have a fully deterministic local parser for
+  // language, era, genre, and result count. Route them straight to the
+  // specialist recommendation call instead of spending a separate model turn
+  // merely to classify the request.
+  if (isExternalCatalogRecommendationRequest(messageText)) {
+    const action = buildExternalRecommendationAction(messageText);
+    console.log(`[agent] action=${action.action} local_route=true`);
+    await executeAgentAction({
+      action,
+      stateStore,
+      chat,
+      config,
+      record,
+      messageText,
+      replyContext,
+      estimateSongDurationsFn,
+      pendingAdditions,
+      pendingClarifications,
+      reviewSongDifficultyFn,
+      unknownSongInfoFn,
+      recommendExternalSongsFn,
+      composeUnsupportedReplyFn
+    });
+    return true;
+  }
+
   // When local parsing cannot confidently split a song reference, use the
   // agent only as an identity resolver. The result still goes through the
   // local catalog resolver and cannot mutate state.
@@ -2214,12 +2245,10 @@ async function handleAgentMessage({
       recentMessages,
       pendingClarification,
       currentDate: CURRENT_DATE,
-      tools: READ_ONLY_SONG_TOOLS,
-      executeToolCall: ({ name, arguments: rawArguments }) => executeReadOnlySongTool({
-        stateStore,
-        name,
-        arguments: rawArguments
-      })
+      tools: isSongInfoRequest(messageText) ? READ_ONLY_SONG_TOOLS : undefined,
+      executeToolCall: isSongInfoRequest(messageText)
+        ? ({ name, arguments: rawArguments }) => executeReadOnlySongTool({ stateStore, name, arguments: rawArguments })
+        : undefined
     });
 
     // Adding a song is a durable mutation. Do not let an LLM turn a metadata
