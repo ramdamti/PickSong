@@ -80,6 +80,8 @@ test('SYSTEM_PROMPT stays compact and preserves global action-planning rules', (
 test('isExternalCatalogRecommendationRequest requires an explicit external-catalog cue', () => {
   assert.equal(isExternalCatalogRecommendationRequest('\u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8\u05d9\u05dd \u05e9\u05dc Pink Floyd'), false);
   assert.equal(isExternalCatalogRecommendationRequest('\u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8\u05d9\u05dd \u05e9\u05dc Pink Floyd \u05e9\u05dc\u05d0 \u05e0\u05de\u05e6\u05d0\u05d9\u05dd \u05d1\u05de\u05d0\u05d2\u05e8'), true);
+  assert.equal(isExternalCatalogRecommendationRequest('\u05ea\u05de\u05dc\u05d9\u05e5 \u05e2\u05dc \u05e9\u05d9\u05e8 \u05d9\u05e9\u05e8\u05d0\u05dc\u05d9 \u05e9\u05dc\u05d0 \u05d1\u05de\u05d0\u05d2\u05e8'), true);
+  assert.equal(isExternalCatalogRecommendationRequest('\u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8 \u05e9\u05dc\u05d0 \u05d1\u05de\u05d0\u05d2\u05e8 \u05e8\u05d5\u05e7 \u05d9\u05e9\u05e8\u05d0\u05dc\u05d9'), true);
   assert.equal(isExternalCatalogRecommendationRequest('\u05ea\u05d1\u05d9\u05d0 \u05dc\u05e0\u05d5 \u05d3\u05d1\u05e8\u05d9\u05dd \u05d7\u05d3\u05e9\u05d9\u05dd'), false);
 });
 

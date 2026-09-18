@@ -145,14 +145,10 @@ function extractBotMessageId(sentMessage) {
 function prefixBotReply(text) {
   const body = String(text || '').trim();
   if (!body) return BOT_PREFIX.trim();
-  // WhatsApp can place the timestamp too close to the last line of a list.
-  // Reserve one RTL-only line for multi-line replies, without adding visual
-  // padding to normal one-line messages.
-  const suffix = body.includes('\n') ? '\n\u200F' : '';
   if (/^\u200f?🤖(?:\s|$)/u.test(body)) {
-    return forceRtlLines(`${body}${suffix}`);
+    return forceRtlLines(body);
   }
-  return forceRtlLines(`${BOT_PREFIX}${body}${suffix}`);
+  return forceRtlLines(`${BOT_PREFIX}${body}`);
 }
 
 function formatSongIdentity(song) {
@@ -273,10 +269,6 @@ function rememberVoiceReply(chatId, reply) {
 function isRecommendationReasonRequest(messageText) {
   const text = String(messageText || '').trim();
   return /(?:למה\s+(?:בחרת|דווקא)|למה\s+זה|תגיד\s+למה|why\s+(?:did\s+you\s+choose|this|that)|why\s+choose)/iu.test(text);
-}
-
-function isSongRecommendationRequest(messageText) {
-  return /(?:תמליץ|המלץ|recommend)/iu.test(String(messageText || ''));
 }
 
 function requiresBotFirstPerson(messageText) {
@@ -1493,15 +1485,15 @@ function rebuildResultListWithReplacements({ context, stateStore, replacementInd
     .filter(Boolean);
 }
 
-async function sendSongsReply({ chat, stateStore, chatId, songs, query = null, includeRecommendationReason = false, isRecommendation = false }) {
+async function sendSongsReply({ chat, stateStore, chatId, songs, query = null, includeRecommendationReason = false }) {
   if (!songs.length) {
     await sendBotMessage(chat, '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd.');
     return;
   }
 
   const reply = includeRecommendationReason
-    ? `${formatSongsReply(songs, { boldIdentities: isRecommendation })}\nלמה: ${buildRecommendationReason(songs[0], query)}`
-    : formatSongsReply(songs, { boldIdentities: isRecommendation });
+    ? `${formatSongsReply(songs)}\nלמה: ${buildRecommendationReason(songs[0], query)}`
+    : formatSongsReply(songs);
   const sentMessage = await sendBotMessage(chat, reply);
   const botMessageId = extractBotMessageId(sentMessage);
   persistResultContext(stateStore, {
@@ -1847,8 +1839,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       chatId: record.chatId,
       songs: matches,
       query: sanitizeQueryForResultContext(action.query || {}, matches.length),
-      includeRecommendationReason: isRecommendationReasonRequest(messageText),
-      isRecommendation: isSongRecommendationRequest(messageText)
+      includeRecommendationReason: isRecommendationReasonRequest(messageText)
     });
     return;
   }

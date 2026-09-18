@@ -330,13 +330,11 @@ function formatSongsReply(songs, options = {}) {
 
   const single = items.length === 1;
   const includeChords = options.includeChords === true;
-  const boldIdentities = options.boldIdentities === true;
 
   const lines = ['\u200F🤖 הבאתי:'];
   items.forEach((song, index) => {
     const identity = normalizeSongLine(song);
-    const formattedIdentity = boldIdentities && identity ? `*${identity}*` : identity;
-    const base = single ? formattedIdentity : `${index + 1}. ${formattedIdentity}`;
+    const base = single ? identity : `${index + 1}. ${identity}`;
     lines.push(`\u200F${base}`);
     const chordsUrl = includeChords ? String(song?.chords_url || '').trim() : '';
     if (chordsUrl) {

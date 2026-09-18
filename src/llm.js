@@ -866,7 +866,7 @@ function isRehearsalPlanRequest(messageText) {
 function isExternalCatalogRecommendationRequest(messageText) {
   const source = String(messageText || '').trim().toLowerCase();
   if (!source) return false;
-  const explicitExternal = /(?:\u05dc\u05d0\s*(?:\u05e7\u05d9\u05d9\u05dd|\u05e7\u05d9\u05d9\u05de\u05d9\u05dd|\u05e7\u05d9\u05d9\u05de\u05d5\u05ea|\u05e0\u05de\u05e6\u05d0|\u05e0\u05de\u05e6\u05d0\u05d9\u05dd|\u05e0\u05de\u05e6\u05d0\u05d5\u05ea)\s*(?:\u05d1\u05de\u05d0\u05d2\u05e8|\u05d0\u05e6\u05dc\u05e0\u05d5)|\u05de\u05d7\u05d5\u05e5\s*\u05dc\u05de\u05d0\u05d2\u05e8|outside\s+(?:the\s+)?catalog|not\s+in\s+(?:the\s+)?catalog)/iu;
+  const explicitExternal = /(?:\u05dc\u05d0\s*(?:\u05e7\u05d9\u05d9\u05dd|\u05e7\u05d9\u05d9\u05de\u05d9\u05dd|\u05e7\u05d9\u05d9\u05de\u05d5\u05ea|\u05e0\u05de\u05e6\u05d0|\u05e0\u05de\u05e6\u05d0\u05d9\u05dd|\u05e0\u05de\u05e6\u05d0\u05d5\u05ea)\s*(?:\u05d1\u05de\u05d0\u05d2\u05e8|\u05d0\u05e6\u05dc\u05e0\u05d5)|\u05e9\u05dc\u05d0\s*(?:\u05d1\u05de\u05d0\u05d2\u05e8|\u05d0\u05e6\u05dc\u05e0\u05d5)|\u05de\u05d7\u05d5\u05e5\s*\u05dc\u05de\u05d0\u05d2\u05e8|outside\s+(?:the\s+)?catalog|not\s+in\s+(?:the\s+)?catalog)/iu;
   const externalRecommendation = /(?:\u05ea\u05de\u05dc\u05d9\u05e5|\u05d4\u05de\u05dc\u05e5|\u05ea\u05d1\u05d9\u05d0|\u05ea\u05df|recommend|give|find)/iu;
   return explicitExternal.test(source) && externalRecommendation.test(source);
 }

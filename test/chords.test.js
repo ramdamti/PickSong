@@ -33,9 +33,8 @@ test('formatting keeps the header and shows a plain chords URL line', () => {
   );
 });
 
-test('formatting bolds song identities only for recommendations', () => {
+test('formatting keeps local song identities unbolded', () => {
   const song = { song_title: 'Sultans of Swing', artist: 'Dire Straits' };
-  assert.match(formatSongsReply([song], { boldIdentities: true }), /\*Sultans of Swing - Dire Straits\*/);
   assert.doesNotMatch(formatSongsReply([song]), /\*Sultans of Swing - Dire Straits\*/);
 });
 
