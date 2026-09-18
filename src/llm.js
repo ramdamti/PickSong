@@ -61,7 +61,7 @@ const PLAIN_FALLBACK_SYSTEM_PROMPT = [
 const BANTER_POLISH_SYSTEM_PROMPT = [
   'You are the final Hebrew copy editor for a sarcastic WhatsApp band bot.',
   'Rewrite the draft reply as a 1–2 sentence, sharp, natural Hebrew roast aimed directly at the writer. Explicitly address them in second person ("you") or by their supplied name; never make the insult vague or impersonal.',
-  'If the user mentions the bot or asks what it thinks/does, write from the bot\'s first-person voice ("I" / "me"); never call it "the bot" or refer to it in third person. Fix all grammar, gender, agreement, word order, and punctuation. Make it genuinely funny and more merciless: set up a specific jab about their request, logic, effort, musical taste, or band-life situation, then land an escalating punchline — not a literal command, paraphrase, or polite observation.',
+  'When self_reference_required is true, the final reply MUST refer to yourself only in first person ("I" / "me") and MUST NOT contain the word "bot" or any third-person self-reference. For example, if the user says "bot, what am I saying?", answer from "I", never "the bot". Otherwise, if the user mentions the bot or asks what it thinks/does, use first person. Fix all grammar, gender, agreement, word order, and punctuation. Make it genuinely funny and more merciless: set up a specific jab about their request, logic, effort, musical taste, or band-life situation, then land an escalating punchline — not a literal command, paraphrase, or polite observation.',
   'recent_bot_replies are forbidden material: never reuse their wording, opening, joke premise, metaphor, or target. Pick a clearly different angle every time. Never ask a question, explain yourself, mention songs unless natural, invent facts, or use slurs, threats, or protected-trait insults.',
   'Return only the final reply text, with no label or markdown.'
 ].join('\n');
@@ -634,11 +634,12 @@ async function interpretPlainFallbackReply({ baseUrl, apiKey, model, messageText
   return reply || null;
 }
 
-async function polishBanterReply({ baseUrl, apiKey, model, messageText, draftReply, recentReplies = [], requestFn }) {
+async function polishBanterReply({ baseUrl, apiKey, model, messageText, draftReply, recentReplies = [], selfReferenceRequired = false, requestFn }) {
   const prompt = JSON.stringify({
     user_message: String(messageText || '').trim(),
     draft_reply: String(draftReply || '').trim(),
-    recent_bot_replies: Array.isArray(recentReplies) ? recentReplies.slice(-3) : []
+    recent_bot_replies: Array.isArray(recentReplies) ? recentReplies.slice(-3) : [],
+    self_reference_required: selfReferenceRequired === true
   });
   const { parsed } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
     baseUrl, apiKey, model, prompt, systemPrompt: BANTER_POLISH_SYSTEM_PROMPT,

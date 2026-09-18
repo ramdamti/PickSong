@@ -1162,6 +1162,8 @@ test('formatGroqStatusReply shows the most recent provider limits and local usag
   assert.match(reply, /TPM: 54%/);
   assert.match(reply, /4,321 \/ 8,000/);
   assert.match(reply, /1,300/);
+  assert.match(reply, /כ-13 הודעות ממוצעות/);
+  assert.match(reply, /325 טוקנים לקריאה/);
   assert.match(reply, /4 קריאות/);
 });
 

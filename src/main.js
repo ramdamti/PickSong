@@ -244,6 +244,15 @@ function formatGroqStatusReply(stats) {
   }
   const localDayTokens = Math.max(0, (Number(stats.dayInputTokens) || 0) + (Number(stats.dayOutputTokens) || 0) - (Number(stats.dayCachedTokens) || 0));
   lines.push(`התהליך היום: ${formatNumber(localDayTokens)} טוקנים, ${formatNumber(stats.dayCalls)} קריאות${stats.rateLimitResponses ? `, ${formatNumber(stats.rateLimitResponses)} חסימות` : ''}.`);
+  const averageTokensPerCall = stats.dayCalls > 0 ? localDayTokens / stats.dayCalls : null;
+  if (Number.isFinite(averageTokensPerCall) && averageTokensPerCall > 0 && Number.isFinite(snapshot.tokenRemaining)) {
+    const byTokens = Math.floor(Math.max(0, snapshot.tokenRemaining) / averageTokensPerCall);
+    const byRequests = Number.isFinite(snapshot.requestRemaining) ? Math.max(0, Math.floor(snapshot.requestRemaining)) : Infinity;
+    const estimatedMessages = Math.min(byTokens, byRequests);
+    lines.push(`הערכה עד לאיפוס ה־TPM: כ-${formatNumber(estimatedMessages)} הודעות ממוצעות (${formatNumber(Math.round(averageTokensPerCall))} טוקנים לקריאה).`);
+  } else {
+    lines.push('הערכת הודעות תופיע אחרי שתהיה לי לפחות קריאה אחת למדוד.');
+  }
   return lines.join('\n');
 }
 
@@ -268,6 +277,10 @@ function isRecommendationReasonRequest(messageText) {
 
 function isSongRecommendationRequest(messageText) {
   return /(?:תמליץ|המלץ|recommend)/iu.test(String(messageText || ''));
+}
+
+function requiresBotFirstPerson(messageText) {
+  return /(?:\b(?:bot|the\s+bot)\b|בוט)/iu.test(String(messageText || ''));
 }
 
 function hasMeaningfulSongQuery(query) {
@@ -1522,7 +1535,8 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
           model: config.llmModel,
           messageText,
           draftReply: reply,
-          recentReplies: getRecentVoiceReplies(chatId)
+          recentReplies: getRecentVoiceReplies(chatId),
+          selfReferenceRequired: requiresBotFirstPerson(messageText)
         }) || reply;
       } catch (error) {
         console.warn(`[agent] respond_polish_failed: ${error.message}`);
