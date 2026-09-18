@@ -147,7 +147,7 @@ test('recommendExternalSongs never treats UNKNOWN as a song identity', async () 
 });
 
 test('callOpenAiCompatibleChat accepts standard tool calls without JSON mode', async () => {
-  const { callOpenAiCompatibleChat } = require('../src/llm');
+  const { callOpenAiCompatibleChat, getAgentUsageStats } = require('../src/llm');
   let requestBody;
   const result = await callOpenAiCompatibleChat({
     baseUrl: 'https://example.com', apiKey: 'test', model: 'test-model', prompt: 'find this song',
@@ -156,6 +156,18 @@ test('callOpenAiCompatibleChat accepts standard tool calls without JSON mode', a
       requestBody = JSON.parse(options.body);
       return {
         ok: true,
+        headers: {
+          get(name) {
+            return {
+              'x-ratelimit-limit-tokens': '8000',
+              'x-ratelimit-remaining-tokens': '4321',
+              'x-ratelimit-reset-tokens': '5s',
+              'x-ratelimit-limit-requests': '1000',
+              'x-ratelimit-remaining-requests': '999',
+              'x-ratelimit-reset-requests': '2h'
+            }[name] || null;
+          }
+        },
         async json() {
           return { choices: [{ message: { tool_calls: [{ id: 'call-1', function: { name: 'lookup_song', arguments: '{"song_title":"Naga"}' } }] } }] };
         }
@@ -165,6 +177,15 @@ test('callOpenAiCompatibleChat accepts standard tool calls without JSON mode', a
   assert.equal(requestBody.response_format, undefined);
   assert.equal(requestBody.tools[0].function.name, 'lookup_song');
   assert.deepEqual(result.parsed.tool_calls, [{ id: 'call-1', name: 'lookup_song', arguments: '{"song_title":"Naga"}' }]);
+  assert.deepEqual(getAgentUsageStats().lastRateLimit, {
+    capturedAt: getAgentUsageStats().lastRateLimit.capturedAt,
+    tokenLimit: 8000,
+    tokenRemaining: 4321,
+    tokenReset: '5s',
+    requestLimit: 1000,
+    requestRemaining: 999,
+    requestReset: '2h'
+  });
 });
 
 test('interpretMessageWithTools executes a local lookup before choosing the final action', async () => {

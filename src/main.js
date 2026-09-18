@@ -1,6 +1,6 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
-const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, recommendExternalSongs, composeUnsupportedReply, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat, isExternalCatalogRecommendationRequest, buildExternalRecommendationAction } = require('./llm');
+const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, recommendExternalSongs, composeUnsupportedReply, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat, isExternalCatalogRecommendationRequest, buildExternalRecommendationAction, getAgentUsageStats } = require('./llm');
 const { READ_ONLY_SONG_TOOLS, executeReadOnlySongTool } = require('./agent-tools');
 const {
   persistResultContext,
@@ -219,6 +219,28 @@ function buildAgentFailureReply(error) {
     return 'לא הבנתי עד הסוף את הבקשה. נסו לנסח שוב במשפט קצר.';
   }
   return 'נתקע לי משהו במנוע — נסו שוב עוד רגע.';
+}
+
+function formatGroqStatusReply(stats) {
+  const snapshot = stats?.lastRateLimit;
+  if (!snapshot) {
+    return 'עוד אין לי מדידת Groq מהתהליך הזה. אחרי הקריאה הבאה אוכל להראות את המכסות.';
+  }
+  const formatNumber = (value) => Number.isFinite(value) ? value.toLocaleString('en-US') : '?';
+  const formatRemaining = (remaining, limit) => {
+    if (!Number.isFinite(remaining) || !Number.isFinite(limit) || limit <= 0) return '?';
+    return `${Math.max(0, Math.min(100, Math.round((remaining / limit) * 100)))}% נשאר`;
+  };
+  const lines = ['מצב Groq (מהתגובה האחרונה):'];
+  if (Number.isFinite(snapshot.tokenLimit) || Number.isFinite(snapshot.tokenRemaining)) {
+    lines.push(`TPM: ${formatRemaining(snapshot.tokenRemaining, snapshot.tokenLimit)} (${formatNumber(snapshot.tokenRemaining)} / ${formatNumber(snapshot.tokenLimit)})${snapshot.tokenReset ? ` · איפוס ${snapshot.tokenReset}` : ''}`);
+  }
+  if (Number.isFinite(snapshot.requestLimit) || Number.isFinite(snapshot.requestRemaining)) {
+    lines.push(`בקשות: ${formatRemaining(snapshot.requestRemaining, snapshot.requestLimit)} (${formatNumber(snapshot.requestRemaining)} / ${formatNumber(snapshot.requestLimit)})${snapshot.requestReset ? ` · איפוס ${snapshot.requestReset}` : ''}`);
+  }
+  const localDayTokens = Math.max(0, (Number(stats.dayInputTokens) || 0) + (Number(stats.dayOutputTokens) || 0) - (Number(stats.dayCachedTokens) || 0));
+  lines.push(`התהליך היום: ${formatNumber(localDayTokens)} טוקנים, ${formatNumber(stats.dayCalls)} קריאות${stats.rateLimitResponses ? `, ${formatNumber(stats.rateLimitResponses)} חסימות` : ''}.`);
+  return lines.join('\n');
 }
 
 function buildClarifyReply(action) {
@@ -2497,6 +2519,11 @@ async function bootstrap() {
       return;
     }
 
+    if (/^\/status\b/i.test(String(record?.text || '').trim())) {
+      await sendBotMessage(chat, formatGroqStatusReply(getAgentUsageStats()));
+      return;
+    }
+
     const recentMessages = buildRecentMessageContext(getRecentMessagesForChat(record.chatId));
     await handleAgentMessage({
       chat,
@@ -2653,6 +2680,7 @@ module.exports = {
   isMessageInTargetGroup,
   buildAgentReplyContext,
   buildAgentFailureReply,
+  formatGroqStatusReply,
   buildClarifyReply,
   isRecommendationReasonRequest,
   buildRecommendationReason,

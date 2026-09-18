@@ -137,7 +137,8 @@ const usageMetrics = {
   dayInputTokens: 0,
   dayOutputTokens: 0,
   dayCachedTokens: 0,
-  rateLimitResponses: 0
+  rateLimitResponses: 0,
+  lastRateLimit: null
 };
 
 function resetUsageWindows(now = new Date()) {
@@ -164,6 +165,31 @@ function resetUsageWindows(now = new Date()) {
 function getAgentUsageStats() {
   resetUsageWindows(new Date());
   return { ...usageMetrics, queueDepth: pendingAgentCalls.length, activeCalls: activeAgentCalls };
+}
+
+function readRateLimitHeader(response, name) {
+  const value = response?.headers?.get?.(name);
+  return value === null || value === undefined || value === '' ? null : String(value);
+}
+
+function recordRateLimitHeaders(response) {
+  const tokenLimit = Number.parseInt(readRateLimitHeader(response, 'x-ratelimit-limit-tokens'), 10);
+  const tokenRemaining = Number.parseInt(readRateLimitHeader(response, 'x-ratelimit-remaining-tokens'), 10);
+  const requestLimit = Number.parseInt(readRateLimitHeader(response, 'x-ratelimit-limit-requests'), 10);
+  const requestRemaining = Number.parseInt(readRateLimitHeader(response, 'x-ratelimit-remaining-requests'), 10);
+  const tokenReset = readRateLimitHeader(response, 'x-ratelimit-reset-tokens');
+  const requestReset = readRateLimitHeader(response, 'x-ratelimit-reset-requests');
+  if (![tokenLimit, tokenRemaining, requestLimit, requestRemaining].some(Number.isFinite)) return;
+
+  usageMetrics.lastRateLimit = {
+    capturedAt: new Date().toISOString(),
+    tokenLimit: Number.isFinite(tokenLimit) ? tokenLimit : null,
+    tokenRemaining: Number.isFinite(tokenRemaining) ? tokenRemaining : null,
+    tokenReset,
+    requestLimit: Number.isFinite(requestLimit) ? requestLimit : null,
+    requestRemaining: Number.isFinite(requestRemaining) ? requestRemaining : null,
+    requestReset
+  };
 }
 
 function recordUsage({ promptTokens = 0, completionTokens = 0, cachedTokens = 0, rateLimited = false } = {}) {
@@ -367,6 +393,7 @@ async function callOpenAiCompatibleChat({
           ]
     })
   });
+  recordRateLimitHeaders(response);
 
   if (!response.ok) {
     const body = await response.text();

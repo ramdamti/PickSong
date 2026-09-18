@@ -7,6 +7,7 @@ const {
   isMessageInTargetGroup,
   buildAgentReplyContext,
   buildAgentFailureReply,
+  formatGroqStatusReply,
   buildClarifyReply,
   isRecommendationReasonRequest,
   buildRecommendationReason,
@@ -1128,6 +1129,29 @@ test('buildAgentFailureReply returns a specific message for rate limits', () => 
     buildAgentFailureReply({ rateLimited: true, status: 429, retryAfterMs: 13_000 }),
     'המנוע נחנק לרגע — נסו שוב בעוד כ-13 שניות.'
   );
+});
+
+test('formatGroqStatusReply shows the most recent provider limits and local usage', () => {
+  const reply = formatGroqStatusReply({
+    dayInputTokens: 1200,
+    dayOutputTokens: 300,
+    dayCachedTokens: 200,
+    dayCalls: 4,
+    rateLimitResponses: 1,
+    lastRateLimit: {
+      tokenLimit: 8000,
+      tokenRemaining: 4321,
+      tokenReset: '5s',
+      requestLimit: 1000,
+      requestRemaining: 999,
+      requestReset: '2h'
+    }
+  });
+
+  assert.match(reply, /TPM: 54%/);
+  assert.match(reply, /4,321 \/ 8,000/);
+  assert.match(reply, /1,300/);
+  assert.match(reply, /4 קריאות/);
 });
 
 test('buildAgentFailureReply returns a clarification message for invalid agent output', () => {
