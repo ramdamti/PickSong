@@ -1516,7 +1516,14 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
     let reply = action.reply;
     if (typeof polishBanterReplyFn === 'function') {
       try {
-        reply = await polishBanterReplyFn({ baseUrl: config.llmBaseUrl, apiKey: config.llmApiKey, model: config.llmModel, messageText, draftReply: reply }) || reply;
+        reply = await polishBanterReplyFn({
+          baseUrl: config.llmBaseUrl,
+          apiKey: config.llmApiKey,
+          model: config.llmModel,
+          messageText,
+          draftReply: reply,
+          recentReplies: getRecentVoiceReplies(chatId)
+        }) || reply;
       } catch (error) {
         console.warn(`[agent] respond_polish_failed: ${error.message}`);
       }

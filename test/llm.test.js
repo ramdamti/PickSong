@@ -316,10 +316,12 @@ test('polishBanterReply uses text mode to produce the final Hebrew reply', async
     baseUrl: 'https://api.example.com', apiKey: 'test', model: 'test-model',
     messageText: 'תגיד לזאביק להפסיק לשגע אותך',
     draftReply: 'זאביק, תפסיק לשגע אותי.',
+    recentReplies: ['זאביק, גם למטרונום יש יותר מודעות עצמית.'],
     requestFn: async (_url, options) => {
       const body = JSON.parse(options.body);
       assert.equal(body.response_format, undefined);
       assert.match(body.messages[0].content, /final Hebrew copy editor/);
+      assert.deepEqual(JSON.parse(body.messages[1].content).recent_bot_replies, ['זאביק, גם למטרונום יש יותר מודעות עצמית.']);
       return { ok: true, async json() { return { choices: [{ message: { content: 'זאביק, גם למטרונום יש יותר מודעות עצמית.' } }], usage: {} }; } };
     }
   });
