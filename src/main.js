@@ -144,18 +144,22 @@ function extractBotMessageId(sentMessage) {
 
 function prefixBotReply(text) {
   const body = String(text || '').trim();
-  if (!body) return BOT_PREFIX.trim();
+  if (!body) return `${BOT_PREFIX.trim()}\n\u200F`;
   if (/^\u200f?🤖(?:\s|$)/u.test(body)) {
-    return forceRtlLines(body);
+    return forceRtlLines(`${body}\n\u200F`);
   }
-  return forceRtlLines(`${BOT_PREFIX}${body}`);
+  return forceRtlLines(`${BOT_PREFIX}${body}\n\u200F`);
+}
+
+function formatSongIdentity(song) {
+  const title = String(song?.song_title || '').trim();
+  const artist = String(song?.artist || '').trim();
+  return title && artist ? `${title} - ${artist}` : title || artist;
 }
 
 function formatBoldSongIdentity(song) {
-  const title = String(song?.song_title || '').trim();
-  const artist = String(song?.artist || '').trim();
-  const identity = title && artist ? `${title} - ${artist}` : title || artist;
-  return identity ? `*${identity}*` : '';
+  const identity = formatSongIdentity(song);
+  return song?.is_recommendation && identity ? `*${identity}*` : identity;
 }
 
 async function sendBotMessage(chat, text) {
@@ -208,13 +212,13 @@ function buildAgentFailureReply(error) {
   if (failureType === 'rate_limited') {
     const retryDelay = formatRetryDelay(error?.retryAfterMs);
     return retryDelay
-      ? `יש עכשיו עומס על המנוע. נסו שוב בעוד כ-${retryDelay}.`
-      : 'יש עכשיו עומס על המנוע. נסו שוב עוד רגע.';
+      ? `המנוע נחנק לרגע — נסו שוב בעוד כ-${retryDelay}.`
+      : 'המנוע נחנק לרגע — נסו שוב עוד רגע.';
   }
   if (failureType === 'invalid_agent_output') {
     return 'לא הבנתי עד הסוף את הבקשה. נסו לנסח שוב במשפט קצר.';
   }
-  return 'יש לי עכשיו עומס קטן. נסו שוב עוד רגע.';
+  return 'נתקע לי משהו במנוע — נסו שוב עוד רגע.';
 }
 
 function buildClarifyReply(action) {
@@ -1657,7 +1661,13 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
         : songs.filter((song) => normalizeText(song.song_title) === normalizeText(verified.song_title) && normalizeText(song.artist) === normalizeText(verified.artist));
       if (!existing.length) {
         console.log(`[external_recommendation] title=${JSON.stringify(verified.song_title)} artist=${JSON.stringify(verified.artist)}`);
-        accepted.push({ ...recommendation, song_title: verified.song_title, artist: verified.artist });
+        accepted.push({
+          ...recommendation,
+          song_title: verified.song_title,
+          artist: verified.artist,
+          song_id: `external:${normalizeText(verified.song_title)}:${normalizeText(verified.artist)}`,
+          is_recommendation: true
+        });
         acceptedArtists.add(artistKey);
         if (accepted.length >= requestedLimit) return;
       }
@@ -1687,13 +1697,19 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       // the original artist/era/style constraints rather than becoming a new
       // generic request.
       if (typeof stateStore.setLastResults === 'function') {
-        persistResultContext(stateStore, {
-          chatId,
-          botMessageId: extractBotMessageId(sentMessage),
-          songs: accepted,
-          query: action.query || {},
-          createdAt: new Date().toISOString()
-        });
+        try {
+          persistResultContext(stateStore, {
+            chatId,
+            botMessageId: extractBotMessageId(sentMessage),
+            songs: accepted,
+            query: action.query || {},
+            createdAt: new Date().toISOString()
+          });
+        } catch (error) {
+          // The recommendation is already delivered; context is optional and
+          // must never trigger a second, misleading failure reply.
+          console.error('[external_recommendation] result_context_failed:', error);
+        }
       }
       if (typeof stateStore.recordExternalRecommendation === 'function') {
         for (const recommendation of accepted) {

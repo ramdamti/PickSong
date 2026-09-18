@@ -14,7 +14,9 @@ const {
   polishBanterReply,
   parseExternalSongRecommendation,
   parseExternalSongRecommendations,
+  isExternalCatalogRecommendationRequest,
   inferRequestedReleaseYearRange,
+  buildExternalRecommendationAction,
   recommendExternalSongs,
   getAgentUsageStats
 } = require('../src/llm');
@@ -73,6 +75,12 @@ test('SYSTEM_PROMPT stays compact and preserves global action-planning rules', (
   assert.match(SYSTEM_PROMPT, /recommend_external_song/);
   assert.match(SYSTEM_PROMPT, /Use add_song only when the user explicitly asks/i);
   assert.match(SYSTEM_PROMPT, /one short, natural, declarative Hebrew roast/i);
+});
+
+test('isExternalCatalogRecommendationRequest requires an explicit external-catalog cue', () => {
+  assert.equal(isExternalCatalogRecommendationRequest('\u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8\u05d9\u05dd \u05e9\u05dc Pink Floyd'), false);
+  assert.equal(isExternalCatalogRecommendationRequest('\u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8\u05d9\u05dd \u05e9\u05dc Pink Floyd \u05e9\u05dc\u05d0 \u05e0\u05de\u05e6\u05d0\u05d9\u05dd \u05d1\u05de\u05d0\u05d2\u05e8'), true);
+  assert.equal(isExternalCatalogRecommendationRequest('\u05ea\u05d1\u05d9\u05d0 \u05dc\u05e0\u05d5 \u05d3\u05d1\u05e8\u05d9\u05dd \u05d7\u05d3\u05e9\u05d9\u05dd'), false);
 });
 
 test('external recommendation reasons are grounded in the band arrangement', () => {
@@ -898,6 +906,16 @@ test('interpretMessage preserves canonical English artist mappings for known Heb
 
   assert.equal(action.action, 'search_songs');
   assert.equal(action.query.requirements.artist, 'Pink Floyd');
+});
+
+test('buildExternalRecommendationAction keeps trailing request constraints out of an artist name', () => {
+  const action = buildExternalRecommendationAction(
+    '\u05ea\u05d1\u05d9\u05d0 4 \u05e9\u05d9\u05e8\u05d9\u05dd \u05e9\u05dc \u05e4\u05d9\u05e0\u05e7 \u05e4\u05dc\u05d5\u05d9\u05d3 \u05e9\u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd \u05dc\u05e0\u05d5 \u05d5\u05dc\u05d0 \u05e0\u05de\u05e6\u05d0\u05d9\u05dd \u05d1\u05de\u05d0\u05d2\u05e8'
+  );
+
+  assert.equal(action.action, 'recommend_external_song');
+  assert.equal(action.query.requirements.artist, 'Pink Floyd');
+  assert.equal(action.query.limit, 4);
 });
 
 test('interpretMessage rewrites clarify into add_song for explicit add requests with song and artist', async () => {

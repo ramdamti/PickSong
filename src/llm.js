@@ -7,7 +7,7 @@ const SYSTEM_PROMPT = [
   'Choose the most specific supported action and compact query. Make a reasonable interpretation rather than clarifying, unless one essential fact is truly missing.',
   'Preserve explicit artist, language, era, count, genre, difficulty, and instrument constraints. Translate them to supported_search_fields. For a specific keyboard instrument use keys_type_any; for generic keys use has_keys and/or keys_role.',
   'For more/fresh/different songs after a result list, set query.avoid_previous_results=true. Preserve its artist and other constraints.',
-  'Action routing: song list -> search_songs; outside local catalog -> recommend_external_song; rehearsal plan -> prepare_rehearsal; named-song metadata or difficulty -> get_song_info; explicit add -> add_song; correction -> update_song; explicit removal -> remove_song; fit feedback -> update_song_feedback; band-history questions -> get_band_failure_reasons or explain_song_rejection.',
+  'Song-list routing: search_songs is the default and should be chosen whenever external intent is unclear. Use recommend_external_song only when the wording clearly asks for songs outside the local catalog, novel material, or recommendations not already in the band library. Explicit local-catalog wording always means search_songs. Rehearsal plan -> prepare_rehearsal; named-song metadata or difficulty -> get_song_info; explicit add -> add_song; correction -> update_song; explicit removal -> remove_song; fit feedback -> update_song_feedback; band-history questions -> get_band_failure_reasons or explain_song_rejection.',
   'Use add_song only when the user explicitly asks to add a song. For "A - B", resolve artist and title without duplicating the full phrase as the title. For adds, assess real full-band difficulty and include ai_metadata.',
   'For mutations, use result_index when a prior list identifies the target. Never turn a question, acknowledgement, or conversation into a mutation.',
   'Use clarify only for a single essential missing value. Use unsupported for unavailable capabilities. For normal conversation use respond.reply: one short, natural, declarative Hebrew roast; no question, echo, slur, threat, or invented fact.',
@@ -834,11 +834,7 @@ function isExternalCatalogRecommendationRequest(messageText) {
   if (!source) return false;
   const explicitExternal = /(?:\u05dc\u05d0\s*(?:\u05e7\u05d9\u05d9\u05dd|\u05e7\u05d9\u05d9\u05de\u05d9\u05dd|\u05e7\u05d9\u05d9\u05de\u05d5\u05ea|\u05e0\u05de\u05e6\u05d0|\u05e0\u05de\u05e6\u05d0\u05d9\u05dd|\u05e0\u05de\u05e6\u05d0\u05d5\u05ea)\s*(?:\u05d1\u05de\u05d0\u05d2\u05e8|\u05d0\u05e6\u05dc\u05e0\u05d5)|\u05de\u05d7\u05d5\u05e5\s*\u05dc\u05de\u05d0\u05d2\u05e8|outside\s+(?:the\s+)?catalog|not\s+in\s+(?:the\s+)?catalog)/iu;
   const externalRecommendation = /(?:\u05ea\u05de\u05dc\u05d9\u05e5|\u05d4\u05de\u05dc\u05e5|\u05ea\u05d1\u05d9\u05d0|\u05ea\u05df|recommend|give|find)/iu;
-  const recommendVerb = /(?:\u05ea\u05de\u05dc\u05d9\u05e5|\u05d4\u05de\u05dc\u05e5|recommend)/iu;
-  const noveltyRequest = /(?:\u05e9\u05d9\u05e8\u05d9\u05dd?\s+\u05d7\u05d3\u05e9(?:\u05d9\u05dd|\u05d5\u05ea)?|\u05d3\u05d1\u05e8\u05d9\u05dd?\s+\u05d7\u05d3\u05e9(?:\u05d9\u05dd|\u05d5\u05ea)?|new\s+(?:songs?|stuff|recommendations?))/iu;
-  return (explicitExternal.test(source) && externalRecommendation.test(source)) ||
-    (externalRecommendation.test(source) && noveltyRequest.test(source)) ||
-    (recommendVerb.test(source) && /(?:\u05e9\u05d9\u05e8|song)/iu.test(source));
+  return explicitExternal.test(source) && externalRecommendation.test(source);
 }
 
 function inferRequestedDurationMinutes(messageText) {
@@ -994,6 +990,14 @@ function cleanInferredArtistName(value) {
     .trim();
 }
 
+function stripArtistRequestQualifiers(value) {
+  return String(value || '')
+    // "songs by Pink Floyd that fit us and are outside the catalog" must
+    // produce Pink Floyd, not the entire trailing request as the artist.
+    .replace(/\s+(?:\u05e9\u05de\u05ea\u05d0\u05d9\u05dd|\u05e9\u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd|\u05e9\u05d9\u05ea\u05d0\u05d9\u05dd|\u05e9\u05d9\u05ea\u05d0\u05d9\u05de\u05d5|\u05e9\u05e0\u05de\u05e6\u05d0\u05d9\u05dd|\u05de\u05d7\u05d5\u05e5)(?:\s|$).*$/u, '')
+    .trim();
+}
+
 function inferRequestedArtist(messageText) {
   const source = String(messageText || '').trim();
   if (!source) return null;
@@ -1009,7 +1013,7 @@ function inferRequestedArtist(messageText) {
   for (const pattern of patterns) {
     const match = source.match(pattern);
     if (!match) continue;
-    const artist = canonicalizeRequestedArtistName(cleanInferredArtistName(match[1]));
+    const artist = canonicalizeRequestedArtistName(stripArtistRequestQualifiers(cleanInferredArtistName(match[1])));
     if (artist) return artist;
   }
 
