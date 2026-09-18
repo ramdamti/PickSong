@@ -144,11 +144,11 @@ function extractBotMessageId(sentMessage) {
 
 function prefixBotReply(text) {
   const body = String(text || '').trim();
-  if (!body) return `${BOT_PREFIX.trim()}\n\u200F`;
+  if (!body) return BOT_PREFIX.trim();
   if (/^\u200f?🤖(?:\s|$)/u.test(body)) {
-    return forceRtlLines(`${body}\n\u200F`);
+    return forceRtlLines(body);
   }
-  return forceRtlLines(`${BOT_PREFIX}${body}\n\u200F`);
+  return forceRtlLines(`${BOT_PREFIX}${body}`);
 }
 
 function formatSongIdentity(song) {
@@ -262,6 +262,10 @@ function isRecommendationReasonRequest(messageText) {
   return /(?:למה\s+(?:בחרת|דווקא)|למה\s+זה|תגיד\s+למה|why\s+(?:did\s+you\s+choose|this|that)|why\s+choose)/iu.test(text);
 }
 
+function isSongRecommendationRequest(messageText) {
+  return /(?:תמליץ|המלץ|recommend)/iu.test(String(messageText || ''));
+}
+
 function hasMeaningfulSongQuery(query) {
   const sections = [query?.requirements || {}, query?.preferences || {}, query?.exclusions || {}];
   return sections.some((section) => Object.values(section).some((value) =>
@@ -325,7 +329,11 @@ function looksLikeBareSpecificHint(messageText) {
     return false;
   }
 
-  if (/(?:תביא|תן|תני|find|give|show|play|עוד|שירים?|songs?|something|משהו|רשימה)/iu.test(compact)) {
+  // Imperative recommendation requests are not song titles. Keep this
+  // distinction narrow: it prevents a genuine bare title/artist hint from
+  // triggering a random catalog list, while allowing "recommend a song" to
+  // use the safe local-catalog default.
+  if (/(?:תביא|תן|תני|תמליץ|המלץ|find|give|show|play|עוד|שיר(?:ים)?|songs?|something|משהו|רשימה)/iu.test(compact)) {
     return false;
   }
 
@@ -1468,15 +1476,15 @@ function rebuildResultListWithReplacements({ context, stateStore, replacementInd
     .filter(Boolean);
 }
 
-async function sendSongsReply({ chat, stateStore, chatId, songs, query = null, includeRecommendationReason = false }) {
+async function sendSongsReply({ chat, stateStore, chatId, songs, query = null, includeRecommendationReason = false, isRecommendation = false }) {
   if (!songs.length) {
     await sendBotMessage(chat, '\u05dc\u05d0 \u05de\u05e6\u05d0\u05ea\u05d9 \u05e9\u05d9\u05e8\u05d9\u05dd \u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd.');
     return;
   }
 
   const reply = includeRecommendationReason
-    ? `${formatSongsReply(songs)}\nלמה: ${buildRecommendationReason(songs[0], query)}`
-    : formatSongsReply(songs);
+    ? `${formatSongsReply(songs, { boldIdentities: isRecommendation })}\nלמה: ${buildRecommendationReason(songs[0], query)}`
+    : formatSongsReply(songs, { boldIdentities: isRecommendation });
   const sentMessage = await sendBotMessage(chat, reply);
   const botMessageId = extractBotMessageId(sentMessage);
   persistResultContext(stateStore, {
@@ -1814,7 +1822,8 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       chatId: record.chatId,
       songs: matches,
       query: sanitizeQueryForResultContext(action.query || {}, matches.length),
-      includeRecommendationReason: isRecommendationReasonRequest(messageText)
+      includeRecommendationReason: isRecommendationReasonRequest(messageText),
+      isRecommendation: isSongRecommendationRequest(messageText)
     });
     return;
   }
@@ -2735,6 +2744,7 @@ module.exports = {
   buildRecommendationReason,
   buildRecentMessageContext,
   isChordsReplyRequest,
+  shouldBlockGenericSearchFallback,
   isAuthorizedAddAction,
   extractSongIdentityFromMetadataQuestion,
   formatRequestedSongInfo,

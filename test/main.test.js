@@ -13,6 +13,7 @@ const {
   buildRecommendationReason,
   buildRecentMessageContext,
   isChordsReplyRequest,
+  shouldBlockGenericSearchFallback,
   handleAgentMessage,
   executeAgentAction
 } = require('../src/main');
@@ -22,6 +23,18 @@ test('stripWakeWord removes standalone bot trigger variants', () => {
   assert.equal(stripWakeWord('\u05d1\u05d5\u05d8, \u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7'), '\u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7');
   assert.equal(stripWakeWord('\u05d1\u05d5\u05d8: \u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7'), '\u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7');
   assert.equal(stripWakeWord('\u05d1\u05d5\u05d8 - \u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7'), '\u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7');
+});
+
+test('generic recommendation wording is not mistaken for a bare song hint', () => {
+  const action = { action: 'search_songs', query: {} };
+  assert.equal(shouldBlockGenericSearchFallback(action, {
+    messageText: '\u05ea\u05de\u05dc\u05d9\u05e5 \u05e2\u05dc \u05e9\u05d9\u05e8',
+    replyContext: null
+  }), false);
+  assert.equal(shouldBlockGenericSearchFallback(action, {
+    messageText: 'Michael Jackson',
+    replyContext: null
+  }), true);
 });
 
 test('executeAgentAction retries once to fill missing external recommendations after filtering', async () => {
@@ -1042,8 +1055,6 @@ test('handleAgentMessage blocks generic fallback for short specific hints with a
   });
 
   assert.equal(handled, true);
-  assert.match(sentMessages[0], /\n\u200f$/u);
-  sentMessages[0] = sentMessages[0].replace(/\n\u200f$/u, '');
   assert.deepEqual(sentMessages, ['\u200F🤖 איזה שירים אתה רוצה?']);
 });
 

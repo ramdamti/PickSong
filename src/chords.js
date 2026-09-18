@@ -141,7 +141,7 @@ function normalizeSongLine(song) {
   const title = String(song?.song_title || '').trim();
   const artist = String(song?.artist || '').trim();
   const identity = title && artist ? `${title} - ${artist}` : title || artist || '';
-  return identity ? `*${identity}*` : '';
+  return identity;
 }
 
 function stripDirectionalMarks(value) {
@@ -330,10 +330,13 @@ function formatSongsReply(songs, options = {}) {
 
   const single = items.length === 1;
   const includeChords = options.includeChords === true;
+  const boldIdentities = options.boldIdentities === true;
 
   const lines = ['\u200F🤖 הבאתי:'];
   items.forEach((song, index) => {
-    const base = single ? normalizeSongLine(song) : `${index + 1}. ${normalizeSongLine(song)}`;
+    const identity = normalizeSongLine(song);
+    const formattedIdentity = boldIdentities && identity ? `*${identity}*` : identity;
+    const base = single ? formattedIdentity : `${index + 1}. ${formattedIdentity}`;
     lines.push(`\u200F${base}`);
     const chordsUrl = includeChords ? String(song?.chords_url || '').trim() : '';
     if (chordsUrl) {

@@ -29,8 +29,14 @@ test('formatting keeps the header and shows a plain chords URL line', () => {
 
   assert.equal(
     formatSongsReply([song], { includeChords: true }),
-    '\u200F🤖 הבאתי:\n\u200F*Sultans of Swing - Dire Straits*\n\u200F   אקורדים: https://tab4u.com/tabs/songs/123'
+    '\u200F🤖 הבאתי:\n\u200FSultans of Swing - Dire Straits\n\u200F   אקורדים: https://tab4u.com/tabs/songs/123'
   );
+});
+
+test('formatting bolds song identities only for recommendations', () => {
+  const song = { song_title: 'Sultans of Swing', artist: 'Dire Straits' };
+  assert.match(formatSongsReply([song], { boldIdentities: true }), /\*Sultans of Swing - Dire Straits\*/);
+  assert.doesNotMatch(formatSongsReply([song]), /\*Sultans of Swing - Dire Straits\*/);
 });
 
 test('parseSongsFromReplyText extracts song lines in order', () => {
