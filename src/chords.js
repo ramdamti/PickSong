@@ -140,7 +140,8 @@ function hasStrongTextMatch(needle, haystack) {
 function normalizeSongLine(song) {
   const title = String(song?.song_title || '').trim();
   const artist = String(song?.artist || '').trim();
-  return title && artist ? `${title} - ${artist}` : title || artist || '';
+  const identity = title && artist ? `${title} - ${artist}` : title || artist || '';
+  return identity ? `*${identity}*` : '';
 }
 
 function stripDirectionalMarks(value) {
@@ -355,7 +356,7 @@ function parseSongsFromReplyText(text) {
     if (/^🤖\s*הבאתי:$/u.test(line)) continue;
     if (/^אקורדים:/u.test(line)) continue;
 
-    const withoutNumber = line.replace(/^\d+\.\s*/u, '');
+    const withoutNumber = line.replace(/^\d+\.\s*/u, '').replace(/^\*|\*$/gu, '');
     const artistIndex = withoutNumber.lastIndexOf(' - ');
     let songTitle = withoutNumber;
     let artist = null;

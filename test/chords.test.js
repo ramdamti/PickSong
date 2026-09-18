@@ -29,13 +29,13 @@ test('formatting keeps the header and shows a plain chords URL line', () => {
 
   assert.equal(
     formatSongsReply([song], { includeChords: true }),
-    '\u200F🤖 הבאתי:\n\u200FSultans of Swing - Dire Straits\n\u200F   אקורדים: https://tab4u.com/tabs/songs/123'
+    '\u200F🤖 הבאתי:\n\u200F*Sultans of Swing - Dire Straits*\n\u200F   אקורדים: https://tab4u.com/tabs/songs/123'
   );
 });
 
 test('parseSongsFromReplyText extracts song lines in order', () => {
   const parsed = parseSongsFromReplyText(
-    '\u200F🤖 הבאתי:\n\u200F1. Sultans of Swing - Dire Straits\n\u200F   אקורדים: https://tab4u.com/tabs/songs/123\n\u200F2. White Room - Cream'
+    '\u200F🤖 הבאתי:\n\u200F1. *Sultans of Swing - Dire Straits*\n\u200F   אקורדים: https://tab4u.com/tabs/songs/123\n\u200F2. *White Room - Cream*'
   );
 
   assert.deepEqual(parsed, [

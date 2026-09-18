@@ -151,6 +151,13 @@ function prefixBotReply(text) {
   return forceRtlLines(`${BOT_PREFIX}${body}`);
 }
 
+function formatBoldSongIdentity(song) {
+  const title = String(song?.song_title || '').trim();
+  const artist = String(song?.artist || '').trim();
+  const identity = title && artist ? `${title} - ${artist}` : title || artist;
+  return identity ? `*${identity}*` : '';
+}
+
 async function sendBotMessage(chat, text) {
   return chat.sendMessage(prefixBotReply(text));
 }
@@ -837,7 +844,7 @@ async function insertSongAndReply({ stateStore, chat, song }) {
   }
 
   await stateStore.queueSave();
-  await sendBotMessage(chat, `\u05d4\u05d5\u05e1\u05e4\u05ea\u05d9: ${song.song_title}${song.artist ? ` - ${song.artist}` : ''}`);
+  await sendBotMessage(chat, `\u05d4\u05d5\u05e1\u05e4\u05ea\u05d9: ${formatBoldSongIdentity(song)}`);
   return true;
 }
 
@@ -892,7 +899,7 @@ function formatBadSongsSummary(songs) {
       const issues = Array.isArray(song?.band_status?.issues) && song.band_status.issues.length > 0
         ? song.band_status.issues.join(', ')
         : '\u05d0\u05d9\u05df \u05e4\u05d9\u05e8\u05d5\u05d8';
-      return `- ${song.song_title}${song.artist ? ` - ${song.artist}` : ''}: ${issues}`;
+      return `- ${formatBoldSongIdentity(song)}: ${issues}`;
     })
   ].join('\n');
 }
@@ -1213,7 +1220,7 @@ function formatRehearsalPlanReply(plan) {
     }
     songIndex += 1;
     lines.push(
-      `${songIndex}. ${item.song.song_title}${item.song.artist ? ` - ${item.song.artist}` : ''}${
+      `${songIndex}. ${formatBoldSongIdentity(item.song)}${
         item.song.duration_seconds ? ` | שיר ${formatSongDuration(item.song.duration_seconds)}` : ''
       }`
     );
@@ -1595,6 +1602,10 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
     const collectRecommendations = async (recommendations) => {
       for (const recommendation of Array.isArray(recommendations) ? recommendations : []) {
       if (!recommendation?.song_title || !recommendation?.artist) continue;
+      if (/^unknown$/i.test(String(recommendation.song_title).trim()) || /^unknown$/i.test(String(recommendation.artist).trim())) {
+        console.warn('[external_recommendation] rejected_unknown_identity');
+        continue;
+      }
       const candidate = `${recommendation.song_title} - ${recommendation.artist}`;
       if (consideredCandidates.has(candidate)) continue;
       consideredCandidates.add(candidate);
@@ -1669,9 +1680,21 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
     }
     if (accepted.length) {
       const reply = accepted.length === 1
-        ? `מצאתי מחוץ למאגר: ${accepted[0].song_title} - ${accepted[0].artist}\nלמה: ${accepted[0].reason}`
-        : `מצאתי מחוץ למאגר:\n${accepted.map((song, index) => `${index + 1}. ${song.song_title} - ${song.artist}\nלמה: ${song.reason}`).join('\n\n')}`;
-      await sendBotMessage(chat, reply);
+        ? `מצאתי מחוץ למאגר: ${formatBoldSongIdentity(accepted[0])}\nלמה: ${accepted[0].reason}`
+        : `מצאתי מחוץ למאגר:\n${accepted.map((song, index) => `${index + 1}. ${formatBoldSongIdentity(song)}\nלמה: ${song.reason}`).join('\n\n')}`;
+      const sentMessage = await sendBotMessage(chat, reply);
+      // Store external results too, so a reply such as "another one" keeps
+      // the original artist/era/style constraints rather than becoming a new
+      // generic request.
+      if (typeof stateStore.setLastResults === 'function') {
+        persistResultContext(stateStore, {
+          chatId,
+          botMessageId: extractBotMessageId(sentMessage),
+          songs: accepted,
+          query: action.query || {},
+          createdAt: new Date().toISOString()
+        });
+      }
       if (typeof stateStore.recordExternalRecommendation === 'function') {
         for (const recommendation of accepted) {
           stateStore.recordExternalRecommendation(chatId, `${recommendation.song_title} - ${recommendation.artist}`);
@@ -1887,7 +1910,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
     const chatId = String(record?.chatId || '').trim();
     if (songToInsert.difficulty === 'high' && pendingAdditions instanceof Map && chatId) {
       pendingAdditions.set(chatId, { song: songToInsert, createdAt: Date.now() });
-      await sendBotMessage(chat, `\u05d4\u05e9\u05d9\u05e8 ${songToInsert.song_title}${songToInsert.artist ? ` - ${songToInsert.artist}` : ''} \u05d1\u05e8\u05de\u05ea \u05e7\u05d5\u05e9\u05d9 \u05d2\u05d1\u05d5\u05d4\u05d4 \u2014 \u05d0\u05ea\u05d4 \u05d1\u05d8\u05d5\u05d7 \u05e9\u05dc\u05d4\u05d5\u05e1\u05d9\u05e3 \u05d0\u05d5\u05ea\u05d5?`);
+      await sendBotMessage(chat, `\u05d4\u05e9\u05d9\u05e8 ${formatBoldSongIdentity(songToInsert)} \u05d1\u05e8\u05de\u05ea \u05e7\u05d5\u05e9\u05d9 \u05d2\u05d1\u05d5\u05d4\u05d4 \u2014 \u05d0\u05ea\u05d4 \u05d1\u05d8\u05d5\u05d7 \u05e9\u05dc\u05d4\u05d5\u05e1\u05d9\u05e3 \u05d0\u05d5\u05ea\u05d5?`);
       return;
     }
     await insertSongAndReply({ stateStore, chat, song: songToInsert });
@@ -1987,7 +2010,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
         console.warn(`[agent] known_song_info_gap_failed: ${error.message}`);
       }
     }
-    await sendBotMessage(chat, `על ${song.song_title}${song.artist ? ` - ${song.artist}` : ''} אין לי מידע מדויק על זה במאגר.`);
+    await sendBotMessage(chat, `על ${formatBoldSongIdentity(song)} אין לי מידע מדויק על זה במאגר.`);
     return;
   }
 
@@ -2019,7 +2042,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
 
     stateStore.removeSongById(song.song_id);
     await stateStore.queueSave();
-    await sendBotMessage(chat, `\u05d4\u05e1\u05e8\u05ea\u05d9: ${song.song_title}${song.artist ? ` - ${song.artist}` : ''}`);
+    await sendBotMessage(chat, `\u05d4\u05e1\u05e8\u05ea\u05d9: ${formatBoldSongIdentity(song)}`);
     return;
   }
 
@@ -2041,7 +2064,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       ...sanitizedUpdates
     });
     await stateStore.queueSave();
-    await sendBotMessage(chat, `\u05e2\u05d3\u05db\u05e0\u05ea\u05d9: ${updated.song_title}${updated.artist ? ` - ${updated.artist}` : ''}`);
+    await sendBotMessage(chat, `\u05e2\u05d3\u05db\u05e0\u05ea\u05d9: ${formatBoldSongIdentity(updated)}`);
     return;
   }
 

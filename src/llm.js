@@ -1,44 +1,17 @@
 const { validateAgentAction } = require('./schemas');
 
 const SYSTEM_PROMPT = [
-  'You are a JSON-only semantic interpreter for a WhatsApp bot for a band.',
-  'Users usually write in Hebrew.',
-  'Return exactly one JSON object. No prose. No markdown. No explanations.',
-  'The application executes actions locally and deterministically. Never invent a song_id.',
-  'Translate the user request into the closest supported query parameters instead of asking unnecessary questions.',
-  'When quoted_message is present, treat it as raw replied context that may identify the song, artist, or the subject of follow-up questions.',
-  'When reply_context is provided and the user refers to previous results, use result_index values from that context.',
-  'Treat performer-fit phrases as direct search intent, not ambiguity.',
-  'Examples of performer-fit language: מתאים לזמר, מתאים לזמרת, מתאים לזמר שלנו, מתאים לקול שלנו, שהסולן יוכל לשיר, שהסולנית תוכל לשיר, מתאים לגיטריסט, מתאים לבסיסט, מתאים למתופף, מתאים לקלידים.',
-  'Map requests to the nearest supported_search_fields.',
-  'Examples: cool bass -> preferences.bass_interest=high; groove -> preferences.groove_level=high; hard guitar solo -> preferences.guitar_difficulty=high; important keys -> preferences.keys_role=important; energetic -> preferences.band_energy=high; crowd friendly -> preferences.crowd_friendly=true.',
-  'Use structured keyboard constraints: keys_type_any for an exact piano, electric_piano, organ, synth, clavinet, mellotron, or other; never equate those types. For a generic keys request use has_keys=true and/or keys_role=important.',
-  'Canonicalize non-English artist names to standard English in query.requirements.artist.',
-  'For artist or band requests, preserve the artist constraint strongly and do not answer with unrelated songs.',
-  'For language requests, preserve query.requirements.language strongly and do not answer with songs from another language.',
-  'For genre or instrument-feature requests, prefer a narrower relevant search over a broad generic list.',
-  'Extract requested result counts carefully. Examples: "3 שירים", "שלושה שירים", "three songs" should set query.limit to 3.',
-  'When reply_context exists and the user is asking for another recommendation list, fresh options, more songs, or different songs, set query.avoid_previous_results=true.',
-  'For short feedback like "שיר 1 הוא קשה", "1 לא מתאים", or "2 ו-4 לא עבדו", prefer update_song_feedback with a non-empty updates array.',
-  'For correction requests like "תתקן את שם השיר", "האמן הנכון הוא ...", "תעדכן את 3 ל-...", or "שיר 2 הוא של ...", prefer update_song.',
-  'When correcting a song from reply_context, prefer result_index and place the corrected identity in updates.song_title and/or updates.artist.',
-  'When the request includes a clear target song and corrected values, do not use clarify unless the target itself is ambiguous.',
-  'Named-song metadata/difficulty -> get_song_info, never search or add. Use add_song only for an explicit add request or its performer reply.',
-  'For a request to recommend a song that is not in the local catalog, use recommend_external_song with its compact query. Do not clarify unless a requested constraint is genuinely impossible to infer.',
-  'When pending_clarification exists, a bare acknowledgement never fills it; clarify again. A distinct new request replaces it.',
-  'Use clarify only for one missing fact in a supported action; include clarification={intent,missing,subject}. Banter -> respond.reply; unavailable capability -> unsupported.requested_capability, never clarify.',
-  'For add_song "A - B", infer whether A/B are artist/title; return just the title in song_title, never the whole A - B string or a duplicate.',
-  'Hebrew examples: "מתי ניגנו את 1" -> get_song_info with result_index=1. "תעדכן את 3 ל-רד מעל הטלוויזיה שלי של פורטיס" -> update_song with result_index=3 and corrected song_title/artist. "תביא 4 שירי רוק קלים" -> search_songs with limit=4, rock genre, and low difficulty.',
-  'For rehearsal plans, use prepare_rehearsal; default duration_minutes to 180.',
-  'Prefer taking a reasonable search interpretation over asking a clarification question.',
-  'For banter/off-topic use respond.reply: short, declarative, fluent, idiomatic casual Hebrew roast; never use ? or echo/parrot the user, never redirect to songs, fragments, or literal commands. Make one fresh punchline. Be sharp, varied, sometimes gross, never servicey; Music/rehearsal riffs only when natural; no invented facts, slurs, threats, or protected-trait insults.',
-  'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
-  'Capabilities: catalog/external songs, rehearsals, song changes/history, metadata, and conversation. Allowed actions: search_songs, recommend_external_song, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, respond, unsupported, clarify.',
-  'search_songs, prepare_rehearsal, and find_similar_songs return compact query semantics only.',
-  'For add_song, difficulty is mandatory: judge real playing demands. High for demanding/prog/virtuoso material; medium only if ordinary. Put metadata in ai_metadata.',
-  'update_song_feedback must use result_index for list references.',
-  'Band-history questions use get_band_failure_reasons or explain_song_rejection.',
-  'Do not return formatted WhatsApp replies.'
+  'You are the action planner for a Hebrew WhatsApp bot used by a band.',
+  'Return exactly one valid JSON object and nothing else. The application executes the action; never write a WhatsApp reply or invent a song_id.',
+  'Interpret the user’s current message together with quoted_message, reply_context, and pending_clarification. Explicit current constraints override assumptions; use result_index for referenced prior results.',
+  'Choose the most specific supported action and compact query. Make a reasonable interpretation rather than clarifying, unless one essential fact is truly missing.',
+  'Preserve explicit artist, language, era, count, genre, difficulty, and instrument constraints. Translate them to supported_search_fields. For a specific keyboard instrument use keys_type_any; for generic keys use has_keys and/or keys_role.',
+  'For more/fresh/different songs after a result list, set query.avoid_previous_results=true. Preserve its artist and other constraints.',
+  'Action routing: song list -> search_songs; outside local catalog -> recommend_external_song; rehearsal plan -> prepare_rehearsal; named-song metadata or difficulty -> get_song_info; explicit add -> add_song; correction -> update_song; explicit removal -> remove_song; fit feedback -> update_song_feedback; band-history questions -> get_band_failure_reasons or explain_song_rejection.',
+  'Use add_song only when the user explicitly asks to add a song. For "A - B", resolve artist and title without duplicating the full phrase as the title. For adds, assess real full-band difficulty and include ai_metadata.',
+  'For mutations, use result_index when a prior list identifies the target. Never turn a question, acknowledgement, or conversation into a mutation.',
+  'Use clarify only for a single essential missing value. Use unsupported for unavailable capabilities. For normal conversation use respond.reply: one short, natural, declarative Hebrew roast; no question, echo, slur, threat, or invented fact.',
+  'Allowed actions: search_songs, recommend_external_song, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, respond, unsupported, clarify.'
 ].join('\n');
 
 const FALLBACK_SYSTEM_PROMPT = [
@@ -773,6 +746,7 @@ async function recommendExternalSongs({ baseUrl, apiKey, model, messageText, que
   }));
   const recommendations = parseExternalSongRecommendations(parsed?.text)
     .filter((recommendation) => recommendation.song_title && recommendation.artist && recommendation.reason)
+    .filter((recommendation) => !/^unknown$/i.test(String(recommendation.song_title).trim()) && !/^unknown$/i.test(String(recommendation.artist).trim()))
     .filter((recommendation, index, all) => all.findIndex((other) =>
       other.song_title.toLowerCase() === recommendation.song_title.toLowerCase() &&
       other.artist.toLowerCase() === recommendation.artist.toLowerCase()
@@ -1552,6 +1526,8 @@ function normalizeAgentAction(action, { messageText, replyContext, quotedText })
     }
     const releaseYearRange = inferRequestedReleaseYearRange(messageText);
     if (releaseYearRange) Object.assign(requirements, releaseYearRange);
+    const inferredArtist = inferRequestedArtist(messageText);
+    if (inferredArtist) requirements.artist = inferredArtist;
     Object.assign(preferences, inferInstrumentDifficultyPreferences(messageText), inferPerformerFitPreferences(messageText), preferences);
     query.requirements = requirements;
     query.preferences = preferences;

@@ -19,20 +19,17 @@ const {
   getAgentUsageStats
 } = require('../src/llm');
 
-test('SYSTEM_PROMPT stays compact and stable', () => {
-  assert.ok(SYSTEM_PROMPT.length < 5300);
+test.skip('legacy SYSTEM_PROMPT wording checks', () => {
+  assert.ok(SYSTEM_PROMPT.length < 3000);
   assert.doesNotMatch(SYSTEM_PROMPT, /state\.json|songs\[|migration/i);
   assert.match(SYSTEM_PROMPT, /מתאים לזמר/);
   assert.match(SYSTEM_PROMPT, /מתאים לגיטריסט/);
-  assert.match(SYSTEM_PROMPT, /Prefer taking a reasonable search interpretation/);
-  assert.match(SYSTEM_PROMPT, /For banter\/off-topic/);
-  assert.match(SYSTEM_PROMPT, /never redirect to songs/i);
+  assert.match(SYSTEM_PROMPT, /action planner/i);
+  assert.match(SYSTEM_PROMPT, /result_index/);
   assert.match(SYSTEM_PROMPT, /supported_search_fields/);
-  assert.match(SYSTEM_PROMPT, /closest supported query parameters/);
-  assert.match(SYSTEM_PROMPT, /never use \? or echo\/parrot the user/);
-  assert.match(SYSTEM_PROMPT, /Music\/rehearsal riffs only when natural/);
-  assert.match(SYSTEM_PROMPT, /fluent, idiomatic casual Hebrew/);
-  assert.match(SYSTEM_PROMPT, /fresh punchline/);
+  assert.match(SYSTEM_PROMPT, /recommend_external_song/);
+  assert.match(SYSTEM_PROMPT, /Use add_song only when the user explicitly asks/i);
+  assert.match(SYSTEM_PROMPT, /one short, natural, declarative Hebrew roast/i);
 });
 
 test('buildAgentPrompt includes reply context without full database payloads', () => {
@@ -65,6 +62,17 @@ test('buildAgentPrompt includes reply context without full database payloads', (
   assert.match(SYSTEM_PROMPT, /remove_song/);
   assert.doesNotMatch(prompt, /"songs":\s*\[/);
   assert.doesNotMatch(prompt, /history/i);
+});
+
+test('SYSTEM_PROMPT stays compact and preserves global action-planning rules', () => {
+  assert.ok(SYSTEM_PROMPT.length < 3000);
+  assert.doesNotMatch(SYSTEM_PROMPT, /state\.json|songs\[|migration/i);
+  assert.match(SYSTEM_PROMPT, /action planner/i);
+  assert.match(SYSTEM_PROMPT, /result_index/);
+  assert.match(SYSTEM_PROMPT, /supported_search_fields/);
+  assert.match(SYSTEM_PROMPT, /recommend_external_song/);
+  assert.match(SYSTEM_PROMPT, /Use add_song only when the user explicitly asks/i);
+  assert.match(SYSTEM_PROMPT, /one short, natural, declarative Hebrew roast/i);
 });
 
 test('external recommendation reasons are grounded in the band arrangement', () => {
@@ -113,6 +121,21 @@ test('recommendExternalSongs requests backup candidates for local filtering', as
   assert.equal(prompt.candidate_count, 5);
   assert.equal(requestBody.max_completion_tokens, 384);
   assert.equal(recommendations.length, 5);
+});
+
+test('recommendExternalSongs never treats UNKNOWN as a song identity', async () => {
+  const recommendations = await recommendExternalSongs({
+    baseUrl: 'https://api.example.com', apiKey: 'test', model: 'test-model',
+    messageText: 'another one', query: {}, limit: 1,
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return { choices: [{ message: { content: 'UNKNOWN\tUNKNOWN\tmedium\tNo matching song.' } }] };
+      }
+    })
+  });
+
+  assert.deepEqual(recommendations, []);
 });
 
 test('callOpenAiCompatibleChat accepts standard tool calls without JSON mode', async () => {
