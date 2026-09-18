@@ -2524,6 +2524,12 @@ async function bootstrap() {
       return;
     }
 
+    const commandText = stripWakeWord(record?.text || '', config.triggerText);
+    if (/^(?:\u05e1\u05d8\u05d8\u05d5\u05e1|status)$/iu.test(String(commandText || '').trim())) {
+      await sendBotMessage(chat, formatGroqStatusReply(getAgentUsageStats()));
+      return;
+    }
+
     const recentMessages = buildRecentMessageContext(getRecentMessagesForChat(record.chatId));
     await handleAgentMessage({
       chat,
