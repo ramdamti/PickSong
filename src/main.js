@@ -145,10 +145,14 @@ function extractBotMessageId(sentMessage) {
 function prefixBotReply(text) {
   const body = String(text || '').trim();
   if (!body) return BOT_PREFIX.trim();
+  // WhatsApp can place the timestamp too close to the last line of a list.
+  // Reserve one RTL-only line for multi-line replies, without adding visual
+  // padding to normal one-line messages.
+  const suffix = body.includes('\n') ? '\n\u200F' : '';
   if (/^\u200f?🤖(?:\s|$)/u.test(body)) {
-    return forceRtlLines(body);
+    return forceRtlLines(`${body}${suffix}`);
   }
-  return forceRtlLines(`${BOT_PREFIX}${body}`);
+  return forceRtlLines(`${BOT_PREFIX}${body}${suffix}`);
 }
 
 function formatSongIdentity(song) {
