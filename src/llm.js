@@ -864,6 +864,14 @@ function isExternalCatalogRecommendationRequest(messageText) {
   return explicitExternal.test(source) && externalRecommendation.test(source);
 }
 
+function isNovelExternalRecommendationRequest(messageText) {
+  const source = String(messageText || '').trim().toLowerCase();
+  if (!source) return false;
+  const externalRecommendation = /(?:\u05ea\u05de\u05dc\u05d9\u05e5|\u05d4\u05de\u05dc\u05e5|\u05ea\u05d1\u05d9\u05d0|\u05ea\u05df|recommend|give|find)/iu;
+  const noveltyRequest = /(?:\u05e9\u05d9\u05e8\u05d9\u05dd?\s+\u05d7\u05d3\u05e9(?:\u05d9\u05dd|\u05d5\u05ea)?|\u05d3\u05d1\u05e8\u05d9\u05dd?\s+\u05d7\u05d3\u05e9(?:\u05d9\u05dd|\u05d5\u05ea)?|new\s+(?:songs?|stuff|recommendations?))/iu;
+  return externalRecommendation.test(source) && noveltyRequest.test(source);
+}
+
 function inferRequestedDurationMinutes(messageText) {
   const source = String(messageText || '').trim().toLowerCase();
   if (!source) return null;
@@ -1539,10 +1547,10 @@ function normalizeAgentAction(action, { messageText, replyContext, quotedText })
   // The local catalog is the safe default. A generic "recommend a song" is
   // not permission to invent or search outside it, even if the model picks
   // recommend_external_song.
-  if (action.action === 'recommend_external_song' && !isExternalCatalogRecommendationRequest(messageText)) {
+  if (action.action === 'recommend_external_song' && !isExternalCatalogRecommendationRequest(messageText) && !isNovelExternalRecommendationRequest(messageText)) {
     action = { ...action, action: 'search_songs' };
   }
-  if (isExternalCatalogRecommendationRequest(messageText)) {
+  if (isExternalCatalogRecommendationRequest(messageText) || isNovelExternalRecommendationRequest(messageText)) {
     const query = action.query && typeof action.query === 'object' && !Array.isArray(action.query) ? { ...action.query } : {};
     const requirements = query.requirements && typeof query.requirements === 'object' && !Array.isArray(query.requirements)
       ? { ...query.requirements }

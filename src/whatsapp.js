@@ -31,7 +31,7 @@ function clearStaleSingletonLocks(authDir, clientId = 'picksong') {
   }
 }
 
-function createWhatsAppClient({ headless, executablePath, authDir }) {
+function createWhatsAppClient({ headless, executablePath, authDir, dumpio = false }) {
   const { Client, LocalAuth } = require('whatsapp-web.js');
   const qrcode = require('qrcode-terminal');
   console.log(
@@ -45,6 +45,7 @@ function createWhatsAppClient({ headless, executablePath, authDir }) {
     puppeteer: {
       headless,
       executablePath: executablePath || undefined,
+      dumpio,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -89,6 +90,10 @@ function createWhatsAppClient({ headless, executablePath, authDir }) {
 
   client.on('disconnected', (reason) => {
     console.error('[whatsapp] disconnected:', reason);
+  });
+
+  client.on('error', (error) => {
+    console.error('[whatsapp] client error:', error);
   });
 
   return client;

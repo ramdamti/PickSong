@@ -9,6 +9,11 @@ function readBool(value, fallback) {
   return fallback;
 }
 
+function readPositiveInt(value, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
+}
+
 function parseDotEnv(content) {
   const result = {};
   const lines = String(content || '').split(/\r?\n/);
@@ -141,7 +146,9 @@ function loadConfig(env = process.env, options = {}) {
     openAiCompatibleBaseUrl,
     catalogSearchEnabled: readBool(mergedEnv.CATALOG_SEARCH_ENABLED, true),
     executablePath: resolveExecutablePath(mergedEnv.PUPPETEER_EXECUTABLE_PATH || mergedEnv.CHROME_PATH || ''),
-    headless: readBool(mergedEnv.HEADLESS, true)
+    headless: readBool(mergedEnv.HEADLESS, true),
+    whatsappStartupTimeoutMs: readPositiveInt(mergedEnv.WHATSAPP_STARTUP_TIMEOUT_MS, 120000, { min: 30000, max: 600000 }),
+    whatsappStartupRetries: readPositiveInt(mergedEnv.WHATSAPP_STARTUP_RETRIES, 1, { min: 0, max: 3 })
   };
 }
 

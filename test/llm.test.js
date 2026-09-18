@@ -2061,8 +2061,9 @@ test('interpretMessage routes external-catalog cues to external recommendations'
     '\u05ea\u05de\u05dc\u05d9\u05e5 \u05dc\u05e0\u05d5 \u05e2\u05dc \u05e9\u05d9\u05e8\u05d9\u05dd',
     '\u05ea\u05d1\u05d9\u05d0 5 \u05d3\u05d1\u05e8\u05d9\u05dd \u05d7\u05d3\u05e9\u05d9\u05dd'
   ];
+  const expectedActions = ['recommend_external_song', 'recommend_external_song', 'search_songs', 'recommend_external_song'];
 
-  for (const messageText of requests) {
+  for (const [index, messageText] of requests.entries()) {
     const action = await interpretMessage({
       provider: 'groq', baseUrl: 'https://api.example.com', apiKey: 'test', model: 'test-model',
       messageText, replyContext: null, recentMessages: [], currentDate: '2026-08-08',
@@ -2073,7 +2074,7 @@ test('interpretMessage routes external-catalog cues to external recommendations'
         }
       })
     });
-    assert.equal(action.action, 'recommend_external_song');
+    assert.equal(action.action, expectedActions[index]);
     if (/5/u.test(messageText)) assert.equal(action.query.limit, 5);
   }
 });

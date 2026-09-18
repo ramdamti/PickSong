@@ -2409,20 +2409,16 @@ async function bootstrap() {
   }
 
   clearStaleSingletonLocks(config.authDir);
-  const client = createWhatsAppClient({
-    headless: config.headless,
-    executablePath: config.executablePath,
-    authDir: config.authDir
-  });
   console.log(
     `[config] groups=${JSON.stringify(config.groupNames)} groupIds=${JSON.stringify(config.groupIds)} trigger=${JSON.stringify(config.triggerText)} provider=${config.llmProvider}`
   );
   let shuttingDown = false;
   let clientDestroyed = false;
+  let client = null;
   let heartbeatTimer = null;
 
   async function destroyClient(reason) {
-    if (clientDestroyed) return;
+    if (clientDestroyed || !client) return;
     clientDestroyed = true;
     console.log(`[shutdown] destroying WhatsApp client (${reason})`);
     // client.destroy() can hang if Chromium's CDP connection is already dead.
@@ -2469,7 +2465,6 @@ async function bootstrap() {
   const pendingClarifications = new Map();
   const recentMessagesByChat = new Map();
   let readyToProcess = false;
-  const startupTimeoutMs = 60000;
   const processedMessageIds = new Set();
   const heartbeatIntervalMs = 15 * 60 * 1000;
   heartbeatTimer = setInterval(() => {
@@ -2628,56 +2623,76 @@ async function bootstrap() {
     }
   };
 
-  client.on('message_create', (message) => {
-    if (!message?.fromMe) return;
-    void handleIncomingMessage(message, 'message_create');
-  });
-  client.on('message', (message) => {
-    if (message?.fromMe) return;
-    void handleIncomingMessage(message, 'message');
-  });
-  console.log('[whatsapp] starting client');
-  const readyPromise = waitForReady(client);
-  readyPromise.then(() => {
-    console.log('[whatsapp] ready');
-    void finalizeStartup().catch((error) => {
-      console.error('[fatal]', error);
-      void destroyClient('finalizeStartup failure').finally(() => process.exit(1));
+  function attachMessageListeners(activeClient) {
+    activeClient.on('message_create', (message) => {
+      if (!message?.fromMe) return;
+      void handleIncomingMessage(message, 'message_create');
     });
-  }).catch((error) => {
-    console.error('[fatal]', error);
-    void destroyClient('ready failure');
-  });
-  // Keep initialization and the ready timeout concurrent. Awaiting initialize
-  // first can hang forever when Chromium stops responding before it rejects.
-  const initializePromise = Promise.resolve().then(() => client.initialize());
-  const initializeFailurePromise = initializePromise.then(
-    () => new Promise(() => {}),
-    (error) => {
-      console.error('[whatsapp] initialize failed:', error);
-      throw error;
-    }
-  );
-  console.log('[whatsapp] initialize called');
-  console.log('[whatsapp] waiting for ready');
-  let startupTimer = null;
-  try {
-    const result = await Promise.race([
-      readyPromise.then(() => 'ready'),
-      initializeFailurePromise,
-      new Promise((resolve) => {
-        startupTimer = setTimeout(() => resolve('timeout'), startupTimeoutMs);
-      })
-    ]);
-    if (result === 'timeout') {
-      throw new Error(`WhatsApp startup timed out after ${startupTimeoutMs}ms`);
-    }
-  } catch (error) {
-    await destroyClient('startup failure');
-    throw error;
-  } finally {
-    clearTimeout(startupTimer);
+    activeClient.on('message', (message) => {
+      if (message?.fromMe) return;
+      void handleIncomingMessage(message, 'message');
+    });
   }
+
+  const startupTimeoutMs = config.whatsappStartupTimeoutMs;
+  const startupAttempts = config.whatsappStartupRetries + 1;
+  let lastStartupError = null;
+  for (let attempt = 1; attempt <= startupAttempts; attempt += 1) {
+    clientDestroyed = false;
+    client = createWhatsAppClient({
+      headless: config.headless,
+      executablePath: config.executablePath,
+      authDir: config.authDir
+    });
+    attachMessageListeners(client);
+    const attemptStartedAt = Date.now();
+    const readyPromise = waitForReady(client);
+    const initializePromise = Promise.resolve().then(() => client.initialize());
+    const initializeFailurePromise = initializePromise.then(
+      () => new Promise(() => {}),
+      (error) => {
+        console.error(`[whatsapp] initialize failed attempt=${attempt}:`, error);
+        throw error;
+      }
+    );
+    const startupDiagnosticsTimer = setInterval(() => {
+      const browserProcess = client?.pupBrowser?.process?.();
+      console.warn(
+        `[whatsapp] startup_wait attempt=${attempt}/${startupAttempts} elapsed_ms=${Date.now() - attemptStartedAt} browser_pid=${browserProcess?.pid || 'unavailable'} browser_exit=${browserProcess?.exitCode ?? 'running'}`
+      );
+    }, 15000);
+    let startupTimer = null;
+    console.log(`[whatsapp] starting client attempt=${attempt}/${startupAttempts} timeout_ms=${startupTimeoutMs}`);
+    console.log('[whatsapp] initialize called');
+    console.log('[whatsapp] waiting for ready');
+    try {
+      const result = await Promise.race([
+        readyPromise.then(() => 'ready'),
+        initializeFailurePromise,
+        new Promise((resolve) => {
+          startupTimer = setTimeout(() => resolve('timeout'), startupTimeoutMs);
+        })
+      ]);
+      if (result === 'timeout') {
+        throw new Error(`WhatsApp startup timed out after ${startupTimeoutMs}ms`);
+      }
+      console.log('[whatsapp] ready');
+      await finalizeStartup();
+      return;
+    } catch (error) {
+      lastStartupError = error;
+      console.error(`[whatsapp] startup attempt=${attempt}/${startupAttempts} failed:`, error);
+      await destroyClient(`startup attempt ${attempt} failure`);
+      if (attempt < startupAttempts) {
+        clearStaleSingletonLocks(config.authDir);
+        console.warn('[whatsapp] retrying startup with a fresh Chromium client');
+      }
+    } finally {
+      clearTimeout(startupTimer);
+      clearInterval(startupDiagnosticsTimer);
+    }
+  }
+  throw lastStartupError || new Error('WhatsApp startup failed');
 }
 
 module.exports = {
