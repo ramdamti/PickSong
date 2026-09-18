@@ -2647,6 +2647,33 @@ async function bootstrap() {
     attachMessageListeners(client);
     const attemptStartedAt = Date.now();
     const readyPromise = waitForReady(client);
+    let observedBrowser = null;
+    let observedPage = null;
+    const attachStartupDiagnostics = () => {
+      const browser = client?.pupBrowser;
+      const page = client?.pupPage;
+      if (browser && browser !== observedBrowser) {
+        observedBrowser = browser;
+        browser.on('disconnected', () => {
+          console.error(`[whatsapp] browser disconnected during startup attempt=${attempt}`);
+        });
+      }
+      if (page && page !== observedPage) {
+        observedPage = page;
+        page.on('pageerror', (error) => {
+          console.error(`[whatsapp] page error during startup attempt=${attempt}:`, error);
+        });
+        page.on('requestfailed', (request) => {
+          console.warn(`[whatsapp] request failed during startup attempt=${attempt} url=${request.url()} error=${request.failure()?.errorText || 'unknown'}`);
+        });
+        page.on('console', (message) => {
+          if (message.type() === 'error' || message.type() === 'warning') {
+            console.warn(`[whatsapp] page console ${message.type()} attempt=${attempt}: ${message.text()}`);
+          }
+        });
+      }
+      return page?.url?.() || 'unavailable';
+    };
     const initializePromise = Promise.resolve().then(() => client.initialize());
     const initializeFailurePromise = initializePromise.then(
       () => new Promise(() => {}),
@@ -2657,8 +2684,9 @@ async function bootstrap() {
     );
     const startupDiagnosticsTimer = setInterval(() => {
       const browserProcess = client?.pupBrowser?.process?.();
+      const pageUrl = attachStartupDiagnostics();
       console.warn(
-        `[whatsapp] startup_wait attempt=${attempt}/${startupAttempts} elapsed_ms=${Date.now() - attemptStartedAt} browser_pid=${browserProcess?.pid || 'unavailable'} browser_exit=${browserProcess?.exitCode ?? 'running'}`
+        `[whatsapp] startup_wait attempt=${attempt}/${startupAttempts} elapsed_ms=${Date.now() - attemptStartedAt} browser_pid=${browserProcess?.pid || 'unavailable'} browser_exit=${browserProcess?.exitCode ?? 'running'} page_url=${JSON.stringify(pageUrl)}`
       );
     }, 15000);
     let startupTimer = null;
