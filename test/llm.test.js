@@ -83,6 +83,22 @@ test('isExternalCatalogRecommendationRequest requires an explicit external-catal
   assert.equal(isExternalCatalogRecommendationRequest('\u05ea\u05d1\u05d9\u05d0 \u05dc\u05e0\u05d5 \u05d3\u05d1\u05e8\u05d9\u05dd \u05d7\u05d3\u05e9\u05d9\u05dd'), false);
 });
 
+test('interpretMessage keeps a generic recommendation inside the local catalog', async () => {
+  const action = await interpretMessage({
+    provider: 'groq', baseUrl: 'https://api.example.com', apiKey: 'test', model: 'test-model',
+    messageText: '\u05ea\u05de\u05dc\u05d9\u05e5 \u05e2\u05dc \u05e9\u05d9\u05e8', replyContext: null, recentMessages: [], currentDate: '2026-09-18',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return { choices: [{ message: { content: JSON.stringify({ action: 'recommend_external_song', query: { limit: 1 } }) } }] };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.limit, 1);
+});
+
 test('external recommendation reasons are grounded in the band arrangement', () => {
   assert.match(EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT, /keys, drums, two guitars, and bass/i);
   assert.match(EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT, /do not give generic mood-only praise/i);

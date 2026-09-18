@@ -1536,6 +1536,12 @@ function normalizeAgentAction(action, { messageText, replyContext, quotedText })
   if (artistReplyAdd) {
     return { action: 'add_song', song: artistReplyAdd };
   }
+  // The local catalog is the safe default. A generic "recommend a song" is
+  // not permission to invent or search outside it, even if the model picks
+  // recommend_external_song.
+  if (action.action === 'recommend_external_song' && !isExternalCatalogRecommendationRequest(messageText)) {
+    action = { ...action, action: 'search_songs' };
+  }
   if (isExternalCatalogRecommendationRequest(messageText)) {
     const query = action.query && typeof action.query === 'object' && !Array.isArray(action.query) ? { ...action.query } : {};
     const requirements = query.requirements && typeof query.requirements === 'object' && !Array.isArray(query.requirements)
