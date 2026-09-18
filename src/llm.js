@@ -115,7 +115,12 @@ const SUPPORTED_SEARCH_FIELDS = {
 // The free Groq tier is token-per-minute limited. Serializing this small bot's
 // requests avoids simultaneous messages exhausting the minute budget.
 const MAX_CONCURRENT_AGENT_CALLS = 1;
-const DEFAULT_MAX_COMPLETION_TOKENS = 800;
+// Most action-planning replies are tiny JSON objects. Keep the normal
+// reservation small so Groq's TPM budget serves more messages; the existing
+// validation retry below gets the larger budget when a request genuinely
+// needs it.
+const DEFAULT_MAX_COMPLETION_TOKENS = 512;
+const ACTION_FALLBACK_MAX_COMPLETION_TOKENS = 800;
 const DEFAULT_MAX_RETRIES = 1;
 // A provider rate-limit response can carry a retry-after far longer than a
 // chat user will ever wait (observed: ~591s). Sleeping that long inline would
@@ -1907,6 +1912,9 @@ async function interpretMessage({
           // hidden reasoning tokens on every message and is the main drain on
           // a free-tier daily token budget; 'low' is plenty for this task.
           reasoningEffort: 'low',
+          maxCompletionTokens: usedJsonValidateFallback
+            ? ACTION_FALLBACK_MAX_COMPLETION_TOKENS
+            : DEFAULT_MAX_COMPLETION_TOKENS,
           requestFn
         });
         const action = validateAgentAction(
