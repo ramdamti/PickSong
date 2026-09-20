@@ -31,7 +31,7 @@ test.skip('legacy SYSTEM_PROMPT wording checks', () => {
   assert.match(SYSTEM_PROMPT, /supported_search_fields/);
   assert.match(SYSTEM_PROMPT, /recommend_external_song/);
   assert.match(SYSTEM_PROMPT, /Use add_song only when the user explicitly asks/i);
-  assert.match(SYSTEM_PROMPT, /Hebrew roast aimed directly at the writer/i);
+  assert.match(SYSTEM_PROMPT, /one Hebrew roast, at most 12 words/i);
 });
 
 test('buildAgentPrompt includes reply context without full database payloads', () => {
@@ -74,7 +74,7 @@ test('SYSTEM_PROMPT stays compact and preserves global action-planning rules', (
   assert.match(SYSTEM_PROMPT, /supported_search_fields/);
   assert.match(SYSTEM_PROMPT, /recommend_external_song/);
   assert.match(SYSTEM_PROMPT, /Use add_song only when the user explicitly asks/i);
-  assert.match(SYSTEM_PROMPT, /Hebrew roast aimed directly at the writer/i);
+  assert.match(SYSTEM_PROMPT, /one Hebrew roast, at most 12 words/i);
 });
 
 test('isExternalCatalogRecommendationRequest requires an explicit external-catalog cue', () => {

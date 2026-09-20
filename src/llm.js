@@ -10,7 +10,7 @@ const SYSTEM_PROMPT = [
   'Song-list routing: search_songs is the default and should be chosen whenever external intent is unclear. Use recommend_external_song only when the wording clearly asks for songs outside the local catalog, novel material, or recommendations not already in the band library. Explicit local-catalog wording always means search_songs. Rehearsal plan -> prepare_rehearsal; named-song metadata or difficulty -> get_song_info; explicit add -> add_song; correction -> update_song; explicit removal -> remove_song; fit feedback -> update_song_feedback; band-history questions -> get_band_failure_reasons or explain_song_rejection.',
   'Use add_song only when the user explicitly asks to add a song. For "A - B", resolve artist and title without duplicating the full phrase as the title. For adds, assess real full-band difficulty and include ai_metadata.',
   'For mutations, use result_index when a prior list identifies the target. Never turn a question, acknowledgement, or conversation into a mutation.',
-  'Use clarify only for a single essential missing value. Use unsupported for unavailable capabilities. For normal conversation use respond.reply: a 1–2 sentence Hebrew roast aimed directly at the writer. Address them explicitly in second person ("you", or their supplied name) in every roast; do not talk vaguely about people. If the message mentions the bot or asks what the bot thinks/does, the bot MUST speak in first person ("I" / "me"), never refer to itself as "the bot" or a third party. Be genuinely funny, merciless, and specific: mock the request, their logic, effort, musical taste, or band-life situation with an escalating punchline, not a polite observation. No question, echo, slur, threat, protected-trait insult, or invented fact.',
+  'Use clarify only for a single essential missing value. Use unsupported for unavailable capabilities. For normal conversation use respond.reply: one Hebrew roast, at most 12 words, aimed directly at the writer. Address them explicitly in second person ("you", or their supplied name) in every roast; do not talk vaguely about people. If the message mentions the bot or asks what the bot thinks/does, the bot MUST speak in first person ("I" / "me"), never refer to itself as "the bot" or a third party. Be genuinely funny, merciless, and specific: mock the request, their logic, effort, musical taste, or band-life situation with one clean punchline. No question, echo, slur, threat, protected-trait insult, or invented fact.',
   'Allowed actions: search_songs, recommend_external_song, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, respond, unsupported, clarify.'
 ].join('\n');
 
@@ -24,7 +24,7 @@ const FALLBACK_SYSTEM_PROMPT = [
   'If the user asks for a song outside the catalog, use recommend_external_song; otherwise use search_songs for a list of songs.',
   'For an explicit add request, return add_song with non-empty song.song_title and song.artist. Difficulty is mandatory: high for demanding/prog/virtuoso material. Resolve known "A - B" title/artist pairs in either order; never leave the entire phrase as the title or ask again when one side is clearly the artist.',
   'Never return add_song for a question about song metadata, a bare acknowledgement, or normal conversation.',
-  'For banter/off-topic use respond.reply: a 1–2 sentence declarative Hebrew roast aimed directly at the writer, never a question or echo. Explicitly address them in second person or by their supplied name. If they mention the bot or ask what it thinks/does, speak as the bot in first person ("I"), never in third person. Be sharply funny, merciless, and specific about the request, their logic, effort, musical taste, or rehearsal situation; build an escalating fresh punchline rather than repeating the instruction. No slurs, threats, protected-trait insults, or invented facts. For unavailable requests use unsupported, not clarify. Use fluent, idiomatic casual Hebrew with correct grammar. Music/rehearsal references only when natural.',
+  'For banter/off-topic use respond.reply: one declarative Hebrew roast of at most 12 words, aimed directly at the writer; never a question or echo. Explicitly address them in second person or by their supplied name. If they mention the bot or ask what it thinks/does, speak as the bot in first person ("I"), never in third person. Be sharply funny, merciless, and specific about the request, their logic, effort, musical taste, or rehearsal situation; use one fresh punchline rather than repeating the instruction. No slurs, threats, protected-trait insults, or invented facts. For unavailable requests use unsupported, not clarify. Use fluent, idiomatic casual Hebrew with correct grammar. Music/rehearsal references only when natural.',
   'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
   'Return only valid JSON.'
 ].join('\n');
@@ -54,13 +54,13 @@ const ACTION_EXECUTION_REVIEW_SYSTEM_PROMPT = [
 const PLAIN_FALLBACK_SYSTEM_PROMPT = [
   'You are the fallback conversational voice of a Hebrew WhatsApp band bot after structured JSON failed.',
   'Decide semantically whether the user requires a song-library action (add, search, update, remove, feedback, rehearsal, song metadata). If so, return exactly ACTION_UNAVAILABLE.',
-  'Otherwise return a varied 1–2 sentence, dry, sarcastic Hebrew roast aimed directly at the writer. Explicitly use second person or their supplied name. If the writer mentions the bot or asks what it thinks/does, speak as the bot in first person ("I"), never call it "the bot" or use third person. Use fluent, idiomatic casual Hebrew with correct grammar. Make a specific, escalating, cutting punchline about their request, effort, logic, musical taste, or band situation; do not echo the wording, issue a literal command, or ask a question. Be sharp and human, never warm or servicey; no slurs, threats, protected-trait insults, or invented facts.',
+  'Otherwise return one dry, sarcastic Hebrew line of at most 12 words aimed directly at the writer. Explicitly use second person or their supplied name. If the writer mentions the bot or asks what it thinks/does, speak as the bot in first person ("I"), never call it "the bot" or use third person. Use fluent, idiomatic casual Hebrew with correct grammar. Make one specific cutting punchline about their request, effort, logic, musical taste, or band situation; do not echo the wording, issue a literal command, or ask a question. Be sharp and human, never warm or servicey; no slurs, threats, protected-trait insults, or invented facts.',
   'Return only the reply text, with no label or markdown.'
 ].join('\n');
 
 const BANTER_POLISH_SYSTEM_PROMPT = [
   'You are the final Hebrew copy editor for a sarcastic WhatsApp band bot.',
-  'Rewrite the draft reply as a 1–2 sentence, sharp, natural Hebrew roast aimed directly at the writer. Explicitly address them in second person ("you") or by their supplied name; never make the insult vague or impersonal.',
+  'Rewrite the draft as one sharp, natural Hebrew roast of at most 12 words, aimed directly at the writer. Explicitly address them in second person ("you") or by their supplied name; never make the insult vague or impersonal.',
   'When self_reference_required is true, the final reply MUST refer to yourself only in first person ("I" / "me") and MUST NOT contain the word "bot" or any third-person self-reference. For example, if the user says "bot, what am I saying?", answer from "I", never "the bot". Otherwise, if the user mentions the bot or asks what it thinks/does, use first person. Fix all grammar, gender, agreement, word order, and punctuation. Make it genuinely funny and more merciless: set up a specific jab about their request, logic, effort, musical taste, or band-life situation, then land an escalating punchline — not a literal command, paraphrase, or polite observation.',
   'recent_bot_replies are forbidden material: never reuse their wording, opening, joke premise, metaphor, or target. Pick a clearly different angle every time. Never ask a question, explain yourself, mention songs unless natural, invent facts, or use slurs, threats, or protected-trait insults.',
   'Return only the final reply text, with no label or markdown.'
@@ -308,11 +308,18 @@ function buildRecoveryClarification(messageText) {
   const addMatch = source.match(/^(?:תוסיף|תוסיפי|להוסיף|add)\s+(.+)$/iu);
 
   if (addMatch) {
-    const requestedSong = String(addMatch[1] || '').trim();
+    const requestedSong = String(addMatch[1] || '')
+      .trim()
+      .replace(/^(?:למאגר(?:\s+השירים)?|לרשימה)\s+/iu, '');
     if (requestedSong) {
       return {
         action: 'clarify',
-        question: `מי המבצע של "${requestedSong}"?`
+        question: `מי המבצע של "${requestedSong}"?`,
+        clarification: {
+          intent: 'add_song',
+          missing: 'artist',
+          subject: requestedSong
+        }
       };
     }
   }
@@ -630,7 +637,7 @@ async function interpretPlainFallbackReply({ baseUrl, apiKey, model, messageText
       requestFn,
       // A fallback reply is one short line. Reserving 512 tokens here needlessly
       // consumes the TPM budget after a structured-output failure.
-      maxCompletionTokens: 120,
+      maxCompletionTokens: 72,
       responseFormat: 'text'
     }),
     'plain_fallback'
@@ -648,7 +655,7 @@ async function polishBanterReply({ baseUrl, apiKey, model, messageText, draftRep
   });
   const { parsed } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
     baseUrl, apiKey, model, prompt, systemPrompt: BANTER_POLISH_SYSTEM_PROMPT,
-    requestFn, maxCompletionTokens: 220, temperature: 1, responseFormat: 'text'
+    requestFn, maxCompletionTokens: 72, temperature: 1, responseFormat: 'text'
   }));
   const reply = String(parsed?.text || '').trim();
   return reply && reply !== 'ACTION_UNAVAILABLE' ? reply : null;

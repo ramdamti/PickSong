@@ -552,12 +552,31 @@ function inferDirectAddSongFromMessage(messageText) {
   const explicitAdd = source.match(/^(?:תוסיף|תוסיפי|להוסיף|הוסף|add)\s+(.+)$/iu);
   if (!explicitAdd) return null;
 
-  const candidate = String(explicitAdd[1] || '').trim();
+  const candidate = normalizeAddSongSubject(explicitAdd[1]);
   if (!candidate || /^(?:למאגר|לרשימה|למאגר השירים)$/iu.test(candidate)) {
     return null;
   }
 
   return parseSongIdentityText(candidate);
+}
+
+function normalizeAddSongSubject(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^את\s+/iu, '')
+    // "תוסיף למאגר <song>" and "תוסיף לרשימה <song>" are add commands;
+    // the destination is not part of the song title.
+    .replace(/^(?:למאגר(?:\s+השירים)?|לרשימה)\s+/iu, '')
+    .trim();
+}
+
+function normalizeExplicitAddMessage(messageText) {
+  const source = String(messageText || '').trim();
+  const explicitAdd = source.match(/^(תוסיף|תוסיפי|להוסיף|הוסף|add)\s+(.+)$/iu);
+  if (!explicitAdd) return source;
+
+  const subject = normalizeAddSongSubject(explicitAdd[2]);
+  return subject ? `תוסיף ${subject}` : source;
 }
 
 function isExplicitAddRequest(messageText) {
@@ -616,16 +635,27 @@ function inferRecentAddSongPayload(messageText, recentMessages, quotedText = '')
   return null;
 }
 
-function buildAgentMessageText(messageText, recentMessages, quotedText = '') {
+function buildAgentMessageText(messageText, recentMessages, quotedText = '', pendingClarification = null) {
   const source = String(messageText || '').trim();
+  const pendingSubject = String(pendingClarification?.subject || '').trim();
+  if (
+    pendingClarification?.intent === 'add_song' &&
+    pendingClarification?.missing === 'artist' &&
+    pendingSubject &&
+    source &&
+    !isExplicitAddRequest(source)
+  ) {
+    return `תוסיף ${pendingSubject} של ${source}`;
+  }
+
   const directAddSong = inferDirectAddSongFromMessage(source);
   if (directAddSong) {
-    return source;
+    return normalizeExplicitAddMessage(source);
   }
 
   const inferredAddSong = inferRecentAddSongPayload(source, recentMessages, quotedText);
   if (!inferredAddSong) {
-    return source;
+    return normalizeExplicitAddMessage(source);
   }
 
   return `תוסיף ${inferredAddSong.song_title} של ${inferredAddSong.artist}`;
@@ -2318,7 +2348,8 @@ async function handleAgentMessage({
     const agentMessageText = buildAgentMessageText(
       messageText,
       recentMessages,
-      quotedText
+      quotedText,
+      pendingClarification
     );
     const action = await interpretMessageFn({
       provider: config.llmProvider,
@@ -2350,7 +2381,13 @@ async function handleAgentMessage({
     // Let the agent explicitly review every durable change before the local
     // executor mutates state. The executor remains authoritative for whether
     // the referenced song actually exists and can be changed.
-    if (isMutationAction(action) && typeof reviewActionExecutionFn === 'function') {
+    const isAddArtistClarificationContinuation =
+      action.action === 'add_song' &&
+      pendingClarification?.intent === 'add_song' &&
+      pendingClarification?.missing === 'artist' &&
+      Boolean(String(pendingClarification?.subject || '').trim()) &&
+      isArtistReplyToAddClarification(messageText, quotedText);
+    if (isMutationAction(action) && typeof reviewActionExecutionFn === 'function' && !isAddArtistClarificationContinuation) {
       const review = await reviewActionExecutionFn({
         baseUrl: config.llmBaseUrl,
         apiKey: config.llmApiKey,

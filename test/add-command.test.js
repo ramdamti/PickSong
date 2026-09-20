@@ -154,6 +154,53 @@ test('handleAgentMessage accepts sparse add_song payloads for explicit add reque
   assert.equal(sentMessages.length, 1);
 });
 
+test('handleAgentMessage resumes an artist clarification for an add-to-library request', async () => {
+  const sentMessages = [];
+  const pendingClarifications = new Map();
+  const stateStore = {
+    addSong(song) { this.song = song; return true; },
+    async queueSave() {},
+    getSongs() { return []; },
+    getResultMessage() { return null; },
+    getLastResults() { return null; }
+  };
+  const chat = {
+    async sendMessage(text) {
+      sentMessages.push(text);
+      return { id: { _serialized: `wamid-${sentMessages.length}` } };
+    }
+  };
+  const config = { triggerText: '\u05d1\u05d5\u05d8', llmProvider: 'groq', llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model' };
+
+  await handleAgentMessage({
+    chat, stateStore, config, pendingClarifications,
+    record: { text: '\u05d1\u05d5\u05d8 \u05ea\u05d5\u05e1\u05d9\u05e3 \u05dc\u05de\u05d0\u05d2\u05e8 I Got My Mind Set on You', quoted: { fromMe: false }, chatId: 'chat-1' },
+    interpretMessageFn: async ({ messageText }) => {
+      assert.equal(messageText, '\u05ea\u05d5\u05e1\u05d9\u05e3 I Got My Mind Set on You');
+      return {
+        action: 'clarify',
+        question: '\u05de\u05d9 \u05d4\u05de\u05d1\u05e6\u05e2 \u05e9\u05dc I Got My Mind Set on You?',
+        clarification: { intent: 'add_song', missing: 'artist', subject: 'I Got My Mind Set on You' }
+      };
+    }
+  });
+
+  await handleAgentMessage({
+    chat, stateStore, config, pendingClarifications,
+    record: { text: 'George Harrison', quoted: { fromMe: false, text: sentMessages[0] }, chatId: 'chat-1' },
+    reviewActionExecutionFn: async () => { throw new Error('known add clarification must not require a second review'); },
+    interpretMessageFn: async ({ messageText, pendingClarification }) => {
+      assert.equal(messageText, '\u05ea\u05d5\u05e1\u05d9\u05e3 I Got My Mind Set on You \u05e9\u05dc George Harrison');
+      assert.equal(pendingClarification.subject, 'I Got My Mind Set on You');
+      return { action: 'add_song', song: createSong({ song_title: 'I Got My Mind Set on You', artist: 'George Harrison' }) };
+    }
+  });
+
+  assert.equal(stateStore.song.song_title, 'I Got My Mind Set on You');
+  assert.equal(stateStore.song.artist, 'George Harrison');
+  assert.equal(pendingClarifications.size, 0);
+});
+
 test('handleAgentMessage preserves legacy top-level keyboard metadata on insertion', async () => {
   const stateStore = {
     addSong(song) {
