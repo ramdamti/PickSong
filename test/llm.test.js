@@ -31,7 +31,7 @@ test.skip('legacy SYSTEM_PROMPT wording checks', () => {
   assert.match(SYSTEM_PROMPT, /supported_search_fields/);
   assert.match(SYSTEM_PROMPT, /recommend_external_song/);
   assert.match(SYSTEM_PROMPT, /Use add_song only when the user explicitly asks/i);
-  assert.match(SYSTEM_PROMPT, /one Hebrew roast, at most 12 words/i);
+  assert.match(SYSTEM_PROMPT, /match the writer’s tone/i);
 });
 
 test('buildAgentPrompt includes reply context without full database payloads', () => {
@@ -74,7 +74,7 @@ test('SYSTEM_PROMPT stays compact and preserves global action-planning rules', (
   assert.match(SYSTEM_PROMPT, /supported_search_fields/);
   assert.match(SYSTEM_PROMPT, /recommend_external_song/);
   assert.match(SYSTEM_PROMPT, /Use add_song only when the user explicitly asks/i);
-  assert.match(SYSTEM_PROMPT, /one Hebrew roast, at most 12 words/i);
+  assert.match(SYSTEM_PROMPT, /match the writer’s tone/i);
 });
 
 test('isExternalCatalogRecommendationRequest requires an explicit external-catalog cue', () => {
@@ -1224,6 +1224,44 @@ test('interpretMessage retries after a locally invalid add_song payload and reco
   assert.equal(callCount, 2);
   assert.equal(action.action, 'add_song');
   assert.equal(action.song.song_title, 'With A Little Help From My Friends');
+});
+
+test('interpretMessage keeps a valid add when only its optional difficulty label is invalid', async () => {
+  let callCount = 0;
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'add Coming Back to Life - Pink Floyd',
+    replyContext: null,
+    recentMessages: [],
+    currentDate: '2026-09-23',
+    requestFn: async () => {
+      callCount += 1;
+      return {
+        ok: true,
+        async json() {
+          return {
+            choices: [{
+              message: {
+                content: JSON.stringify({
+                  action: 'add_song',
+                  song: { song_title: 'Coming Back to Life', artist: 'Pink Floyd', difficulty: 'unknown' }
+                })
+              }
+            }]
+          };
+        }
+      };
+    }
+  });
+
+  assert.equal(callCount, 1);
+  assert.equal(action.action, 'add_song');
+  assert.equal(action.song.song_title, 'Coming Back to Life');
+  assert.equal(action.song.artist, 'Pink Floyd');
+  assert.equal(action.song.difficulty, null);
 });
 
 test('interpretMessage returns a useful clarification rather than throwing after two invalid add_song payloads', async () => {

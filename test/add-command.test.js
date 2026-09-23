@@ -201,6 +201,34 @@ test('handleAgentMessage resumes an artist clarification for an add-to-library r
   assert.equal(pendingClarifications.size, 0);
 });
 
+test('handleAgentMessage ignores an artist reply when the pending subject already contains the artist', async () => {
+  const sentMessages = [];
+  const pendingClarifications = new Map([['chat-1', {
+    intent: 'add_song', missing: 'artist', subject: 'Coming Back to Life - Pink Floyd', createdAt: Date.now()
+  }]]);
+  const stateStore = {
+    addSong(song) { this.song = song; return true; },
+    async queueSave() {},
+    getSongs() { return []; },
+    getResultMessage() { return null; },
+    getLastResults() { return null; }
+  };
+  const chat = { async sendMessage(text) { sentMessages.push(text); return { id: { _serialized: 'wamid-1' } }; } };
+  const config = { triggerText: '\u05d1\u05d5\u05d8', llmProvider: 'groq', llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model' };
+
+  await handleAgentMessage({
+    chat, stateStore, config, pendingClarifications,
+    record: { text: '\u05db\u05ea\u05d5\u05d1 \u05dc\u05da \u05d9\u05d0 \u05d3\u05d1\u05d9\u05dc', quoted: { fromMe: false, text: '\u200f\u{1F916} \u05de\u05d9 \u05d4\u05de\u05d1\u05e6\u05e2 \u05e9\u05dc "Coming Back to Life - Pink Floyd"?' }, chatId: 'chat-1' },
+    interpretMessageFn: async ({ messageText }) => {
+      assert.equal(messageText, '\u05ea\u05d5\u05e1\u05d9\u05e3 Coming Back to Life \u05e9\u05dc Pink Floyd');
+      return { action: 'add_song', song: createSong({ song_title: 'Coming Back to Life', artist: 'Pink Floyd' }) };
+    }
+  });
+
+  assert.equal(stateStore.song.song_title, 'Coming Back to Life');
+  assert.equal(stateStore.song.artist, 'Pink Floyd');
+});
+
 test('handleAgentMessage preserves legacy top-level keyboard metadata on insertion', async () => {
   const stateStore = {
     addSong(song) {

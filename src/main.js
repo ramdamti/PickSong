@@ -641,6 +641,20 @@ function buildAgentMessageText(messageText, recentMessages, quotedText = '', pen
   if (
     pendingClarification?.intent === 'add_song' &&
     pendingClarification?.missing === 'artist' &&
+    pendingSubject
+  ) {
+    // Older recovery prompts could mistakenly ask for an artist even though
+    // the original subject already contained "title - artist". Keep that
+    // known identity authoritative; never turn a frustrated reply into an
+    // artist name.
+    const knownIdentity = parseSongIdentityText(pendingSubject);
+    if (knownIdentity) {
+      return `תוסיף ${knownIdentity.song_title} של ${knownIdentity.artist}`;
+    }
+  }
+  if (
+    pendingClarification?.intent === 'add_song' &&
+    pendingClarification?.missing === 'artist' &&
     pendingSubject &&
     source &&
     !isExplicitAddRequest(source)
