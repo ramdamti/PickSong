@@ -1,7 +1,7 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
 const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, recommendExternalSongs, composeUnsupportedReply, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat, isExternalCatalogRecommendationRequest, buildExternalRecommendationAction, getAgentUsageStats } = require('./llm');
-const { READ_ONLY_SONG_TOOLS, executeReadOnlySongTool } = require('./agent-tools');
+const { READ_ONLY_TOOLS, executeReadOnlyTool } = require('./agent-tools');
 const {
   persistResultContext,
   resolveActiveResultContext,
@@ -12,7 +12,11 @@ const { formatSongsReply, prepareSongsForReply } = require('./chords');
 const { ALLOWED_UPDATE_FIELDS } = require('./schemas');
 const { discoverCatalogSongs } = require('./song-catalog');
 
-const CURRENT_DATE = '2026-08-08';
+function currentDateInIsrael() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date());
+}
 const MUTABLE_SONG_FIELDS = new Set(ALLOWED_UPDATE_FIELDS);
 const BOT_PREFIX = '\u200F🤖 ';
 const DEFAULT_REHEARSAL_DURATION_MINUTES = 180;
@@ -2375,11 +2379,14 @@ async function handleAgentMessage({
       replyContext,
       recentMessages,
       pendingClarification,
-      currentDate: CURRENT_DATE,
-      tools: isSongInfoRequest(messageText) ? READ_ONLY_SONG_TOOLS : undefined,
-      executeToolCall: isSongInfoRequest(messageText)
-        ? ({ name, arguments: rawArguments }) => executeReadOnlySongTool({ stateStore, name, arguments: rawArguments })
-        : undefined
+      currentDate: currentDateInIsrael(),
+      tools: READ_ONLY_TOOLS,
+      executeToolCall: ({ name, arguments: rawArguments }) => executeReadOnlyTool({
+        stateStore,
+        eventsFile: config.eventsFile,
+        name,
+        arguments: rawArguments
+      })
     });
 
     // Adding a song is a durable mutation. Do not let an LLM turn a metadata
@@ -2469,9 +2476,11 @@ async function bootstrap() {
     createWhatsAppClient,
     clearStaleSingletonLocks,
     waitForReady,
+    findGroupChat,
     messageToRecord,
     readQuotedMessage
   } = require('./whatsapp');
+  const { loadEventSchedule, saveEventSchedule, sendDueEventReminders, eventFromWhatsAppMessage, upsertEvent } = require('./event-reminders');
   const config = loadConfig(process.env);
   const loadedState = await loadState(config.stateFile);
   const loadedSeenState = await loadSeenState(config.seenFile);
@@ -2492,6 +2501,9 @@ async function bootstrap() {
   let clientDestroyed = false;
   let client = null;
   let heartbeatTimer = null;
+  let eventReminderTimer = null;
+  let eventReminderCheckRunning = false;
+  let eventSchedule = await loadEventSchedule(config.eventsFile);
 
   async function destroyClient(reason) {
     if (clientDestroyed || !client) return;
@@ -2525,6 +2537,7 @@ async function bootstrap() {
     shuttingDown = true;
     console.log(`[shutdown] received ${signal}`);
     clearInterval(heartbeatTimer);
+    clearInterval(eventReminderTimer);
     await destroyClient(signal);
     process.exit(0);
   }
@@ -2550,6 +2563,49 @@ async function bootstrap() {
     );
   }, heartbeatIntervalMs);
   heartbeatTimer.unref();
+
+  async function checkEventReminders() {
+    if (eventReminderCheckRunning || !eventSchedule.group_name || eventSchedule.events.length === 0 || !client) return;
+    eventReminderCheckRunning = true;
+    try {
+      const chat = await findGroupChat(client, eventSchedule.group_name);
+      const result = await sendDueEventReminders({
+        schedule: eventSchedule,
+        send: async (text, event) => {
+          await sendBotMessage(chat, text);
+          console.log(`[event_reminder] sent id=${event.id} group=${JSON.stringify(eventSchedule.group_name)}`);
+        }
+      });
+      eventSchedule = result.schedule;
+      if (result.due.length > 0) {
+        await saveEventSchedule(config.eventsFile, eventSchedule);
+      }
+    } catch (error) {
+      console.error(`[event_reminder] check_failed: ${error.message}`);
+    } finally {
+      eventReminderCheckRunning = false;
+    }
+  }
+
+  async function syncScheduledEventMessage(message, source) {
+    const event = eventFromWhatsAppMessage(message);
+    if (!event || !eventSchedule.group_name) return false;
+    let chat = null;
+    try {
+      chat = typeof message?.getChat === 'function' ? await message.getChat() : null;
+    } catch (error) {
+      console.warn(`[event_sync] chat_lookup_failed: ${error.message}`);
+      return false;
+    }
+    if (!chat?.isGroup || normalizeText(chat.name) !== normalizeText(eventSchedule.group_name)) return false;
+
+    const result = upsertEvent(eventSchedule, event);
+    if (!result.changed) return false;
+    eventSchedule = result.schedule;
+    await saveEventSchedule(config.eventsFile, eventSchedule);
+    console.log(`[event_sync] source=${source} id=${event.id} cancelled=${event.cancelled} start=${event.start_at}`);
+    return true;
+  }
 
   function markProcessed(messageId) {
     if (!messageId || processedMessageIds.has(messageId)) return false;
@@ -2617,6 +2673,7 @@ async function bootstrap() {
   }
 
   async function processMessageObject(message, source) {
+    await syncScheduledEventMessage(message, source);
     const messageId = message.id?._serialized || message.id?.id || '';
     if (!markProcessed(messageId)) return;
     if (stateStore.hasSeenMessage(messageId)) return;
@@ -2689,6 +2746,12 @@ async function bootstrap() {
     }
 
     console.log('[whatsapp] watcher is live');
+    await checkEventReminders();
+    eventReminderTimer = setInterval(() => {
+      void checkEventReminders();
+    }, 60 * 1000);
+    eventReminderTimer.unref();
+    console.log(`[event_reminder] enabled group=${JSON.stringify(eventSchedule.group_name)} events=${eventSchedule.events.length} time=20:00 two_days_before`);
   }
 
   const handleIncomingMessage = async (message, source) => {
@@ -2707,6 +2770,11 @@ async function bootstrap() {
     activeClient.on('message', (message) => {
       if (message?.fromMe) return;
       void handleIncomingMessage(message, 'message');
+    });
+    activeClient.on('message_edit', (message) => {
+      void syncScheduledEventMessage(message, 'message_edit').catch((error) => {
+        console.error(`[event_sync] edit_failed: ${error.message}`);
+      });
     });
   }
 

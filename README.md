@@ -53,6 +53,7 @@ Primary files:
 
 - `state.json` - canonical dataset and runtime context
 - `seen.json` - recent seen-message cache
+- `events.json` - event reminders and sent-reminder history
 
 The runtime expects `state.json` to already be canonical and enriched. On startup it validates:
 
@@ -80,6 +81,7 @@ Optional:
 - `TRIGGER_TEXT` - defaults to `בוט`
 - `STATE_FILE` - defaults to `state.json`
 - `SEEN_FILE` - defaults to `seen.json`
+- `EVENTS_FILE` - defaults to `events.json`; stores scheduled group-event reminders
 - `AUTH_DIR` - defaults to `.wwebjs_auth`
 - `DISCOVER_CHORDS` - `true` or `false`, defaults to `true`
 - `LLM_PROVIDER` - `groq` or `openai_compatible`, defaults to `groq`

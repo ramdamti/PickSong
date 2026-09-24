@@ -132,6 +132,7 @@ function loadConfig(env = process.env, options = {}) {
     triggerText: (mergedEnv.TRIGGER_TEXT || '\u05d1\u05d5\u05d8').trim(),
     stateFile: path.resolve(mergedEnv.STATE_FILE || 'state.json'),
     seenFile: path.resolve(mergedEnv.SEEN_FILE || 'seen.json'),
+    eventsFile: path.resolve(mergedEnv.EVENTS_FILE || 'events.json'),
     authDir: path.resolve(mergedEnv.AUTH_DIR || '.wwebjs_auth'),
     discoverChords: readBool(mergedEnv.DISCOVER_CHORDS ?? mergedEnv.discover_chords, true),
     llmProvider,

@@ -1,3 +1,6 @@
+const { searchSongs } = require('./song-search');
+const { loadEventSchedule } = require('./event-reminders');
+
 function compactSong(song) {
   return {
     song_id: song.song_id,
@@ -47,6 +50,23 @@ const READ_ONLY_SONG_TOOLS = [
   }
 ];
 
+const READ_ONLY_EVENT_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'lookup_rehearsals',
+      description: 'Retrieve the current WhatsApp rehearsal events for the band. Use for any question about a rehearsal date, the next rehearsal, rehearsals in a month, or the full rehearsal schedule. Never creates or changes an event.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false
+      }
+    }
+  }
+];
+
+const READ_ONLY_TOOLS = [...READ_ONLY_SONG_TOOLS, ...READ_ONLY_EVENT_TOOLS];
+
 function parseToolArguments(rawArguments) {
   if (rawArguments && typeof rawArguments === 'object' && !Array.isArray(rawArguments)) {
     return rawArguments;
@@ -89,9 +109,27 @@ function executeReadOnlySongTool({ stateStore, name, arguments: rawArguments }) 
   return { ok: true, status: 'found', songs: [compactSong(matches[0])] };
 }
 
+async function executeReadOnlyTool({ stateStore, eventsFile, name, arguments: rawArguments }) {
+  if (name === 'lookup_rehearsals') {
+    const schedule = await loadEventSchedule(eventsFile);
+    return {
+      ok: true,
+      status: schedule.events.length ? 'found' : 'not_found',
+      time_zone: schedule.time_zone,
+      events: schedule.events
+        .filter((event) => !event.cancelled)
+        .sort((left, right) => new Date(left.start_at) - new Date(right.start_at))
+        .map(({ id, title, start_at, details }) => ({ id, title, start_at, details }))
+    };
+  }
+  return executeReadOnlySongTool({ stateStore, name, arguments: rawArguments });
+}
+
 module.exports = {
   READ_ONLY_SONG_TOOLS,
+  READ_ONLY_EVENT_TOOLS,
+  READ_ONLY_TOOLS,
   executeReadOnlySongTool,
+  executeReadOnlyTool,
   parseToolArguments
 };
-const { searchSongs } = require('./song-search');
