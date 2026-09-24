@@ -56,6 +56,7 @@ function normalizeSchedule(raw) {
   return {
     version: 1,
     group_name: String(source.group_name || '').trim(),
+    group_id: String(source.group_id || '').trim() || null,
     time_zone: String(source.time_zone || REMINDER_TIME_ZONE).trim() || REMINDER_TIME_ZONE,
     events: Array.isArray(source.events) ? source.events.map(normalizeEvent).filter(Boolean) : [],
     sent

@@ -1,7 +1,7 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
 const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, recommendExternalSongs, composeUnsupportedReply, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat, isExternalCatalogRecommendationRequest, buildExternalRecommendationAction, getAgentUsageStats } = require('./llm');
-const { READ_ONLY_TOOLS, executeReadOnlyTool } = require('./agent-tools');
+const { READ_ONLY_SONG_TOOLS, executeReadOnlySongTool } = require('./agent-tools');
 const {
   persistResultContext,
   resolveActiveResultContext,
@@ -168,6 +168,10 @@ function formatBoldSongIdentity(song) {
 
 async function sendBotMessage(chat, text) {
   return chat.sendMessage(prefixBotReply(text));
+}
+
+async function sendBotMessageToId(client, chatId, text) {
+  return client.sendMessage(chatId, prefixBotReply(text));
 }
 
 function buildChatResponder(message, chatId) {
@@ -677,6 +681,11 @@ function buildAgentMessageText(messageText, recentMessages, quotedText = '', pen
   }
 
   return `תוסיף ${inferredAddSong.song_title} של ${inferredAddSong.artist}`;
+}
+
+function isScheduleInquiry(messageText) {
+  const text = normalizeText(messageText);
+  return /(?:חזר(?:ה|ות)|rehearsal|אירוע(?:ים)?|event(?:s)?|לו["״']?ז|schedule|calendar|יומן|מתי|איפה|באיזה\s+יום|בתאריך|חודש|ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר|january|february|march|april|may|june|july|august|september|october|november|december|הבא(?:ה)?|הקרוב(?:ה)?|סופ["״']?ש|שבת|שישי|חמישי|רביעי|שלישי|שני|ראשון)/iu.test(text);
 }
 
 function buildRecentMessageContext(records, limit = 3) {
@@ -2201,7 +2210,8 @@ async function handleAgentMessage({
   recommendExternalSongsFn = recommendExternalSongs,
   composeUnsupportedReplyFn = composeUnsupportedReply,
   prepareSongsForReplyFn = prepareSongsForReply,
-  estimateSongDurationsFn
+  estimateSongDurationsFn,
+  scheduledRehearsals = []
 }) {
   const handling = shouldHandleMessage(record, config.triggerText);
   const replyContext = buildAgentReplyContext(stateStore, record);
@@ -2380,13 +2390,11 @@ async function handleAgentMessage({
       recentMessages,
       pendingClarification,
       currentDate: currentDateInIsrael(),
-      tools: READ_ONLY_TOOLS,
-      executeToolCall: ({ name, arguments: rawArguments }) => executeReadOnlyTool({
-        stateStore,
-        eventsFile: config.eventsFile,
-        name,
-        arguments: rawArguments
-      })
+      scheduledRehearsals,
+      tools: isSongInfoRequest(messageText) ? READ_ONLY_SONG_TOOLS : undefined,
+      executeToolCall: isSongInfoRequest(messageText)
+        ? ({ name, arguments: rawArguments }) => executeReadOnlySongTool({ stateStore, name, arguments: rawArguments })
+        : undefined
     });
 
     // Adding a song is a durable mutation. Do not let an LLM turn a metadata
@@ -2568,11 +2576,15 @@ async function bootstrap() {
     if (eventReminderCheckRunning || !eventSchedule.group_name || eventSchedule.events.length === 0 || !client) return;
     eventReminderCheckRunning = true;
     try {
-      const chat = await findGroupChat(client, eventSchedule.group_name);
+      const chat = eventSchedule.group_id ? null : await findGroupChat(client, eventSchedule.group_name);
       const result = await sendDueEventReminders({
         schedule: eventSchedule,
         send: async (text, event) => {
-          await sendBotMessage(chat, text);
+          if (eventSchedule.group_id) {
+            await sendBotMessageToId(client, eventSchedule.group_id, text);
+          } else {
+            await sendBotMessage(chat, text);
+          }
           console.log(`[event_reminder] sent id=${event.id} group=${JSON.stringify(eventSchedule.group_name)}`);
         }
       });
@@ -2666,6 +2678,9 @@ async function bootstrap() {
       recentMessages,
       pendingAdditions,
       pendingClarifications,
+      scheduledRehearsals: isScheduleInquiry(record.text)
+        ? eventSchedule.events.filter((event) => !event.cancelled)
+        : [],
       reviewSongDifficultyFn: interpretSongDifficulty,
       reviewActionExecutionFn: reviewAgentActionExecution,
       resolveSongReferenceFn: resolveSongReference
@@ -2878,6 +2893,7 @@ module.exports = {
   isRecommendationReasonRequest,
   buildRecommendationReason,
   buildRecentMessageContext,
+  isScheduleInquiry,
   isChordsReplyRequest,
   shouldBlockGenericSearchFallback,
   isAuthorizedAddAction,

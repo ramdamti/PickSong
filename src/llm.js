@@ -7,7 +7,7 @@ const SYSTEM_PROMPT = [
   'Choose the most specific supported action and compact query. Make a reasonable interpretation rather than clarifying, unless one essential fact is truly missing.',
   'Preserve explicit artist, language, era, count, genre, difficulty, and instrument constraints. Translate them to supported_search_fields. For a specific keyboard instrument use keys_type_any; for generic keys use has_keys and/or keys_role.',
   'For more/fresh/different songs after a result list, set query.avoid_previous_results=true. Preserve its artist and other constraints.',
-  'Route local song lists to search_songs; use recommend_external_song only when explicitly asking outside the catalog. For scheduled rehearsals or WhatsApp events (next, monthly, or all), call lookup_rehearsals and answer only from its result. Rehearsal plan -> prepare_rehearsal; song metadata -> get_song_info; add -> add_song; correction -> update_song; removal -> remove_song; fit feedback -> update_song_feedback; band history -> get_band_failure_reasons or explain_song_rejection.',
+  'Route local song lists to search_songs; use recommend_external_song only when explicitly asking outside the catalog. For scheduled rehearsals or WhatsApp events (next, monthly, or all), answer only from scheduled_rehearsals in the input. Rehearsal plan -> prepare_rehearsal; song metadata -> get_song_info; add -> add_song; correction -> update_song; removal -> remove_song; fit feedback -> update_song_feedback; band history -> get_band_failure_reasons or explain_song_rejection.',
   'Use add_song only when the user explicitly asks to add a song. For "A - B", resolve artist and title without duplicating the full phrase as the title. For adds, assess real full-band difficulty and include ai_metadata.',
   'For mutations, use result_index when a prior list identifies the target. Never turn a question, acknowledgement, or conversation into a mutation.',
   'Use clarify only for a single essential missing value. Use unsupported for unavailable capabilities. For normal conversation use respond.reply and match the writer’s tone: be brief, warm, and helpful for a polite or neutral message; use one Hebrew roast of at most 12 words only when they are insulting, hostile, or mocking. Address them explicitly in second person ("you", or their supplied name) in a roast; do not talk vaguely about people. If the message mentions the bot or asks what the bot thinks/does, the bot MUST speak in first person ("I" / "me"), never refer to itself as "the bot" or a third party. A roast must be funny, with one punchline. No question, echo, slur, threat, protected-trait insult, or invented fact.',
@@ -268,13 +268,14 @@ function extractJsonBlock(text) {
   return null;
 }
 
-function buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate, pendingClarification }) {
+function buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate, pendingClarification, scheduledRehearsals }) {
   return JSON.stringify({
     supported_search_fields: SUPPORTED_SEARCH_FIELDS,
     current_date: currentDate,
     user_message: messageText,
     quoted_message: quotedText ? String(quotedText).trim() : null,
     recent_messages: Array.isArray(recentMessages) ? recentMessages : [],
+    scheduled_rehearsals: Array.isArray(scheduledRehearsals) ? scheduledRehearsals : [],
     reply_context: replyContext || null,
     pending_clarification: pendingClarification || null
   });
@@ -1888,6 +1889,7 @@ async function interpretMessage({
   recentMessages,
   pendingClarification,
   currentDate,
+  scheduledRehearsals,
   requestFn,
   maxRetries = DEFAULT_MAX_RETRIES
 }) {
@@ -1904,7 +1906,7 @@ async function interpretMessage({
     throw new Error('LLM base URL is required');
   }
 
-  const prompt = buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate, pendingClarification });
+  const prompt = buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate, pendingClarification, scheduledRehearsals });
   const fallbackPrompt = buildFallbackAgentPrompt({ messageText, quotedText, replyContext, currentDate, pendingClarification });
 
   return runWithAgentConcurrencyLimit(async () => {
@@ -1981,6 +1983,7 @@ async function interpretMessageWithTools({
   replyContext,
   recentMessages,
   pendingClarification,
+  scheduledRehearsals,
   currentDate,
   tools,
   executeToolCall,
@@ -1992,14 +1995,14 @@ async function interpretMessageWithTools({
   const useTools = Array.isArray(tools) && tools.length > 0 && typeof executeToolCall === 'function';
   const selectedProvider = String(provider || '').trim().toLowerCase();
   if (!useTools || (selectedProvider !== 'groq' && selectedProvider !== 'openai_compatible')) {
-    return interpretMessage({ provider, baseUrl, apiKey, model, messageText, quotedText, replyContext, recentMessages, pendingClarification, currentDate, requestFn });
+    return interpretMessage({ provider, baseUrl, apiKey, model, messageText, quotedText, replyContext, recentMessages, pendingClarification, currentDate, scheduledRehearsals, requestFn });
   }
 
-  const prompt = buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate, pendingClarification });
+  const prompt = buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate, pendingClarification, scheduledRehearsals });
   const messages = [
     {
       role: 'system',
-      content: `${SYSTEM_PROMPT}\nYou may call the supplied local read-only tools before deciding. For a named-song metadata question, call lookup_song first. For catalog recommendations, call search_catalog first. For any scheduled-rehearsal or event question, call lookup_rehearsals first. Tool results are authoritative: never claim a song exists when lookup_song returns not_found, never invent event details, and never turn a lookup into an add.`
+      content: `${SYSTEM_PROMPT}\nYou may call the supplied local read-only tools before deciding. For a named-song metadata question, call lookup_song first. For catalog recommendations, call search_catalog first. Tool results are authoritative: never claim a song exists when lookup_song returns not_found, and never turn a lookup into an add.`
     },
     { role: 'user', content: prompt }
   ];
@@ -2039,7 +2042,7 @@ async function interpretMessageWithTools({
     });
   } catch (error) {
     console.warn(`[agent] tool_loop_fallback: ${error.message}`);
-    return interpretMessage({ provider, baseUrl, apiKey, model, messageText, quotedText, replyContext, recentMessages, pendingClarification, currentDate, requestFn });
+    return interpretMessage({ provider, baseUrl, apiKey, model, messageText, quotedText, replyContext, recentMessages, pendingClarification, currentDate, scheduledRehearsals, requestFn });
   }
 }
 

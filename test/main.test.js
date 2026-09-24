@@ -12,6 +12,7 @@ const {
   isRecommendationReasonRequest,
   buildRecommendationReason,
   buildRecentMessageContext,
+  isScheduleInquiry,
   isChordsReplyRequest,
   shouldBlockGenericSearchFallback,
   handleAgentMessage,
@@ -23,6 +24,13 @@ test('stripWakeWord removes standalone bot trigger variants', () => {
   assert.equal(stripWakeWord('\u05d1\u05d5\u05d8, \u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7'), '\u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7');
   assert.equal(stripWakeWord('\u05d1\u05d5\u05d8: \u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7'), '\u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7');
   assert.equal(stripWakeWord('\u05d1\u05d5\u05d8 - \u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7'), '\u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7');
+});
+
+test('schedule inquiry detection is broad while ordinary song requests do not carry the event schedule', () => {
+  assert.equal(isScheduleInquiry('מתי החזרה הבאה?'), true);
+  assert.equal(isScheduleInquiry('מה יש בינואר'), true);
+  assert.equal(isScheduleInquiry('אני פנוי בשבת הקרובה'), true);
+  assert.equal(isScheduleInquiry('תביא שיר'), false);
 });
 
 test('generic recommendation wording is not mistaken for a bare song hint', () => {
