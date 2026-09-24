@@ -685,7 +685,62 @@ function buildAgentMessageText(messageText, recentMessages, quotedText = '', pen
 
 function isScheduleInquiry(messageText) {
   const text = normalizeText(messageText);
-  return /(?:חזר(?:ה|ות)|rehearsal|אירוע(?:ים)?|event(?:s)?|לו["״']?ז|schedule|calendar|יומן|מתי|איפה|באיזה\s+יום|בתאריך|חודש|ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר|january|february|march|april|may|june|july|august|september|october|november|december|הבא(?:ה)?|הקרוב(?:ה)?|סופ["״']?ש|שבת|שישי|חמישי|רביעי|שלישי|שני|ראשון)/iu.test(text);
+  const scheduleTerms = /(?:חזר(?:ה|ות)|rehearsal|אירוע(?:ים)?|event(?:s)?|לו["״']?ז|schedule|calendar|יומן|חודש|ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר|january|february|march|april|may|june|july|august|september|october|november|december|שבת|שישי|חמישי|רביעי|שלישי|שני|ראשון)/iu;
+  const requestTerms = /(?:מתי|איזה|אילו|מה\s+יש|תביא|תראה|הראה|רשימה|כל\s+החזרות|הבא(?:ה)?|הקרוב(?:ה)?|next|upcoming|all|[?？])/iu;
+  return scheduleTerms.test(text) && requestTerms.test(text);
+}
+
+const HEBREW_MONTHS = [
+  'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
+  'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'
+];
+
+function eventDateParts(event) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jerusalem', year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).formatToParts(new Date(event.start_at));
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return { year: Number(values.year), month: Number(values.month), day: Number(values.day), hour: values.hour, minute: values.minute };
+}
+
+function getScheduleReply(messageText, scheduledRehearsals, now = new Date()) {
+  const events = (Array.isArray(scheduledRehearsals) ? scheduledRehearsals : [])
+    .filter((event) => event && !event.cancelled && !Number.isNaN(new Date(event.start_at).getTime()))
+    .sort((left, right) => new Date(left.start_at) - new Date(right.start_at));
+  if (!events.length) return 'אין לי כרגע חזרות רשומות בלוח.';
+
+  const text = normalizeText(messageText);
+  const englishMonths = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+  const requestedMonth = [...HEBREW_MONTHS, ...englishMonths].findIndex((month) => text.includes(month));
+  const futureEvents = events.filter((event) => new Date(event.start_at).getTime() >= now.getTime());
+  let selected = futureEvents;
+  let label = 'החזרות הקרובות';
+
+  if (requestedMonth >= 0) {
+    const month = (requestedMonth % 12) + 1;
+    selected = events.filter((event) => eventDateParts(event).month === month && new Date(event.start_at).getTime() >= now.getTime());
+    label = `חזרות ב${HEBREW_MONTHS[month - 1]}`;
+  } else if (/(?:חודש\s+הקרוב|החודש|this\s+month|next\s+month)/iu.test(text)) {
+    const current = eventDateParts({ start_at: now.toISOString() });
+    const nextMonth = current.month === 12 ? 1 : current.month + 1;
+    const nextYear = current.month === 12 ? current.year + 1 : current.year;
+    selected = events.filter((event) => {
+      const parts = eventDateParts(event);
+      return (parts.year === current.year && parts.month === current.month) || (parts.year === nextYear && parts.month === nextMonth);
+    }).filter((event) => new Date(event.start_at).getTime() >= now.getTime());
+    label = 'חזרות בחודש הקרוב';
+  } else if (/(?:החזרה\s+הבא(?:ה)?|מתי\s+החזרה|next\s+rehearsal)/iu.test(text)) {
+    const event = futureEvents[0];
+    if (!event) return 'אין לי כרגע חזרה עתידית רשומה.';
+    const parts = eventDateParts(event);
+    return `החזרה הבאה: ${event.title} — ${String(parts.day).padStart(2, '0')}.${String(parts.month).padStart(2, '0')}.${parts.year} ב־${parts.hour}:${parts.minute}${event.details ? `, ${event.details}` : ''}.`;
+  }
+
+  if (!selected.length) return `אין חזרות רשומות ב${label.replace(/^חזרות ב/, '')}.`;
+  return `${label}:\n${selected.map((event) => {
+    const parts = eventDateParts(event);
+    return `- ${String(parts.day).padStart(2, '0')}.${String(parts.month).padStart(2, '0')}.${parts.year}, ${parts.hour}:${parts.minute} — ${event.title}${event.details ? `, ${event.details}` : ''}`;
+  }).join('\n')}`;
 }
 
 function buildRecentMessageContext(records, limit = 3) {
@@ -2225,6 +2280,11 @@ async function handleAgentMessage({
     return true;
   }
 
+  if (isScheduleInquiry(messageText)) {
+    await sendBotMessage(chat, getScheduleReply(messageText, scheduledRehearsals));
+    return true;
+  }
+
   const pendingChatId = String(record?.chatId || '').trim();
   let pendingClarification = pendingClarifications instanceof Map ? pendingClarifications.get(pendingChatId) : null;
   if (pendingClarification && Date.now() - Number(pendingClarification.createdAt || 0) > PENDING_CLARIFICATION_TTL_MS) {
@@ -2894,6 +2954,7 @@ module.exports = {
   buildRecommendationReason,
   buildRecentMessageContext,
   isScheduleInquiry,
+  getScheduleReply,
   isChordsReplyRequest,
   shouldBlockGenericSearchFallback,
   isAuthorizedAddAction,

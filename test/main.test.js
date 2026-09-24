@@ -13,6 +13,7 @@ const {
   buildRecommendationReason,
   buildRecentMessageContext,
   isScheduleInquiry,
+  getScheduleReply,
   isChordsReplyRequest,
   shouldBlockGenericSearchFallback,
   handleAgentMessage,
@@ -31,6 +32,21 @@ test('schedule inquiry detection is broad while ordinary song requests do not ca
   assert.equal(isScheduleInquiry('מה יש בינואר'), true);
   assert.equal(isScheduleInquiry('אני פנוי בשבת הקרובה'), true);
   assert.equal(isScheduleInquiry('תביא שיר'), false);
+});
+
+test('schedule replies select the next rehearsal and an exact requested month', () => {
+  const events = [
+    { id: 'sep', title: 'חזרת להקה', start_at: '2026-09-26T14:00:00.000Z', details: 'גרוב, חדר E' },
+    { id: 'oct-1', title: 'חזרת להקה', start_at: '2026-10-10T14:30:00.000Z', details: 'גרוב, חדר B' },
+    { id: 'oct-2', title: 'חזרת להקה', start_at: '2026-10-24T15:00:00.000Z', details: 'אצל יאיר' },
+    { id: 'nov', title: 'חזרת להקה', start_at: '2026-11-07T16:00:00.000Z', details: 'גרוב, חדר B' }
+  ];
+  const now = new Date('2026-09-24T08:00:00.000Z');
+  assert.match(getScheduleReply('מתי החזרה הבאה?', events, now), /26\.09\.2026/);
+  const october = getScheduleReply('איזה חזרות יש באוקטובר?', events, now);
+  assert.match(october, /10\.10\.2026/);
+  assert.match(october, /24\.10\.2026/);
+  assert.doesNotMatch(october, /07\.11\.2026/);
 });
 
 test('generic recommendation wording is not mistaken for a bare song hint', () => {
