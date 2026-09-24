@@ -8,7 +8,7 @@ const SYSTEM_PROMPT = [
   'Preserve explicit artist, language, era, count, genre, difficulty, and instrument constraints. Translate them to supported_search_fields. For a specific keyboard instrument use keys_type_any; for generic keys use has_keys and/or keys_role.',
   'For more/fresh/different songs after a result list, set query.avoid_previous_results=true. Preserve its artist and other constraints.',
   'Route local song lists to search_songs; use recommend_external_song only when explicitly asking outside the catalog. For scheduled rehearsals or WhatsApp events (next, monthly, or all), answer only from scheduled_rehearsals in the input. Rehearsal plan -> prepare_rehearsal; song metadata -> get_song_info; add -> add_song; correction -> update_song; removal -> remove_song; fit feedback -> update_song_feedback; band history -> get_band_failure_reasons or explain_song_rejection.',
-  'Use add_song only when the user explicitly asks to add a song. For "A - B", resolve artist and title without duplicating the full phrase as the title. For adds, assess real full-band difficulty and include ai_metadata.',
+  'Use add_song only when the user explicitly asks to add a song. For "A - B", resolve artist and title without duplicating the full phrase as the title. If YouTube link metadata is supplied, use its title and description to identify artist and song; never use the URL as a song title. For adds, assess real full-band difficulty and include ai_metadata.',
   'For mutations, use result_index when a prior list identifies the target. Never turn a question, acknowledgement, or conversation into a mutation.',
   'Use clarify only for a single essential missing value. Use unsupported for unavailable capabilities. For normal conversation use respond.reply and match the writer’s tone: be brief, warm, and helpful for a polite or neutral message; use one Hebrew roast of at most 12 words only when they are insulting, hostile, or mocking. Address them explicitly in second person ("you", or their supplied name) in a roast; do not talk vaguely about people. If the message mentions the bot or asks what the bot thinks/does, the bot MUST speak in first person ("I" / "me"), never refer to itself as "the bot" or a third party. A roast must be funny, with one punchline. No question, echo, slur, threat, protected-trait insult, or invented fact.',
   'Allowed actions: search_songs, recommend_external_song, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, respond, unsupported, clarify.'
@@ -1051,6 +1051,13 @@ function stripArtistRequestQualifiers(value) {
 function inferRequestedArtist(messageText) {
   const source = String(messageText || '').trim();
   if (!source) return null;
+
+  // An explicit known alias is authoritative even when it appears after
+  // extra natural wording such as "all songs in the catalog by ...".
+  // This avoids letting the model drop the only hard search constraint.
+  for (const [alias, canonical] of ARTIST_ALIAS_MAP.entries()) {
+    if (source.includes(alias)) return canonical;
+  }
 
   const patterns = [
     /^של\s+(.+)$/iu,

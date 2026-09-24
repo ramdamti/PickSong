@@ -683,6 +683,31 @@ function buildAgentMessageText(messageText, recentMessages, quotedText = '', pen
   return `תוסיף ${inferredAddSong.song_title} של ${inferredAddSong.artist}`;
 }
 
+function extractYouTubeUrl(text, links = []) {
+  const candidates = [String(text || ''), ...(Array.isArray(links) ? links.map((link) => link?.link || link?.url || link) : [])];
+  for (const candidate of candidates) {
+    const match = String(candidate || '').match(/https?:\/\/(?:www\.)?(?:youtube\.com\/(?:watch\?[^\s]*v=|shorts\/)|youtu\.be\/)[^\s&?#]+[^\s]*/iu);
+    if (match) return match[0];
+  }
+  return null;
+}
+
+function buildYouTubeAddContext(record) {
+  const ownPreview = record?.linkPreview || {};
+  const quotedPreview = record?.quoted?.linkPreview || {};
+  const preview = {
+    title: ownPreview.title || quotedPreview.title || '',
+    description: ownPreview.description || quotedPreview.description || '',
+    links: Array.isArray(ownPreview.links) && ownPreview.links.length ? ownPreview.links : (quotedPreview.links || [])
+  };
+  const sourceText = `${record?.text || ''}\n${record?.quoted?.text || ''}`;
+  const url = extractYouTubeUrl(sourceText, preview.links);
+  if (!url) return '';
+  const title = String(preview.title || '').trim();
+  const description = String(preview.description || '').trim();
+  return `\nYouTube link metadata (use this to identify the requested song; do not include the URL in the title): ${JSON.stringify({ url, title: title || null, description: description || null })}`;
+}
+
 function isScheduleInquiry(messageText) {
   const text = normalizeText(messageText);
   const scheduleTerms = /(?:חזר(?:ה|ות)|rehearsal|אירוע(?:ים)?|event(?:s)?|לו["״']?ז|schedule|calendar|יומן|חודש|ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר|january|february|march|april|may|june|july|august|september|october|november|december|שבת|שישי|חמישי|רביעי|שלישי|שני|ראשון)/iu;
@@ -2438,7 +2463,7 @@ async function handleAgentMessage({
       recentMessages,
       quotedText,
       pendingClarification
-    );
+    ) + buildYouTubeAddContext(record);
     const action = await interpretMessageFn({
       provider: config.llmProvider,
       baseUrl: config.llmBaseUrl,
@@ -2757,6 +2782,11 @@ async function bootstrap() {
     if (!text) return;
 
     const record = messageToRecord(message);
+    record.linkPreview = {
+      title: message.title || message._data?.title || '',
+      description: message.description || message._data?.description || '',
+      links: message.links || message._data?.links || []
+    };
     const quoted = await readQuotedMessage(message);
     record.quoted = quoted || record.quoted;
     record.quotedText = quoted?.text || null;
@@ -2955,6 +2985,8 @@ module.exports = {
   buildRecentMessageContext,
   isScheduleInquiry,
   getScheduleReply,
+  extractYouTubeUrl,
+  buildYouTubeAddContext,
   isChordsReplyRequest,
   shouldBlockGenericSearchFallback,
   isAuthorizedAddAction,

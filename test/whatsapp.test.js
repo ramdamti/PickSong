@@ -82,3 +82,20 @@ test('readQuotedMessage keeps raw reply context when hasQuotedMsg is false', asy
     author: null
   });
 });
+
+test('readQuotedMessage keeps a quoted YouTube preview', async () => {
+  const quoted = await readQuotedMessage({
+    hasQuotedMsg: false,
+    _data: {
+      quotedStanzaID: 'wamid.youtube',
+      quotedMsg: {
+        body: 'https://youtu.be/abc123',
+        title: 'Pink Floyd - Coming Back to Life',
+        description: 'Official video'
+      }
+    }
+  });
+
+  assert.equal(quoted.linkPreview.title, 'Pink Floyd - Coming Back to Life');
+  assert.equal(quoted.linkPreview.description, 'Official video');
+});

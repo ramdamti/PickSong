@@ -194,11 +194,17 @@ async function readQuotedMessage(message) {
       return null;
     }
 
+    const linkPreview = {
+      title: raw?.title || message?._data?.quotedMsg?.title || '',
+      description: raw?.description || message?._data?.quotedMsg?.description || '',
+      links: raw?.links || message?._data?.quotedMsg?.links || []
+    };
     return {
       id: String(rawId || '').trim(),
       text: rawText ? String(rawText).trim() : null,
       fromMe: raw?.fromMe === undefined ? null : Boolean(raw.fromMe),
-      author: rawAuthor ? String(rawAuthor).trim() : null
+      author: rawAuthor ? String(rawAuthor).trim() : null,
+      ...(linkPreview.title || linkPreview.description || linkPreview.links.length ? { linkPreview } : {})
     };
   })();
 
@@ -209,6 +215,11 @@ async function readQuotedMessage(message) {
 
   try {
     const quoted = await message.getQuotedMessage();
+    const linkPreview = {
+      title: quoted?.title || quoted?._data?.title || fallbackQuoted?.linkPreview?.title || '',
+      description: quoted?.description || quoted?._data?.description || fallbackQuoted?.linkPreview?.description || '',
+      links: quoted?.links || quoted?._data?.links || fallbackQuoted?.linkPreview?.links || []
+    };
     return {
       id: quoted?.id?._serialized || quoted?.id?.id || fallbackQuoted?.id || '',
       text: quoted?.body
@@ -217,7 +228,8 @@ async function readQuotedMessage(message) {
           ? String(quoted.caption).trim()
           : fallbackQuoted?.text || null,
       fromMe: quoted?.fromMe === undefined ? fallbackQuoted?.fromMe ?? null : Boolean(quoted.fromMe),
-      author: quoted?.author || quoted?.from || fallbackQuoted?.author || null
+      author: quoted?.author || quoted?.from || fallbackQuoted?.author || null,
+      ...(linkPreview.title || linkPreview.description || linkPreview.links.length ? { linkPreview } : {})
     };
   } catch (error) {
     return fallbackQuoted;

@@ -14,6 +14,8 @@ const {
   buildRecentMessageContext,
   isScheduleInquiry,
   getScheduleReply,
+  extractYouTubeUrl,
+  buildYouTubeAddContext,
   isChordsReplyRequest,
   shouldBlockGenericSearchFallback,
   handleAgentMessage,
@@ -47,6 +49,25 @@ test('schedule replies select the next rehearsal and an exact requested month', 
   assert.match(october, /10\.10\.2026/);
   assert.match(october, /24\.10\.2026/);
   assert.doesNotMatch(october, /07\.11\.2026/);
+});
+
+test('YouTube link metadata is provided to explicit add requests without treating the URL as a title', () => {
+  const url = 'https://www.youtube.com/watch?v=abc123';
+  assert.equal(extractYouTubeUrl(`בוט תוסיף למאגר ${url}`), url);
+  assert.match(buildYouTubeAddContext({
+    text: `בוט תוסיף למאגר ${url}`,
+    linkPreview: { title: 'Pink Floyd - Coming Back to Life', description: 'Official video' }
+  }), /Pink Floyd - Coming Back to Life/);
+});
+
+test('YouTube metadata from a quoted link is available to an add request', () => {
+  assert.match(buildYouTubeAddContext({
+    text: 'בוט תוסיף למאגר',
+    quoted: {
+      text: 'https://youtu.be/abc123',
+      linkPreview: { title: 'George Harrison - Got My Mind Set on You', description: '', links: [] }
+    }
+  }), /George Harrison - Got My Mind Set on You/);
 });
 
 test('generic recommendation wording is not mistaken for a bare song hint', () => {
