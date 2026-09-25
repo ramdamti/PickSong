@@ -231,6 +231,28 @@ function validateSong(value, options = {}) {
 
 function validateAddSongPayload(value) {
   const song = ensureObject(value, 'song');
+  const rawAiMetadata = song.ai_metadata === undefined || song.ai_metadata === null
+    ? undefined
+    : ensureObject(song.ai_metadata, 'ai_metadata');
+  // Metadata is enrichment, not the identity of the song.  An otherwise
+  // valid explicit add must not be rejected merely because the model omitted
+  // one enrichment field.  State normalization supplies canonical defaults
+  // for omitted fields on persistence; fields that affect search semantics
+  // are still validated when present.
+  const aiMetadata = rawAiMetadata && REQUIRED_AI_METADATA_FIELDS.every((field) => field in rawAiMetadata)
+    ? validateAiMetadata(rawAiMetadata)
+    : rawAiMetadata && {
+      ...rawAiMetadata,
+      ...(rawAiMetadata.vocal_style === undefined
+        ? {}
+        : { vocal_style: ensureStringArray(rawAiMetadata.vocal_style, 'ai_metadata.vocal_style').map((item) => item.toLowerCase()) }),
+      ...(rawAiMetadata.keys_type === undefined
+        ? {}
+        : { keys_type: ensureEnumArray(rawAiMetadata.keys_type, KEYS_TYPES, 'ai_metadata.keys_type[]') }),
+      ...(rawAiMetadata.crowd_friendly === undefined
+        ? {}
+        : { crowd_friendly: Boolean(rawAiMetadata.crowd_friendly) })
+    };
   return {
     ...song,
     song_id: song.song_id ? String(song.song_id).trim() : null,
@@ -249,7 +271,7 @@ function validateAddSongPayload(value) {
     difficulty: song.difficulty ? ensureEnum(song.difficulty, DIFFICULTIES, 'song.difficulty') : null,
     feel: song.feel ? ensureEnum(song.feel, FEELS, 'song.feel') : null,
     duration_seconds: ensurePositiveInteger(song.duration_seconds, 'song.duration_seconds', { allowNull: true }),
-    ai_metadata: song.ai_metadata ? validateAiMetadata(song.ai_metadata) : undefined,
+    ai_metadata: aiMetadata,
     band_status: song.band_status ? validateBandStatus(song.band_status) : undefined
   };
 }

@@ -189,6 +189,29 @@ test('createStateStore addSong fills canonical placeholders for legacy add flow'
   assert.equal(added.band_status.fit, 'unknown');
 });
 
+test('createStateStore preserves supplied partial agent metadata and fills the remaining fields', () => {
+  const store = createStateStore('state.json', 'seen.json', createCanonicalState(), {
+    seenMessageIds: [],
+    lastBootstrapAt: null
+  });
+
+  const inserted = store.addSong({
+    message_id: 'msg-partial-metadata',
+    source_text: 'Add a song',
+    song_title: 'Metadata Song',
+    artist: 'Metadata Artist',
+    ai_metadata: { keys_role: 'important', keys_type: ['piano'] }
+  });
+
+  assert.equal(inserted, true);
+  const added = store.state.songs.find((song) => song.message_id === 'msg-partial-metadata');
+  assert.ok(added);
+  assert.equal(added.ai_metadata.keys_role, 'important');
+  assert.deepEqual(added.ai_metadata.keys_type, ['piano']);
+  assert.equal(added.ai_metadata.guitar_difficulty, 'medium');
+  assert.equal(added.ai_metadata.original_vocal, 'unknown');
+});
+
 test('loadState repairs incomplete agent song fields instead of failing startup', async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'picksong-state-repair-'));
   const stateFile = path.join(tempDir, 'state.json');

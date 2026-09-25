@@ -32,7 +32,10 @@ test('stripWakeWord removes standalone bot trigger variants', () => {
 test('schedule inquiry detection is broad while ordinary song requests do not carry the event schedule', () => {
   assert.equal(isScheduleInquiry('מתי החזרה הבאה?'), true);
   assert.equal(isScheduleInquiry('מה יש בינואר'), true);
-  assert.equal(isScheduleInquiry('אני פנוי בשבת הקרובה'), true);
+  assert.equal(isScheduleInquiry('אני פנוי בשבת הקרובה'), false);
+  assert.equal(isScheduleInquiry('מתי החזרה בשבת הקרובה?'), true);
+  assert.equal(isScheduleInquiry('may I add a song?'), false);
+  assert.equal(isScheduleInquiry('what rehearsals are in May?'), true);
   assert.equal(isScheduleInquiry('תביא שיר'), false);
 });
 

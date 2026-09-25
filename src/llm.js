@@ -1061,6 +1061,8 @@ function inferRequestedArtist(messageText) {
 
   const patterns = [
     /(?:^|\s)(?:במאגר|catalog)\s+של\s+(.+)$/iu,
+    /(?:שירים?|songs?).*?\s+של\s+(.+?)\s+(?:שיש|שנמצאים|שנמצא|במאגר|בקטלוג|in\s+the\s+catalog).*$/iu,
+    /(?:שירים?|songs?).*?\s+של\s+(.+)$/iu,
     /^של\s+(.+)$/iu,
     /(?:^|\s)שירים?\s+של\s+(.+)$/iu,
     /(?:^|\s)תביא\s+שירים?\s+של\s+(.+)$/iu,

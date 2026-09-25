@@ -996,6 +996,22 @@ test('interpretMessage extracts an arbitrary artist after "in the catalog by" wo
   assert.equal(action.query.requirements.artist, 'jimi hendrix');
 });
 
+test('interpretMessage extracts any artist from natural local-catalog wording', async () => {
+  const action = await interpretMessage({
+    provider: 'groq', baseUrl: 'https://api.example.com', apiKey: 'test', model: 'test-model',
+    messageText: 'תביא את כל השירים של Dire Straits שיש במאגר',
+    replyContext: null, recentMessages: [], currentDate: '2026-09-24',
+    requestFn: async () => ({
+      ok: true, status: 200,
+      async json() {
+        return { choices: [{ message: { content: JSON.stringify({ action: 'search_songs', query: {} }) } }] };
+      }
+    })
+  });
+
+  assert.equal(action.query.requirements.artist, 'Dire Straits');
+});
+
 test('buildExternalRecommendationAction keeps trailing request constraints out of an artist name', () => {
   const action = buildExternalRecommendationAction(
     '\u05ea\u05d1\u05d9\u05d0 4 \u05e9\u05d9\u05e8\u05d9\u05dd \u05e9\u05dc \u05e4\u05d9\u05e0\u05e7 \u05e4\u05dc\u05d5\u05d9\u05d3 \u05e9\u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd \u05dc\u05e0\u05d5 \u05d5\u05dc\u05d0 \u05e0\u05de\u05e6\u05d0\u05d9\u05dd \u05d1\u05de\u05d0\u05d2\u05e8'
@@ -1307,6 +1323,41 @@ test('interpretMessage keeps a valid add when only its optional difficulty label
   assert.equal(action.song.song_title, 'Coming Back to Life');
   assert.equal(action.song.artist, 'Pink Floyd');
   assert.equal(action.song.difficulty, null);
+});
+
+test('interpretMessage keeps a valid add when the agent returns partial metadata', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'add Coming Back to Life - Pink Floyd',
+    replyContext: null,
+    recentMessages: [],
+    currentDate: '2026-09-23',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                action: 'add_song',
+                song: {
+                  song_title: 'Coming Back to Life',
+                  artist: 'Pink Floyd',
+                  ai_metadata: { keys_type: ['piano'], keys_role: 'important' }
+                }
+              })
+            }
+          }]
+        };
+      }
+    })
+  });
+
+  assert.equal(action.action, 'add_song');
+  assert.deepEqual(action.song.ai_metadata, { keys_type: ['piano'], keys_role: 'important' });
 });
 
 test('interpretMessage returns a useful clarification rather than throwing after two invalid add_song payloads', async () => {

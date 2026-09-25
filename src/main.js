@@ -710,8 +710,12 @@ function buildYouTubeAddContext(record) {
 
 function isScheduleInquiry(messageText) {
   const text = normalizeText(messageText);
-  const scheduleTerms = /(?:חזר(?:ה|ות)|rehearsal|אירוע(?:ים)?|event(?:s)?|לו["״']?ז|schedule|calendar|יומן|חודש|ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר|january|february|march|april|may|june|july|august|september|october|november|december|שבת|שישי|חמישי|רביעי|שלישי|שני|ראשון)/iu;
-  const requestTerms = /(?:מתי|איזה|אילו|מה\s+יש|תביא|תראה|הראה|רשימה|כל\s+החזרות|הבא(?:ה)?|הקרוב(?:ה)?|next|upcoming|all|[?？])/iu;
+  // A weekday by itself is ordinary group chat ("I'm free Saturday"), not
+  // necessarily a request for the rehearsal calendar.  Calendar queries can
+  // still mention a weekday together with "rehearsal" or another schedule
+  // term, which is already covered here.
+  const scheduleTerms = /(?:חזר(?:ה|ות)|rehearsal|אירוע(?:ים)?|event(?:s)?|לו["״']?ז|schedule|calendar|יומן|חודש|ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר|january|february|march|april|june|july|august|september|october|november|december)/iu;
+  const requestTerms = /(?:מתי|איזה|אילו|מה\s+יש|תביא|תראה|הראה|רשימה|כל\s+החזרות|הבא(?:ה)?|הקרוב(?:ה)?|what|next|upcoming|all|[?？])/iu;
   return scheduleTerms.test(text) && requestTerms.test(text);
 }
 
