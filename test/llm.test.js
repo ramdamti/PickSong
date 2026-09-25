@@ -974,6 +974,28 @@ test('interpretMessage keeps a compact Hebrew artist alias despite extra local-c
   assert.equal(action.query.requirements.artist, 'Pink Floyd');
 });
 
+test('interpretMessage extracts an arbitrary artist after "in the catalog by" wording', async () => {
+  const action = await interpretMessage({
+    provider: 'groq',
+    baseUrl: 'https://api.example.com',
+    apiKey: 'test',
+    model: 'test-model',
+    messageText: 'תביא את כל השירים במאגר של jimi hendrix',
+    replyContext: null,
+    recentMessages: [],
+    currentDate: '2026-09-24',
+    requestFn: async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return { choices: [{ message: { content: JSON.stringify({ action: 'search_songs', query: {} }) } }] };
+      }
+    })
+  });
+
+  assert.equal(action.query.requirements.artist, 'jimi hendrix');
+});
+
 test('buildExternalRecommendationAction keeps trailing request constraints out of an artist name', () => {
   const action = buildExternalRecommendationAction(
     '\u05ea\u05d1\u05d9\u05d0 4 \u05e9\u05d9\u05e8\u05d9\u05dd \u05e9\u05dc \u05e4\u05d9\u05e0\u05e7 \u05e4\u05dc\u05d5\u05d9\u05d3 \u05e9\u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd \u05dc\u05e0\u05d5 \u05d5\u05dc\u05d0 \u05e0\u05de\u05e6\u05d0\u05d9\u05dd \u05d1\u05de\u05d0\u05d2\u05e8'
