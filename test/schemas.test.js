@@ -101,14 +101,19 @@ test('validateAgentAction rejects unsupported update_song fields', () => {
   );
 });
 
-test('validateAgentAction tolerates missing or malformed search query payloads', () => {
-  const validated = validateAgentAction({
-    action: 'search_songs',
-    query: 'not-an-object'
-  });
+test('validateAgentAction requires an explicit result limit for song searches', () => {
+  assert.throws(
+    () => validateAgentAction({ action: 'search_songs', query: 'not-an-object' }),
+    /search_songs requires query\.limit/
+  );
+});
 
-  assert.equal(validated.action, 'search_songs');
-  assert.deepEqual(validated.query, {});
+test('validateAgentAction caps song search lists at fifteen results', () => {
+  assert.throws(
+    () => validateAgentAction({ action: 'search_songs', query: { limit: 16 } }),
+    /query\.limit must not exceed 15/
+  );
+  assert.equal(validateAgentAction({ action: 'search_songs', query: { limit: 15 } }).query.limit, 15);
 });
 
 test('validateAgentAction accepts keyboard type search constraints', () => {
@@ -139,6 +144,7 @@ test('validateAgentAction accepts search replacement indexes', () => {
   const validated = validateAgentAction({
     action: 'search_songs',
     query: {
+      limit: 3,
       replace_result_indexes: [2, '5', 5, 7],
       avoid_previous_results: true
     }

@@ -266,6 +266,30 @@ test('interpretMessageWithTools accepts a Groq final-action compatibility tool w
   assert.equal(executeCalls, 0);
 });
 
+test('interpretMessageWithTools asks Groq to correct a compatibility search missing its result limit', async () => {
+  const { interpretMessageWithTools } = require('../src/llm');
+  const responses = [
+    { choices: [{ message: { tool_calls: [{ id: 'call-invalid', function: { name: 'json', arguments: '{"action":"search_songs","query":{}}' } }] } }] },
+    { choices: [{ message: { tool_calls: [{ id: 'call-fixed', function: { name: 'json', arguments: '{"action":"search_songs","query":{"limit":1}}' } }] } }] }
+  ];
+  const requestBodies = [];
+  const action = await interpretMessageWithTools({
+    provider: 'groq', baseUrl: 'https://example.com', apiKey: 'test', model: 'test-model',
+    messageText: 'bring one song', quotedText: '', replyContext: null,
+    recentMessages: [], pendingClarification: null, currentDate: '2026-09-26',
+    tools: [{ type: 'function', function: { name: 'json', parameters: { type: 'object' } } }],
+    executeToolCall: async () => { throw new Error('should_not_run'); },
+    requestFn: async (_url, options) => {
+      requestBodies.push(JSON.parse(options.body));
+      return { ok: true, async json() { return responses.shift(); } };
+    }
+  });
+
+  assert.equal(action.query.limit, 1);
+  assert.equal(requestBodies.length, 2);
+  assert.match(requestBodies[1].messages.at(-1).content, /query\.limit is required/);
+});
+
 test('interpretMessageWithTools accepts the response compatibility tool for a free reply', async () => {
   const { interpretMessageWithTools } = require('../src/llm');
   const action = await interpretMessageWithTools({
@@ -673,6 +697,7 @@ test.skip('legacy: interpretMessage rewrites rehearsal search requests into prep
                 content: JSON.stringify({
                   action: 'search_songs',
                   query: {
+                    limit: 5,
                     requirements: {
                       genres: ['rock']
                     },
@@ -998,6 +1023,7 @@ test.skip('legacy: interpretMessage overrides transliterated artist output with 
                 content: JSON.stringify({
                   action: 'search_songs',
                   query: {
+                    limit: 1,
                     requirements: {
                       artist: 'Portis'
                     }
@@ -1072,6 +1098,7 @@ test('interpretMessage preserves canonical English artist mappings for known Heb
                 content: JSON.stringify({
                   action: 'search_songs',
                   query: {
+                    limit: 5,
                     requirements: {
                       artist: 'Pink Floyd'
                     }
@@ -1713,6 +1740,7 @@ test('interpretMessage preserves agent-provided keyboard type constraints', asyn
                 content: JSON.stringify({
                   action: 'search_songs',
                   query: {
+                    limit: 1,
                     requirements: {
                       keys_type_any: ['piano']
                     },

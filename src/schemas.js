@@ -347,6 +347,12 @@ function validateAgentAction(value) {
         ? action.query
         : {};
     validated.query = validateSongQuery(rawQuery);
+    if (name === 'search_songs' && !Number.isInteger(validated.query.limit)) {
+      throw new Error('agent_action.search_songs requires query.limit');
+    }
+    if (name === 'search_songs' && validated.query.limit > 15) {
+      throw new Error('agent_action.search_songs query.limit must not exceed 15');
+    }
     if (name === 'prepare_rehearsal') {
       validated.duration_minutes = ensurePositiveInteger(action.duration_minutes, 'agent_action.duration_minutes', { allowNull: true });
     }
