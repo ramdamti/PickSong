@@ -7,7 +7,7 @@ const SYSTEM_PROMPT = [
   'Choose a specific supported action and compact query. Clarify only if one essential fact is missing.',
   'Preserve explicit artist, language, era, count, genre, difficulty, and instrument constraints in supported_search_fields. Specific keys -> keys_type_any; generic keys -> has_keys/keys_role.',
   'For more/fresh/different songs after a result list, set query.avoid_previous_results=true. To replace specific numbered results, set query.replace_result_indexes to those indexes. Preserve the existing constraints.',
-  'Lists -> search_songs with every explicit query constraint. Catalog facts -> search_catalog; events -> lookup_rehearsals; plans -> prepare_rehearsal; chords -> get_chords; metadata -> get_song_info; add/correction/removal/feedback use their actions.',
+  'Lists/recommendations -> search_songs; one-song request uses limit=1. Facts -> search_catalog; events -> lookup_rehearsals; plans -> prepare_rehearsal; chords -> get_chords; metadata -> get_song_info; mutations use their actions.',
   'Band-status actions are only for explicit historic feedback; fit is sparse. Open recommendations use search_songs.',
   'Use add_song only when the user explicitly asks to add a song. For "A - B", resolve artist and title without duplicating the full phrase as the title. If YouTube link metadata is supplied, use its title and description to identify artist and song; never use the URL as a song title. For adds, assess real full-band difficulty and include ai_metadata.',
   'For mutations, use result_index when a prior list identifies the target. Never turn a question, acknowledgement, or conversation into a mutation.',
@@ -22,7 +22,7 @@ const FALLBACK_SYSTEM_PROMPT = [
   'Allowed actions: search_songs, recommend_external_song, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, get_chords, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, respond, unsupported, clarify.',
   'Use reply_context result indexes when relevant.',
   'If the user asks for songs by an artist, preserve the artist strongly.',
-  'If the user asks for a song outside the catalog, use recommend_external_song; otherwise use search_songs for a list of songs.',
+  'If the user asks for a song outside the catalog, use recommend_external_song; otherwise use search_songs. A one-song request uses limit=1.',
   'Use get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, and get_band_failure_reasons only for an explicit question about recorded band feedback. fit may be sparse; open recommendations use search_songs.',
   'For an explicit add request, return add_song with non-empty song.song_title and song.artist. Difficulty is mandatory: high for demanding/prog/virtuoso material. Resolve known "A - B" title/artist pairs in either order; never leave the entire phrase as the title or ask again when one side is clearly the artist.',
   'Never return add_song for a question about song metadata, a bare acknowledgement, or normal conversation.',
@@ -1699,6 +1699,24 @@ async function interpretMessage({
   });
 }
 
+function compatibilityActionFromToolCalls(toolCalls, context) {
+  if (!Array.isArray(toolCalls) || toolCalls.length !== 1) return null;
+
+  const call = toolCalls[0];
+  const name = String(call?.function?.name || '').trim().toLowerCase();
+  if (name !== 'json' && name !== 'response') return null;
+
+  try {
+    const parsed = JSON.parse(String(call?.function?.arguments || '{}'));
+    const action = validateAgentAction(normalizeAgentAction(parsed, context));
+    return { action, toolName: name };
+  } catch {
+    // Keep the ordinary tool loop for malformed compatibility calls so the
+    // model can receive a normal tool error and correct itself.
+    return null;
+  }
+}
+
 async function interpretMessageWithTools({
   provider,
   baseUrl,
@@ -1751,6 +1769,13 @@ async function interpretMessageWithTools({
           const parsed = extractJsonBlock(result.content);
           const action = validateAgentAction(normalizeAgentAction(parsed, { messageText, replyContext, quotedText }));
           console.log(`[agent] action=${estimateActionName(action)} tools=${turn} input=${result.usage.promptTokens} cached=${result.usage.cachedTokens} output=${result.usage.completionTokens} total=${result.usage.totalTokens} latency=${result.usage.latencyMs}ms`);
+          return action;
+        }
+
+        const compatibilityResult = compatibilityActionFromToolCalls(result.toolCalls, { messageText, replyContext, quotedText });
+        if (compatibilityResult) {
+          const { action, toolName } = compatibilityResult;
+          console.log(`[agent] action=${estimateActionName(action)} tools=${turn} compatibility_tool=${toolName} input=${result.usage.promptTokens} cached=${result.usage.cachedTokens} output=${result.usage.completionTokens} total=${result.usage.totalTokens} latency=${result.usage.latencyMs}ms`);
           return action;
         }
 

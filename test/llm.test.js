@@ -227,6 +227,72 @@ test('interpretMessageWithTools executes a local lookup before choosing the fina
   assert.match(requestBodies[1].messages.at(-1).content, /"found"/);
 });
 
+test('interpretMessageWithTools accepts a Groq final-action compatibility tool without executing it', async () => {
+  const { interpretMessageWithTools } = require('../src/llm');
+  let executeCalls = 0;
+  const action = await interpretMessageWithTools({
+    provider: 'groq', baseUrl: 'https://example.com', apiKey: 'test', model: 'test-model',
+    messageText: 'bring one song', quotedText: '', replyContext: null,
+    recentMessages: [], pendingClarification: null, currentDate: '2026-09-26',
+    tools: [{ type: 'function', function: { name: 'json', parameters: { type: 'object' } } }],
+    executeToolCall: async () => {
+      executeCalls += 1;
+      return { ok: false, error: 'should_not_run' };
+    },
+    requestFn: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      assert.equal(body.tools[0].function.name, 'json');
+      return {
+        ok: true,
+        async json() {
+          return {
+            choices: [{
+              message: {
+                tool_calls: [{
+                  id: 'call-json',
+                  function: { name: 'json', arguments: '{"action":"search_songs","query":{"limit":1}}' }
+                }]
+              }
+            }]
+          };
+        }
+      };
+    }
+  });
+
+  assert.equal(action.action, 'search_songs');
+  assert.equal(action.query.limit, 1);
+  assert.equal(executeCalls, 0);
+});
+
+test('interpretMessageWithTools accepts the response compatibility tool for a free reply', async () => {
+  const { interpretMessageWithTools } = require('../src/llm');
+  const action = await interpretMessageWithTools({
+    provider: 'groq', baseUrl: 'https://example.com', apiKey: 'test', model: 'test-model',
+    messageText: 'answer me', quotedText: '', replyContext: null,
+    recentMessages: [], pendingClarification: null, currentDate: '2026-09-26',
+    tools: [{ type: 'function', function: { name: 'response', parameters: { type: 'object' } } }],
+    executeToolCall: async () => { throw new Error('should_not_run'); },
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return {
+          choices: [{
+            message: {
+              tool_calls: [{
+                id: 'call-response',
+                function: { name: 'response', arguments: '{"action":"respond","reply":"יש עוד במאגר."}' }
+              }]
+            }
+          }]
+        };
+      }
+    })
+  });
+
+  assert.deepEqual(action, { action: 'respond', reply: 'יש עוד במאגר.' });
+});
+
 test('interpretMessageWithTools lets the agent query arbitrary catalog metadata before a free reply', async () => {
   const { interpretMessageWithTools } = require('../src/llm');
   const toolCalls = [];

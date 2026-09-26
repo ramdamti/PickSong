@@ -65,7 +65,28 @@ const READ_ONLY_EVENT_TOOLS = [
   }
 ];
 
-const READ_ONLY_TOOLS = [...READ_ONLY_SONG_TOOLS, ...READ_ONLY_EVENT_TOOLS];
+// Some OpenAI-compatible models occasionally emit these names as a wrapper
+// around the final action, even when asked to return JSON content. Including
+// the aliases prevents the provider from rejecting that otherwise valid action
+// before it reaches our schema validation. They are handled in llm.js and are
+// never executed as data tools.
+const FINAL_ACTION_COMPATIBILITY_TOOLS = ['json', 'response'].map((name) => ({
+  type: 'function',
+  function: {
+    name,
+    description: 'Compatibility wrapper for the final validated bot action. Its arguments must be the final action object; it does not read or change data.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', description: 'The final bot action name.' }
+      },
+      required: ['action'],
+      additionalProperties: true
+    }
+  }
+}));
+
+const READ_ONLY_TOOLS = [...READ_ONLY_SONG_TOOLS, ...READ_ONLY_EVENT_TOOLS, ...FINAL_ACTION_COMPATIBILITY_TOOLS];
 
 function parseToolArguments(rawArguments) {
   if (rawArguments && typeof rawArguments === 'object' && !Array.isArray(rawArguments)) {
@@ -134,6 +155,7 @@ async function executeReadOnlyTool({ stateStore, eventsFile, name, arguments: ra
 module.exports = {
   READ_ONLY_SONG_TOOLS,
   READ_ONLY_EVENT_TOOLS,
+  FINAL_ACTION_COMPATIBILITY_TOOLS,
   READ_ONLY_TOOLS,
   executeReadOnlySongTool,
   executeReadOnlyTool,

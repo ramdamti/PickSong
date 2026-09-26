@@ -76,6 +76,8 @@ test('search_catalog counts arbitrary metadata constraints for an agent query', 
 
 test('lookup_rehearsals returns the current non-cancelled WhatsApp event schedule', async () => {
   assert.equal(READ_ONLY_TOOLS.some((tool) => tool.function.name === 'lookup_rehearsals'), true);
+  assert.equal(READ_ONLY_TOOLS.some((tool) => tool.function.name === 'json'), true);
+  assert.equal(READ_ONLY_TOOLS.some((tool) => tool.function.name === 'response'), true);
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'picksong-events-'));
   const eventsFile = path.join(directory, 'events.json');
   await saveEventSchedule(eventsFile, {
