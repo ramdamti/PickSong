@@ -71,6 +71,7 @@ test('SYSTEM_PROMPT stays compact and preserves global action-planning rules', (
   assert.match(SYSTEM_PROMPT, /result_index/);
   assert.match(SYSTEM_PROMPT, /supported_search_fields/);
   assert.match(SYSTEM_PROMPT, /recommend_external_song/);
+  assert.match(SYSTEM_PROMPT, /mandatory query\.limit/);
   assert.match(SYSTEM_PROMPT, /Use add_song only when the user explicitly asks/i);
   assert.match(SYSTEM_PROMPT, /match the writer’s tone/i);
 });
