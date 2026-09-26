@@ -2187,12 +2187,13 @@ async function handleAgentMessage({
   scheduledRehearsals = []
 }) {
   const handling = shouldHandleMessage(record, config.triggerText);
+  // This must be an unconditional gate. buildAgentReplyContext always
+  // returns a compact object, so using it as a fallback here would let an
+  // outgoing bot message re-enter the agent and create a reply loop.
+  if (!handling.shouldHandle) return false;
   const replyContext = buildAgentReplyContext(stateStore, record);
-  if (!handling.shouldHandle && !replyContext) return false;
 
-  const messageText = handling.shouldHandle
-    ? handling.messageText
-    : String(record?.text || '').trim();
+  const messageText = handling.messageText;
   if (!messageText) {
     await sendBotMessage(chat, '\u05de\u05d4 \u05dc\u05d7\u05e4\u05e9?');
     return true;

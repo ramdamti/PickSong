@@ -27,6 +27,46 @@ test('stripWakeWord removes standalone bot trigger variants', () => {
   assert.equal(stripWakeWord('\u05d1\u05d5\u05d8 - \u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7'), '\u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7');
 });
 
+test('handleAgentMessage ignores an outgoing bot message even when catalog context exists', async () => {
+  let agentCalls = 0;
+  const handled = await handleAgentMessage({
+    chat: { sendMessage: async () => { throw new Error('bot message must not produce a reply'); } },
+    stateStore: {
+      getSongs() { return []; },
+      getLastResults() { return { results: [{ index: 1, song_id: 'song_a', title: 'Zombie', artist: 'The Cranberries' }] }; }
+    },
+    config: { triggerText: 'בוט' },
+    record: { text: '🤖 במאגר יש 248 שירים.', fromMe: true, chatId: 'chat-self' },
+    interpretMessageFn: async () => {
+      agentCalls += 1;
+      throw new Error('bot message must not reach the agent');
+    }
+  });
+
+  assert.equal(handled, false);
+  assert.equal(agentCalls, 0);
+});
+
+test('handleAgentMessage ignores an unrelated group message even when catalog context exists', async () => {
+  let agentCalls = 0;
+  const handled = await handleAgentMessage({
+    chat: { sendMessage: async () => { throw new Error('unrelated message must not produce a reply'); } },
+    stateStore: {
+      getSongs() { return []; },
+      getLastResults() { return { results: [{ index: 1, song_id: 'song_a', title: 'Zombie', artist: 'The Cranberries' }] }; }
+    },
+    config: { triggerText: 'בוט' },
+    record: { text: 'מי מביא כבלים לחזרה?', fromMe: false, chatId: 'chat-unrelated' },
+    interpretMessageFn: async () => {
+      agentCalls += 1;
+      throw new Error('unrelated message must not reach the agent');
+    }
+  });
+
+  assert.equal(handled, false);
+  assert.equal(agentCalls, 0);
+});
+
 test('handleAgentMessage sends event questions to the agent tools instead of a local schedule parser', async () => {
   let capturedTools = [];
   const sentMessages = [];
