@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   SYSTEM_PROMPT,
+  BANTER_POLISH_SYSTEM_PROMPT,
   EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT,
   FALLBACK_SYSTEM_PROMPT,
   buildAgentPrompt,
@@ -29,7 +30,8 @@ test.skip('legacy SYSTEM_PROMPT wording checks', () => {
   assert.match(SYSTEM_PROMPT, /supported_search_fields/);
   assert.match(SYSTEM_PROMPT, /recommend_external_song/);
   assert.match(SYSTEM_PROMPT, /Use add_song only when the user explicitly asks/i);
-  assert.match(SYSTEM_PROMPT, /match the writer’s tone/i);
+  assert.match(SYSTEM_PROMPT, /final voice is polished separately/i);
+  assert.match(BANTER_POLISH_SYSTEM_PROMPT, /Match the writer’s tone/i);
 });
 
 test('buildAgentPrompt includes reply context without full database payloads', () => {
@@ -73,7 +75,8 @@ test('SYSTEM_PROMPT stays compact and preserves global action-planning rules', (
   assert.match(SYSTEM_PROMPT, /recommend_external_song/);
   assert.match(SYSTEM_PROMPT, /mandatory query\.limit/);
   assert.match(SYSTEM_PROMPT, /Use add_song only when the user explicitly asks/i);
-  assert.match(SYSTEM_PROMPT, /match the writer’s tone/i);
+  assert.match(SYSTEM_PROMPT, /final voice is polished separately/i);
+  assert.match(BANTER_POLISH_SYSTEM_PROMPT, /Match the writer’s tone/i);
 });
 
 test('interpretMessage preserves an external recommendation selected by the agent', async () => {
@@ -136,6 +139,7 @@ test('recommendExternalSongs requests backup candidates for local filtering', as
   const prompt = JSON.parse(requestBody.messages[1].content);
   assert.equal(prompt.requested_result_count, 4);
   assert.equal(prompt.candidate_count, 5);
+  assert.equal('catalog_candidates' in prompt, false);
   assert.equal(requestBody.max_completion_tokens, 384);
   assert.equal(recommendations.length, 5);
 });
@@ -1719,6 +1723,23 @@ test.skip('legacy: interpretMessage infers bass difficulty preferences from hard
 
   assert.equal(action.action, 'search_songs');
   assert.equal(action.query.preferences.bass_difficulty, 'high');
+});
+
+test('interpretMessage keeps an agent-planned rehearsal duration out of song filters', async () => {
+  const action = await interpretMessage({
+    provider: 'groq', baseUrl: 'https://api.example.com', apiKey: 'test', model: 'test-model',
+    messageText: '\u05d1\u05d5\u05d8 \u05ea\u05db\u05d9\u05df \u05e8\u05e9\u05d9\u05de\u05ea \u05e9\u05d9\u05e8\u05d9\u05dd \u05dc\u05d7\u05d6\u05e8\u05d4 \u05e9\u05dc 3 \u05e9\u05e2\u05d5\u05ea',
+    replyContext: null, recentMessages: [], currentDate: '2026-09-26',
+    requestFn: async () => ({
+      ok: true,
+      async json() {
+        return { choices: [{ message: { content: JSON.stringify({ action: 'prepare_rehearsal', duration_minutes: 180, query: {} }) } }] };
+      }
+    })
+  });
+
+  assert.equal(action.duration_minutes, 180);
+  assert.deepEqual(action.query, {});
 });
 
 test('interpretMessage preserves agent-provided keyboard type constraints', async () => {

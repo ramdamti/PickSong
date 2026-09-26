@@ -60,6 +60,18 @@ test('validateAgentAction accepts add_song action', () => {
   assert.equal(validated.song.song_title, 'Zombie');
 });
 
+test('validateAgentAction accepts semantic local-data intents without a text parser', () => {
+  const catalog = validateAgentAction({
+    action: 'catalog_question',
+    query: { requirements: { artist: 'Pink Floyd' } }
+  });
+  const rehearsals = validateAgentAction({ action: 'rehearsal_question' });
+
+  assert.equal(catalog.action, 'catalog_question');
+  assert.equal(catalog.query.requirements.artist, 'Pink Floyd');
+  assert.equal(rehearsals.action, 'rehearsal_question');
+});
+
 test('validateAgentAction rejects invalid feedback issue enums', () => {
   assert.throws(
     () =>
@@ -108,12 +120,9 @@ test('validateAgentAction requires an explicit result limit for song searches', 
   );
 });
 
-test('validateAgentAction caps song search lists at fifteen results', () => {
-  assert.throws(
-    () => validateAgentAction({ action: 'search_songs', query: { limit: 16 } }),
-    /query\.limit must not exceed 15/
-  );
-  assert.equal(validateAgentAction({ action: 'search_songs', query: { limit: 15 } }).query.limit, 15);
+test('validateAgentAction caps song search lists at twenty results', () => {
+  assert.equal(validateAgentAction({ action: 'search_songs', query: { limit: 21 } }).query.limit, 20);
+  assert.equal(validateAgentAction({ action: 'search_songs', query: { limit: 20 } }).query.limit, 20);
 });
 
 test('validateAgentAction accepts keyboard type search constraints', () => {

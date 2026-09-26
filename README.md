@@ -102,9 +102,9 @@ The runtime is tuned for Groq usage with `openai/gpt-oss-20b` and assumes the Gr
 
 Operational rules:
 
-- normal handling performs at most one LLM call per incoming user message
+- normal handling performs one compact JSON-planning LLM call per incoming user message
 - search, ranking, validation, persistence, and formatting stay deterministic in local code
-- the runtime prompt sends only `current_date`, `user_message`, and minimal `reply_context`
+- routine planning sends no function-tool schemas; a second, small model call is made only when the agent semantically asks for a grounded catalog/event fact
 - the full song database is never sent to the model
 - local formatting and state writes never trigger extra LLM calls
 - external-song candidates come from iTunes Search; the model may select only an exact returned identity
@@ -115,7 +115,7 @@ Groq-specific notes:
 - cached prompt tokens do not count toward Groq rate limits
 - caching is prefix-based, so the stable system prompt is intentionally reused
 - exact free-tier request and token quotas are account-specific and must be checked in the Groq Limits page for the active organization
-- the model call caps output with `max_completion_tokens=800`
+- routine action planning caps output with `max_completion_tokens=384`
 - 429 responses are retried once with `retry-after` support before the request is surfaced as a temporary overload
 
 Observability:

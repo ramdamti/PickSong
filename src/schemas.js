@@ -14,6 +14,8 @@ const ACTION_NAMES = new Set([
   'get_band_bad_songs',
   'get_band_maybe_songs',
   'get_band_failure_reasons',
+  'catalog_question',
+  'rehearsal_question',
   'respond',
   'unsupported',
   'clarify'
@@ -336,6 +338,22 @@ function validateAgentAction(value) {
     return validated;
   }
 
+  // These are read-only semantic intents. The agent, rather than a local
+  // phrase matcher, decides when a free-form question needs current data.
+  // The executor reads the local source and asks a small second-stage model
+  // call to phrase the grounded answer.
+  if (name === 'catalog_question') {
+    const rawQuery = action.query && typeof action.query === 'object' && !Array.isArray(action.query)
+      ? action.query
+      : {};
+    validated.query = validateSongQuery(rawQuery);
+    return validated;
+  }
+
+  if (name === 'rehearsal_question') {
+    return validated;
+  }
+
   if (name === 'unsupported') {
     validated.requested_capability = String(action.requested_capability || '').trim() || 'the requested capability';
     return validated;
@@ -350,8 +368,10 @@ function validateAgentAction(value) {
     if (name === 'search_songs' && !Number.isInteger(validated.query.limit)) {
       throw new Error('agent_action.search_songs requires query.limit');
     }
-    if (name === 'search_songs' && validated.query.limit > 15) {
-      throw new Error('agent_action.search_songs query.limit must not exceed 15');
+    if (name === 'search_songs' && validated.query.limit > 20) {
+      // Presentation safety cap: never flood the WhatsApp group even when
+      // the agent receives an explicit oversized list request.
+      validated.query.limit = 20;
     }
     if (name === 'prepare_rehearsal') {
       validated.duration_minutes = ensurePositiveInteger(action.duration_minutes, 'agent_action.duration_minutes', { allowNull: true });

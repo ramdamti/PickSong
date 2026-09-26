@@ -1,7 +1,7 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
-const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, recommendExternalSongs, composeUnsupportedReply, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat, getAgentUsageStats } = require('./llm');
-const { READ_ONLY_TOOLS, executeReadOnlyTool } = require('./agent-tools');
+const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, recommendExternalSongs, composeUnsupportedReply, interpretUnknownSongInfo, resolveSongReference, answerLocalDataQuestion, callOpenAiCompatibleChat, getAgentUsageStats } = require('./llm');
+const { executeReadOnlyTool } = require('./agent-tools');
 const {
   persistResultContext,
   resolveActiveResultContext,
@@ -646,7 +646,9 @@ function buildRecentMessageContext(records, limit = 5) {
   return items
     .slice(-limit)
     .map((record) => ({
-      text: String(record?.text || '').trim(),
+      // Context helps pronouns and follow-ups, but a pasted essay should not
+      // consume the minute quota for every later bot request.
+      text: String(record?.text || '').trim().slice(0, 240),
       from_me: Boolean(record?.fromMe),
       sender: String(record?.sender || record?.from || '').trim()
     }))
@@ -1522,10 +1524,44 @@ async function sendSongsReply({ chat, stateStore, chatId, songs, query = null, i
   await stateStore.queueSave();
 }
 
-async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingRemovals, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn, polishBanterReplyFn, recommendExternalSongsFn, discoverExternalSongsFn = discoverCatalogSongs, composeUnsupportedReplyFn }) {
+async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingRemovals, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn, answerLocalDataQuestionFn = answerLocalDataQuestion, polishBanterReplyFn, recommendExternalSongsFn, discoverExternalSongsFn = discoverCatalogSongs, composeUnsupportedReplyFn }) {
   const activeContext = resolveActiveResultContext(stateStore, record);
   const songs = stateStore.getSongs();
   const chatId = String(record?.chatId || '').trim();
+
+  if (action.action === 'catalog_question' || action.action === 'rehearsal_question') {
+    const name = action.action === 'catalog_question' ? 'search_catalog' : 'lookup_rehearsals';
+    const query = action.action === 'catalog_question'
+      ? {
+          ...(action.query || {}),
+          // A factual answer needs a representative sample, not an unbounded
+          // catalog payload. The total count remains exact in the tool result.
+          limit: Math.min(Math.max(Number.parseInt(action.query?.limit, 10) || 8, 1), 15)
+        }
+      : null;
+    const data = await executeReadOnlyTool({
+      stateStore,
+      eventsFile: config.eventsFile,
+      name,
+      arguments: query ? JSON.stringify({ query }) : '{}'
+    });
+    let reply = null;
+    if (typeof answerLocalDataQuestionFn === 'function') {
+      try {
+        reply = await answerLocalDataQuestionFn({
+          baseUrl: config.llmBaseUrl,
+          apiKey: config.llmApiKey,
+          model: config.llmModel,
+          messageText,
+          data
+        });
+      } catch (error) {
+        console.warn(`[agent] data_answer_failed: ${error.message}`);
+      }
+    }
+    await sendBotMessage(chat, reply || 'לא הצלחתי לחלץ תשובה מהנתונים כרגע.');
+    return;
+  }
 
   if (action.action === 'respond') {
     let reply = action.reply;
@@ -1753,7 +1789,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       messageText,
       query: action.query || {},
       excludedCandidates: Array.from(consideredCandidates),
-      catalogCandidates: sourceCandidates || [],
+      catalogCandidates: sourceCandidates,
       limit
     });
     await collectRecommendations(await requestRecommendations(requestedLimit));
@@ -2294,13 +2330,11 @@ async function handleAgentMessage({
       pendingClarification,
       currentDate: currentDateInIsrael(),
       scheduledRehearsals,
-      tools: READ_ONLY_TOOLS,
-      executeToolCall: ({ name, arguments: rawArguments }) => executeReadOnlyTool({
-        stateStore,
-        eventsFile: config.eventsFile,
-        name,
-        arguments: rawArguments
-      })
+      // The common path is structured JSON without function schemas. This
+      // avoids paying their token cost on every search/add/rehearsal plan.
+      // The agent emits catalog_question/rehearsal_question when it actually
+      // needs fresh local facts; executeAgentAction then reads them lazily.
+      tools: []
     });
 
     // Adding a song is a durable mutation. Do not let an LLM turn a metadata

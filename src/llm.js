@@ -7,26 +7,28 @@ const SYSTEM_PROMPT = [
   'Choose a specific supported action and compact query. Clarify only if one essential fact is missing.',
   'Preserve explicit artist, language, era, count, genre, difficulty, and instrument constraints in supported_search_fields. Specific keys -> keys_type_any; generic keys -> has_keys/keys_role.',
   'For more/fresh/different songs after a result list, set query.avoid_previous_results=true. To replace specific numbered results, set query.replace_result_indexes to those indexes. Preserve the existing constraints.',
-  'Lists -> search_songs: mandatory query.limit (1 for one song; else stated count or 5; max 15). Facts -> search_catalog; events -> lookup_rehearsals; plans -> prepare_rehearsal; chords -> get_chords; metadata -> get_song_info; mutations use their actions.',
+  'Lists -> search_songs: mandatory query.limit (1 for one song; else stated count or 5; max 20). Current catalog facts/counts -> catalog_question with query; rehearsal-date facts -> rehearsal_question; plans -> prepare_rehearsal; chords -> get_chords; metadata -> get_song_info; mutations use their actions.',
+  'For prepare_rehearsal, put total time only in duration_minutes; query contains musical filters only, never duration text.',
   'Band-status actions are only for explicit historic feedback; fit is sparse. Open recommendations use search_songs.',
   'Use add_song only when the user explicitly asks to add a song. For "A - B", resolve artist and title without duplicating the full phrase as the title. If YouTube link metadata is supplied, use its title and description to identify artist and song; never use the URL as a song title. For adds, assess real full-band difficulty and include ai_metadata.',
   'For mutations, use result_index when a prior list identifies the target. Never turn a question, acknowledgement, or conversation into a mutation.',
-  'For factual follow-ups, use catalog_context; respond, do not search. Use unsupported for unavailable capabilities. Hebrew replies must be concise, conversational Israeli Hebrew with natural word order; avoid formal, robotic, translated, or service language. For normal conversation use respond.reply and match the writer’s tone: be brief, warm, and helpful for a polite or neutral message; use one Hebrew roast of at most 12 words only when they are insulting, hostile, or mocking. Address them explicitly in second person ("you", or their supplied name) in a roast; do not talk vaguely about people. If the message mentions the bot or asks what the bot thinks/does, the bot MUST speak in first person ("I" / "me"), never refer to itself as "the bot" or a third party. A roast must be funny, with one punchline. No question, echo, slur, threat, protected-trait insult, or invented fact.',
-  'Allowed actions: search_songs, recommend_external_song, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, get_chords, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, respond, unsupported, clarify.'
+  'For factual follow-ups, use catalog_context and respond; do not search. Use unsupported only for unavailable capabilities. For respond.reply, write a short natural-Hebrew draft; final voice is polished separately.',
+  'Allowed actions: search_songs, recommend_external_song, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, get_chords, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, catalog_question, rehearsal_question, respond, unsupported, clarify.'
 ].join('\n');
 
 const FALLBACK_SYSTEM_PROMPT = [
   'You are a JSON-only semantic interpreter for a WhatsApp bot for a band.',
   'Return exactly one JSON object. No prose. No markdown.',
   'Never invent a song_id.',
-  'Allowed actions: search_songs, recommend_external_song, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, get_chords, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, respond, unsupported, clarify.',
+  'Allowed actions: search_songs, recommend_external_song, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, get_chords, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, catalog_question, rehearsal_question, respond, unsupported, clarify.',
   'Use reply_context result indexes when relevant.',
   'If the user asks for songs by an artist, preserve the artist strongly.',
-  'If the user asks for a song outside the catalog, use recommend_external_song; otherwise use search_songs. query.limit is mandatory: use 1 for one song, otherwise the stated count or 5, never over 15.',
+  'If the user asks for a song outside the catalog, use recommend_external_song; otherwise use search_songs. For a current catalog count/fact use catalog_question; for a rehearsal-date fact use rehearsal_question. query.limit is mandatory for search_songs: use 1 for one song, otherwise the stated count or 5, never over 20.',
+  'For prepare_rehearsal, put total time only in duration_minutes; query contains musical filters only.',
   'Use get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, and get_band_failure_reasons only for an explicit question about recorded band feedback. fit may be sparse; open recommendations use search_songs.',
   'For an explicit add request, return add_song with non-empty song.song_title and song.artist. Difficulty is mandatory: high for demanding/prog/virtuoso material. Resolve known "A - B" title/artist pairs in either order; never leave the entire phrase as the title or ask again when one side is clearly the artist.',
   'Never return add_song for a question about song metadata, a bare acknowledgement, or normal conversation.',
-  'For banter/off-topic use respond.reply and match the writer’s tone: a polite or neutral message gets one brief, warm Hebrew sentence; an insulting, hostile, or mocking message gets one declarative Hebrew roast of at most 12 words. A roast must address the writer in second person or by name; never use a question or echo. If they mention the bot or ask what it thinks/does, speak as the bot in first person ("I"), never in third person. Keep a roast sharply funny and specific, using one fresh punchline. No slurs, threats, protected-trait insults, or invented facts. For unavailable requests use unsupported, not clarify. Write fluent, native Israeli Hebrew: short, everyday, conversational, with natural word order; avoid formal, robotic, or translated phrasing. Music/rehearsal references only when natural.',
+  'For banter/off-topic use respond.reply with one short, natural Hebrew draft; its final voice is polished separately. For unavailable requests use unsupported, not clarify.',
   'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
   'Return only valid JSON.'
 ].join('\n');
@@ -96,6 +98,12 @@ const UNKNOWN_SONG_INFO_SYSTEM_PROMPT = [
   'Do not suggest adding the song and do not use markdown.'
 ].join('\n');
 
+const DATA_ANSWER_SYSTEM_PROMPT = [
+  'You answer a WhatsApp band-bot question using only the supplied local data.',
+  'Answer the user directly in concise, natural Israeli Hebrew. State uncertainty only when the supplied data lacks the answer.',
+  'Do not invent songs, events, counts, dates, or metadata. Do not mention tools, JSON, or internal data.'
+].join('\n');
+
 const SONG_REFERENCE_RESOLUTION_SYSTEM_PROMPT = [
   'Extract the referenced song title and artist from a user question about a song.',
   'Return exactly one line in this format: title<TAB>artist. Use an empty artist field when unknown.',
@@ -121,7 +129,9 @@ const MAX_CONCURRENT_AGENT_CALLS = 1;
 // reservation small so Groq's TPM budget serves more messages; the existing
 // validation retry below gets the larger budget when a request genuinely
 // needs it.
-const DEFAULT_MAX_COMPLETION_TOKENS = 512;
+// Add-song payloads can include substantial metadata. 384 still constrains
+// runaway reasoning while leaving enough room for a complete valid action.
+const DEFAULT_MAX_COMPLETION_TOKENS = 384;
 const ACTION_FALLBACK_MAX_COMPLETION_TOKENS = 800;
 const DEFAULT_MAX_RETRIES = 1;
 // A provider rate-limit response can carry a retry-after far longer than a
@@ -746,21 +756,24 @@ function parseExternalSongRecommendations(text) {
   return recommendations.length > 0 ? recommendations : [parseExternalSongRecommendation(raw)].filter(Boolean);
 }
 
-async function recommendExternalSongs({ baseUrl, apiKey, model, messageText, query, excludedCandidates = [], catalogCandidates = [], limit = 1, requestFn }) {
+async function recommendExternalSongs({ baseUrl, apiKey, model, messageText, query, excludedCandidates = [], catalogCandidates = null, limit = 1, requestFn }) {
   const requestedCount = Math.min(Math.max(Number.parseInt(limit, 10) || 1, 1), 10);
   // One spare choice absorbs a local rejection without paying to generate a
   // large backup list. A retry remains available when it is actually needed.
   const candidateCount = Math.min(requestedCount + 1, 10);
-  const prompt = JSON.stringify({
+  const promptPayload = {
     user_request: String(messageText || '').trim(),
     search_constraints: query || {},
     requested_result_count: requestedCount,
     candidate_count: candidateCount,
-    do_not_repeat_candidates: excludedCandidates,
-    catalog_candidates: Array.isArray(catalogCandidates)
-      ? catalogCandidates.map((candidate) => ({ title: candidate.song_title, artist: candidate.artist, release_date: candidate.release_date || null, catalog_source: candidate.catalog_source || null })).slice(0, 50)
-      : []
-  });
+    do_not_repeat_candidates: excludedCandidates
+  };
+  if (Array.isArray(catalogCandidates) && catalogCandidates.length > 0) {
+    promptPayload.catalog_candidates = catalogCandidates
+      .map((candidate) => ({ title: candidate.song_title, artist: candidate.artist, release_date: candidate.release_date || null, catalog_source: candidate.catalog_source || null }))
+      .slice(0, 50);
+  }
+  const prompt = JSON.stringify(promptPayload);
   const { parsed } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
     baseUrl, apiKey, model, prompt, systemPrompt: EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT,
     requestFn, maxCompletionTokens: Math.max(384, candidateCount * 64), reasoningEffort: 'low', temperature: 0.7, responseFormat: 'text'
@@ -824,6 +837,19 @@ async function interpretUnknownSongInfo({ baseUrl, apiKey, model, songTitle, art
     baseUrl, apiKey, model, prompt, systemPrompt: UNKNOWN_SONG_INFO_SYSTEM_PROMPT,
     requestFn, maxCompletionTokens: 256, responseFormat: 'text'
   }));
+  return String(parsed?.text || '').trim() || null;
+}
+
+async function answerLocalDataQuestion({ baseUrl, apiKey, model, messageText, data, requestFn }) {
+  const prompt = JSON.stringify({
+    user_question: String(messageText || '').trim(),
+    local_data: data || null
+  });
+  const { parsed, usage } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
+    baseUrl, apiKey, model, prompt, systemPrompt: DATA_ANSWER_SYSTEM_PROMPT,
+    requestFn, maxCompletionTokens: 160, reasoningEffort: 'low', responseFormat: 'text'
+  }));
+  console.log(`[agent] data_answer input=${usage.promptTokens} cached=${usage.cachedTokens} output=${usage.completionTokens} total=${usage.totalTokens} latency=${usage.latencyMs}ms`);
   return String(parsed?.text || '').trim() || null;
 }
 
@@ -1436,7 +1462,19 @@ function normalizeAgentAction(action, { messageText, replyContext, quotedText })
     };
   }
 
-  if (action.action !== 'find_similar_songs' && action.action !== 'prepare_rehearsal') {
+  // Rehearsal duration and musical constraints are semantic decisions for the
+  // agent. Do not run legacy text parsers here: a phrase such as "3 hours"
+  // can otherwise be mistaken for an artist constraint.
+  if (action.action === 'prepare_rehearsal') {
+    return {
+      ...action,
+      query: action.query && typeof action.query === 'object' && !Array.isArray(action.query)
+        ? { ...action.query }
+        : {}
+    };
+  }
+
+  if (action.action !== 'find_similar_songs') {
     return action;
   }
 
@@ -1513,10 +1551,6 @@ function normalizeAgentAction(action, { messageText, replyContext, quotedText })
       preferences
     }
   };
-
-  if (action.action === 'prepare_rehearsal') {
-    return normalizedAction;
-  }
 
   return normalizedAction;
 }
@@ -1744,7 +1778,7 @@ async function interpretMessageWithTools({
   const messages = [
     {
       role: 'system',
-      content: `${SYSTEM_PROMPT}\nYou may call the supplied local read-only tools before deciding. For a named-song metadata question, call lookup_song first. For any factual question about the catalog, call search_catalog first, using every relevant metadata constraint. Tool results are authoritative: never claim a song exists when lookup_song returns not_found, and never turn a lookup into an add.`
+      content: `${SYSTEM_PROMPT}\nUse local read-only tools for named-song metadata (lookup_song), catalog facts (search_catalog), and rehearsals (lookup_rehearsals). Their results are authoritative; never turn a read into an add.`
     },
     { role: 'user', content: prompt }
   ];
@@ -1818,6 +1852,7 @@ module.exports = {
   EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT,
   UNSUPPORTED_REPLY_SYSTEM_PROMPT,
   UNKNOWN_SONG_INFO_SYSTEM_PROMPT,
+  DATA_ANSWER_SYSTEM_PROMPT,
   SONG_REFERENCE_RESOLUTION_SYSTEM_PROMPT,
   MAX_CONCURRENT_AGENT_CALLS,
   DEFAULT_MAX_COMPLETION_TOKENS,
@@ -1838,6 +1873,7 @@ module.exports = {
   recommendExternalSongs,
   composeUnsupportedReply,
   interpretUnknownSongInfo,
+  answerLocalDataQuestion,
   resolveSongReference,
   callOpenAiCompatibleChat,
   getAgentUsageStats

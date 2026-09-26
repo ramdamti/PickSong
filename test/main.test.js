@@ -67,7 +67,7 @@ test('handleAgentMessage ignores an unrelated group message even when catalog co
   assert.equal(agentCalls, 0);
 });
 
-test('handleAgentMessage sends event questions to the agent tools instead of a local schedule parser', async () => {
+test('handleAgentMessage keeps event wording semantic and does not attach tools to every request', async () => {
   let capturedTools = [];
   const sentMessages = [];
   const handled = await handleAgentMessage({
@@ -82,8 +82,37 @@ test('handleAgentMessage sends event questions to the agent tools instead of a l
   });
 
   assert.equal(handled, true);
-  assert.equal(capturedTools.some((tool) => tool.function.name === 'lookup_rehearsals'), true);
+  assert.deepEqual(capturedTools, []);
   assert.match(sentMessages[0], /יש שתי חזרות באוקטובר/);
+});
+
+test('executeAgentAction answers a semantic catalog question from local data only when requested', async () => {
+  const sentMessages = [];
+  let capturedData = null;
+  await executeAgentAction({
+    action: { action: 'catalog_question', query: { requirements: { artist: 'Pink Floyd' } } },
+    stateStore: {
+      getSongs() {
+        return [{
+          song_id: 'pink_1', song_title: 'Time', artist: 'Pink Floyd', language: 'en', genres: ['rock'],
+          difficulty: 'medium', feel: 'upbeat', ai_metadata: {}, band_status: {}
+        }];
+      },
+      getLastResults() { return null; }
+    },
+    chat: { sendMessage: async (text) => sentMessages.push(text) },
+    record: { chatId: 'catalog-question' },
+    messageText: 'How many Pink Floyd songs are in the catalog?',
+    config: {},
+    answerLocalDataQuestionFn: async ({ data }) => {
+      capturedData = data;
+      return 'There is one Pink Floyd song in the catalog.';
+    }
+  });
+
+  assert.equal(capturedData.total_matches, 1);
+  assert.equal(capturedData.songs[0].song_title, 'Time');
+  assert.match(sentMessages[0], /There is one Pink Floyd song in the catalog\./);
 });
 
 test('YouTube link metadata is provided to explicit add requests without treating the URL as a title', () => {
@@ -209,8 +238,9 @@ test('handleAgentMessage executes an external recommendation selected by the age
       action: 'recommend_external_song',
       query: { requirements: { language: 'he' } }
     }),
-    recommendExternalSongsFn: async ({ query }) => {
+    recommendExternalSongsFn: async ({ query, catalogCandidates }) => {
       assert.equal(query.requirements.language, 'he');
+      assert.equal(catalogCandidates, null);
       return [{ song_title: '\u05e9\u05d9\u05e8 \u05d1\u05d3\u05d9\u05e7\u05d4', artist: '\u05d0\u05de\u05df \u05d1\u05d3\u05d9\u05e7\u05d4', difficulty: 'low', reason: '\u05de\u05ea\u05d0\u05d9\u05dd.' }];
     }
   });
