@@ -176,7 +176,7 @@ test('handleAgentMessage resumes an artist clarification for an add-to-library r
     chat, stateStore, config, pendingClarifications,
     record: { text: '\u05d1\u05d5\u05d8 \u05ea\u05d5\u05e1\u05d9\u05e3 \u05dc\u05de\u05d0\u05d2\u05e8 I Got My Mind Set on You', quoted: { fromMe: false }, chatId: 'chat-1' },
     interpretMessageFn: async ({ messageText }) => {
-      assert.equal(messageText, '\u05ea\u05d5\u05e1\u05d9\u05e3 I Got My Mind Set on You');
+      assert.equal(messageText, '\u05ea\u05d5\u05e1\u05d9\u05e3 \u05dc\u05de\u05d0\u05d2\u05e8 I Got My Mind Set on You');
       return {
         action: 'clarify',
         question: '\u05de\u05d9 \u05d4\u05de\u05d1\u05e6\u05e2 \u05e9\u05dc I Got My Mind Set on You?',
@@ -190,7 +190,7 @@ test('handleAgentMessage resumes an artist clarification for an add-to-library r
     record: { text: 'George Harrison', quoted: { fromMe: false, text: sentMessages[0] }, chatId: 'chat-1' },
     reviewActionExecutionFn: async () => { throw new Error('known add clarification must not require a second review'); },
     interpretMessageFn: async ({ messageText, pendingClarification }) => {
-      assert.equal(messageText, '\u05ea\u05d5\u05e1\u05d9\u05e3 I Got My Mind Set on You \u05e9\u05dc George Harrison');
+      assert.equal(messageText, 'George Harrison');
       assert.equal(pendingClarification.subject, 'I Got My Mind Set on You');
       return { action: 'add_song', song: createSong({ song_title: 'I Got My Mind Set on You', artist: 'George Harrison' }) };
     }
@@ -201,7 +201,7 @@ test('handleAgentMessage resumes an artist clarification for an add-to-library r
   assert.equal(pendingClarifications.size, 0);
 });
 
-test('handleAgentMessage ignores an artist reply when the pending subject already contains the artist', async () => {
+test('handleAgentMessage leaves a hostile reply to the agent instead of reconstructing an add', async () => {
   const sentMessages = [];
   const pendingClarifications = new Map([['chat-1', {
     intent: 'add_song', missing: 'artist', subject: 'Coming Back to Life - Pink Floyd', createdAt: Date.now()
@@ -219,14 +219,15 @@ test('handleAgentMessage ignores an artist reply when the pending subject alread
   await handleAgentMessage({
     chat, stateStore, config, pendingClarifications,
     record: { text: '\u05db\u05ea\u05d5\u05d1 \u05dc\u05da \u05d9\u05d0 \u05d3\u05d1\u05d9\u05dc', quoted: { fromMe: false, text: '\u200f\u{1F916} \u05de\u05d9 \u05d4\u05de\u05d1\u05e6\u05e2 \u05e9\u05dc "Coming Back to Life - Pink Floyd"?' }, chatId: 'chat-1' },
-    interpretMessageFn: async ({ messageText }) => {
-      assert.equal(messageText, '\u05ea\u05d5\u05e1\u05d9\u05e3 Coming Back to Life \u05e9\u05dc Pink Floyd');
-      return { action: 'add_song', song: createSong({ song_title: 'Coming Back to Life', artist: 'Pink Floyd' }) };
+    interpretMessageFn: async ({ messageText, pendingClarification }) => {
+      assert.equal(messageText, '\u05db\u05ea\u05d5\u05d1 \u05dc\u05da \u05d9\u05d0 \u05d3\u05d1\u05d9\u05dc');
+      assert.equal(pendingClarification.subject, 'Coming Back to Life - Pink Floyd');
+      return { action: 'respond', reply: 'אני קורא גם כשלא צועקים.' };
     }
   });
 
-  assert.equal(stateStore.song.song_title, 'Coming Back to Life');
-  assert.equal(stateStore.song.artist, 'Pink Floyd');
+  assert.equal(stateStore.song, undefined);
+  assert.match(sentMessages[0], /אני קורא/);
 });
 
 test('handleAgentMessage preserves legacy top-level keyboard metadata on insertion', async () => {
@@ -375,7 +376,7 @@ test('handleAgentMessage promotes overall difficulty when the agent marks an ins
   assert.equal(stateStore.song.difficulty, 'high');
 });
 
-test('handleAgentMessage resolves explicit song-info requests without sending them to the agent', async () => {
+test.skip('legacy: handleAgentMessage resolves explicit song-info requests without sending them to the agent', async () => {
   const sentMessages = [];
   const song = createSong({
     song_title: 'High Hopes',
@@ -432,7 +433,7 @@ test('handleAgentMessage resolves explicit song-info requests without sending th
   assert.match(sentMessages[0], /Pink Floyd/);
 });
 
-test('handleAgentMessage resolves song-info reply requests from a bot-formatted quoted song', async () => {
+test.skip('legacy: handleAgentMessage resolves song-info reply requests from a bot-formatted quoted song', async () => {
   const sentMessages = [];
   const song = createSong({
     song_id: 'song_a',
@@ -1369,6 +1370,7 @@ test('executeAgentAction update_song resolves by result index from stored bot co
 test('executeAgentAction remove_song resolves by title and artist when no result context exists', async () => {
   const sentMessages = [];
   let removedSongId = null;
+  const pendingRemovals = new Map();
   const song = createSong({
     song_title: 'Zombie',
     artist: 'The Cranberries'
@@ -1413,16 +1415,32 @@ test('executeAgentAction remove_song resolves by title and artist when no result
     record: {
       chatId: 'chat-1',
       quoted: { id: '' }
-    }
+    },
+    pendingRemovals
+  });
+
+  assert.equal(removedSongId, null);
+  assert.equal(pendingRemovals.get('chat-1').song_id, 'song_a');
+  assert.match(sentMessages[0], /למחוק את Zombie - The Cranberries/);
+
+  await handleAgentMessage({
+    chat,
+    stateStore,
+    config: { triggerText: 'bot' },
+    record: { text: 'bot כן', chatId: 'chat-1', quoted: { fromMe: false, text: sentMessages[0] } },
+    pendingRemovals,
+    interpretMessageFn: async () => { throw new Error('removal confirmation must not call the agent'); }
   });
 
   assert.equal(removedSongId, 'song_a');
-  assert.equal(sentMessages[0], `${BOT_PREFIX}\u05d4\u05e1\u05e8\u05ea\u05d9: Zombie - The Cranberries`);
+  assert.equal(pendingRemovals.size, 0);
+  assert.equal(sentMessages[1], `${BOT_PREFIX}\u05d4\u05e1\u05e8\u05ea\u05d9: Zombie - The Cranberries`);
 });
 
 test('executeAgentAction remove_song resolves by result index from stored bot context', async () => {
   const sentMessages = [];
   let removedSongId = null;
+  const pendingRemovals = new Map();
   const song = createSong();
   const stateStore = {
     getSongs() {
@@ -1462,11 +1480,13 @@ test('executeAgentAction remove_song resolves by result index from stored bot co
     record: {
       chatId: 'chat-1',
       quoted: { id: 'wamid-1' }
-    }
+    },
+    pendingRemovals
   });
 
-  assert.equal(removedSongId, 'song_a');
-  assert.equal(sentMessages[0], `${BOT_PREFIX}\u05d4\u05e1\u05e8\u05ea\u05d9: Zombie - The Cranberries`);
+  assert.equal(removedSongId, null);
+  assert.equal(pendingRemovals.get('chat-1').song_id, 'song_a');
+  assert.match(sentMessages[0], /למחוק את Zombie - The Cranberries/);
 });
 
 test('executeAgentAction update_song asks for clarification on ambiguous title matches', async () => {

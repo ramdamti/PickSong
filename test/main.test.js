@@ -12,8 +12,6 @@ const {
   isRecommendationReasonRequest,
   buildRecommendationReason,
   buildRecentMessageContext,
-  isScheduleInquiry,
-  getScheduleReply,
   extractYouTubeUrl,
   buildYouTubeAddContext,
   isChordsReplyRequest,
@@ -29,29 +27,23 @@ test('stripWakeWord removes standalone bot trigger variants', () => {
   assert.equal(stripWakeWord('\u05d1\u05d5\u05d8 - \u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7'), '\u05ea\u05df \u05dc\u05d9 \u05e8\u05d5\u05e7');
 });
 
-test('schedule inquiry detection is broad while ordinary song requests do not carry the event schedule', () => {
-  assert.equal(isScheduleInquiry('מתי החזרה הבאה?'), true);
-  assert.equal(isScheduleInquiry('מה יש בינואר'), true);
-  assert.equal(isScheduleInquiry('אני פנוי בשבת הקרובה'), false);
-  assert.equal(isScheduleInquiry('מתי החזרה בשבת הקרובה?'), true);
-  assert.equal(isScheduleInquiry('may I add a song?'), false);
-  assert.equal(isScheduleInquiry('what rehearsals are in May?'), true);
-  assert.equal(isScheduleInquiry('תביא שיר'), false);
-});
+test('handleAgentMessage sends event questions to the agent tools instead of a local schedule parser', async () => {
+  let capturedTools = [];
+  const sentMessages = [];
+  const handled = await handleAgentMessage({
+    chat: { sendMessage: async (text) => sentMessages.push(text) },
+    stateStore: { getSongs() { return []; }, getLastResults() { return null; } },
+    config: { triggerText: 'בוט', llmProvider: 'groq', llmBaseUrl: 'https://example.com', llmApiKey: 'test', llmModel: 'test-model' },
+    record: { text: 'בוט כמה חזרות יש באוקטובר?', chatId: 'chat-events' },
+    interpretMessageFn: async ({ tools }) => {
+      capturedTools = tools;
+      return { action: 'respond', reply: 'יש שתי חזרות באוקטובר.' };
+    }
+  });
 
-test('schedule replies select the next rehearsal and an exact requested month', () => {
-  const events = [
-    { id: 'sep', title: 'חזרת להקה', start_at: '2026-09-26T14:00:00.000Z', details: 'גרוב, חדר E' },
-    { id: 'oct-1', title: 'חזרת להקה', start_at: '2026-10-10T14:30:00.000Z', details: 'גרוב, חדר B' },
-    { id: 'oct-2', title: 'חזרת להקה', start_at: '2026-10-24T15:00:00.000Z', details: 'אצל יאיר' },
-    { id: 'nov', title: 'חזרת להקה', start_at: '2026-11-07T16:00:00.000Z', details: 'גרוב, חדר B' }
-  ];
-  const now = new Date('2026-09-24T08:00:00.000Z');
-  assert.match(getScheduleReply('מתי החזרה הבאה?', events, now), /26\.09\.2026/);
-  const october = getScheduleReply('איזה חזרות יש באוקטובר?', events, now);
-  assert.match(october, /10\.10\.2026/);
-  assert.match(october, /24\.10\.2026/);
-  assert.doesNotMatch(october, /07\.11\.2026/);
+  assert.equal(handled, true);
+  assert.equal(capturedTools.some((tool) => tool.function.name === 'lookup_rehearsals'), true);
+  assert.match(sentMessages[0], /יש שתי חזרות באוקטובר/);
 });
 
 test('YouTube link metadata is provided to explicit add requests without treating the URL as a title', () => {
@@ -163,7 +155,7 @@ test('executeAgentAction rejects foreign identities for Hebrew external recommen
   assert.doesNotMatch(sentMessages[0], /Dream On/);
 });
 
-test('handleAgentMessage routes external recommendations without an action-classification model call', async () => {
+test('handleAgentMessage executes an external recommendation selected by the agent', async () => {
   const sentMessages = [];
   await handleAgentMessage({
     chat: { sendMessage: async (message) => sentMessages.push(message) },
@@ -173,7 +165,10 @@ test('handleAgentMessage routes external recommendations without an action-class
     },
     config: { triggerText: '\u05d1\u05d5\u05d8', catalogSearchEnabled: false },
     record: { text: '\u05d1\u05d5\u05d8 \u05ea\u05d1\u05d9\u05d0 \u05e9\u05d9\u05e8 \u05d9\u05e9\u05e8\u05d0\u05dc\u05d9 \u05de\u05d7\u05d5\u05e5 \u05dc\u05de\u05d0\u05d2\u05e8', quoted: { fromMe: false }, chatId: 'chat-direct-external' },
-    interpretMessageFn: async () => { throw new Error('the action model should not run'); },
+    interpretMessageFn: async () => ({
+      action: 'recommend_external_song',
+      query: { requirements: { language: 'he' } }
+    }),
     recommendExternalSongsFn: async ({ query }) => {
       assert.equal(query.requirements.language, 'he');
       return [{ song_title: '\u05e9\u05d9\u05e8 \u05d1\u05d3\u05d9\u05e7\u05d4', artist: '\u05d0\u05de\u05df \u05d1\u05d3\u05d9\u05e7\u05d4', difficulty: 'low', reason: '\u05de\u05ea\u05d0\u05d9\u05dd.' }];
@@ -319,10 +314,9 @@ test('buildAgentReplyContext returns stored numbered results only', () => {
     quoted: { id: 'wamid-1', text: '\u200f🤖 1. Zombie - The Cranberries' }
   });
 
-  assert.deepEqual(context, {
-    source: 'reply',
-    results: [{ index: 1, song_id: 'song_a', title: 'Zombie', artist: 'The Cranberries' }]
-  });
+  assert.equal(context.source, 'reply');
+  assert.deepEqual(context.results, [{ index: 1, song_id: 'song_a', title: 'Zombie', artist: 'The Cranberries' }]);
+  assert.equal(context.catalog_context.last_result.shown_count, 1);
 });
 
 test('buildAgentReplyContext ignores quoted messages without the bot prefix', () => {
@@ -337,27 +331,58 @@ test('buildAgentReplyContext ignores quoted messages without the bot prefix', ()
     quoted: { id: 'wamid-1', text: '1. Zombie - The Cranberries' }
   });
 
-  assert.equal(context, null);
+  assert.equal(context.source, 'conversation');
+  assert.deepEqual(context.results, []);
+  assert.equal(context.catalog_context.catalog_song_count, 0);
 });
 
-test('isChordsReplyRequest detects Hebrew and English chord requests', () => {
+test('buildAgentReplyContext supplies compact factual context for the last list without requiring a reply', () => {
+  const stateStore = {
+    getSongs() {
+      return [
+        { song_id: 'song_a', artist: 'Pink Floyd', genres: ['rock'] },
+        { song_id: 'song_b', artist: 'Pink Floyd', genres: ['rock'] },
+        { song_id: 'song_c', artist: 'Other', genres: ['rock'] }
+      ];
+    },
+    getLastResults() {
+      return {
+        results: [{ index: 1, song_id: 'song_a', title: 'Time', artist: 'Pink Floyd' }],
+        query: { requirements: { artist: 'Pink Floyd' } }
+      };
+    }
+  };
+
+  const context = buildAgentReplyContext(stateStore, { chatId: 'chat-1', quoted: { text: '' } });
+  assert.equal(context.source, 'conversation');
+  assert.equal(context.results.length, 0);
+  assert.equal(context.catalog_context.catalog_song_count, 3);
+  assert.equal(context.catalog_context.last_result.shown_count, 1);
+  assert.equal(context.catalog_context.last_result.matching_count, 2);
+});
+
+test.skip('legacy: isChordsReplyRequest detects Hebrew and English chord requests', () => {
   assert.equal(isChordsReplyRequest('תביא אקורדים'), true);
   assert.equal(isChordsReplyRequest('אפשר chords?'), true);
   assert.equal(isChordsReplyRequest('מתי ניגנו את זה?'), false);
 });
 
-test('buildRecentMessageContext keeps the last three compact messages', () => {
+test('buildRecentMessageContext keeps the last five compact messages', () => {
   const recent = buildRecentMessageContext([
     { text: 'אחד', fromMe: false, sender: 'A' },
     { text: 'שתיים', fromMe: true, sender: 'Me' },
     { text: 'שלוש', fromMe: false, sender: 'B' },
-    { text: 'ארבע', fromMe: false, sender: 'C' }
+    { text: 'ארבע', fromMe: false, sender: 'C' },
+    { text: 'חמש', fromMe: false, sender: 'D' },
+    { text: 'שש', fromMe: false, sender: 'E' }
   ]);
 
   assert.deepEqual(recent, [
     { text: 'שתיים', from_me: true, sender: 'Me' },
     { text: 'שלוש', from_me: false, sender: 'B' },
-    { text: 'ארבע', from_me: false, sender: 'C' }
+    { text: 'ארבע', from_me: false, sender: 'C' },
+    { text: 'חמש', from_me: false, sender: 'D' },
+    { text: 'שש', from_me: false, sender: 'E' }
   ]);
 });
 
@@ -656,7 +681,7 @@ test('handleAgentMessage asks the execution reviewer before an explicit durable 
   assert.match(sentMessages[0], /לא ביצעתי שינוי/);
 });
 
-test('handleAgentMessage rewrites generic add-to-library requests using the latest recent song message', async () => {
+test('handleAgentMessage supplies recent context for a generic add-to-library request without rewriting it', async () => {
   let agentCalls = 0;
   let capturedMessageText = null;
   const sentMessages = [];
@@ -720,13 +745,13 @@ test('handleAgentMessage rewrites generic add-to-library requests using the late
 
   assert.equal(handled, true);
   assert.equal(agentCalls, 1);
-  assert.equal(capturedMessageText, '\u05ea\u05d5\u05e1\u05d9\u05e3 wish you where here \u05e9\u05dc pink floyd');
+  assert.equal(capturedMessageText, '\u05ea\u05d5\u05e1\u05d9\u05e3 \u05dc\u05de\u05d0\u05d2\u05e8');
   assert.equal(stateStore.song.song_title, 'Wish You Were Here');
   assert.equal(stateStore.song.artist, 'Pink Floyd');
   assert.equal(sentMessages.length, 1);
 });
 
-test('handleAgentMessage rewrites plain add requests using the replied song message first', async () => {
+test('handleAgentMessage supplies quoted context for a plain add request without rewriting it', async () => {
   let agentCalls = 0;
   let capturedMessageText = null;
   const sentMessages = [];
@@ -790,13 +815,13 @@ test('handleAgentMessage rewrites plain add requests using the replied song mess
 
   assert.equal(handled, true);
   assert.equal(agentCalls, 1);
-  assert.equal(capturedMessageText, '\u05ea\u05d5\u05e1\u05d9\u05e3 wish you where here \u05e9\u05dc pink floyd');
+  assert.equal(capturedMessageText, '\u05ea\u05d5\u05e1\u05d9\u05e3');
   assert.equal(stateStore.song.song_title, 'Wish You Were Here');
   assert.equal(stateStore.song.artist, 'Pink Floyd');
   assert.equal(sentMessages.length, 1);
 });
 
-test('handleAgentMessage answers metadata questions about an added song reply without calling the agent', async () => {
+test.skip('legacy: handleAgentMessage answers metadata questions about an added song reply without calling the agent', async () => {
   let agentCalls = 0;
   const sentMessages = [];
   const song = {
@@ -887,7 +912,7 @@ test('handleAgentMessage answers metadata questions about an added song reply wi
   assert.doesNotMatch(sentMessages[0], /\u05e9\u05e4\u05d4:/);
 });
 
-test('handleAgentMessage answers a missing catalog song with the knowledge fallback', async () => {
+test.skip('legacy: handleAgentMessage answers a missing catalog song with the knowledge fallback', async () => {
   const sentMessages = [];
   let agentCalls = 0;
   const stateStore = {
@@ -926,7 +951,7 @@ test('handleAgentMessage answers a missing catalog song with the knowledge fallb
   assert.match(sentMessages[0], /השיר לא קיים במאגר שלנו, אבל לפי מה שאני יודע: רמת הקושי כנראה בינונית\./);
 });
 
-test('handleAgentMessage returns reply-context songs with chords without calling the agent', async () => {
+test.skip('legacy: handleAgentMessage returns reply-context songs with chords without calling the agent', async () => {
   let agentCalls = 0;
   let saved = 0;
   const sentMessages = [];

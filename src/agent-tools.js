@@ -1,4 +1,4 @@
-const { searchSongs } = require('./song-search');
+const { searchSongs, countHardFilterMatches } = require('./song-search');
 const { loadEventSchedule } = require('./event-reminders');
 
 function compactSong(song) {
@@ -37,7 +37,7 @@ const READ_ONLY_SONG_TOOLS = [
     type: 'function',
     function: {
       name: 'search_catalog',
-      description: 'Search the local band catalog for song recommendations. Never creates or changes a song.',
+      description: 'Query the local band catalog using any supported metadata fields (artist, language, genre, year, difficulty, instruments, singer fit, band status, etc.). Returns the total number of hard-filter matches and a compact sample. Never creates or changes a song.',
       parameters: {
         type: 'object',
         properties: {
@@ -84,8 +84,14 @@ function executeReadOnlySongTool({ stateStore, name, arguments: rawArguments }) 
   if (name === 'search_catalog') {
     const query = args.query && typeof args.query === 'object' && !Array.isArray(args.query) ? args.query : {};
     const songs = typeof stateStore?.getSongs === 'function' ? stateStore.getSongs() : [];
-    const results = searchSongs(songs, { ...query, limit: Math.min(Math.max(Number.parseInt(query.limit, 10) || 5, 1), 10) });
-    return { ok: true, status: results.length ? 'found' : 'not_found', songs: results.map(compactSong) };
+    const totalMatches = countHardFilterMatches(songs, query);
+    const results = searchSongs(songs, { ...query, limit: Math.min(Math.max(Number.parseInt(query.limit, 10) || 10, 1), 20) });
+    return {
+      ok: true,
+      status: totalMatches ? 'found' : 'not_found',
+      total_matches: totalMatches,
+      songs: results.map(compactSong)
+    };
   }
   if (name !== 'lookup_song') {
     return { ok: false, error: 'unknown_tool' };

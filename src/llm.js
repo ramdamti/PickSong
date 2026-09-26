@@ -6,25 +6,25 @@ const SYSTEM_PROMPT = [
   'Interpret the user’s current message together with quoted_message, reply_context, and pending_clarification. Explicit current constraints override assumptions; use result_index for referenced prior results.',
   'Choose the most specific supported action and compact query. Make a reasonable interpretation rather than clarifying, unless one essential fact is truly missing.',
   'Preserve explicit artist, language, era, count, genre, difficulty, and instrument constraints. Translate them to supported_search_fields. For a specific keyboard instrument use keys_type_any; for generic keys use has_keys and/or keys_role.',
-  'For more/fresh/different songs after a result list, set query.avoid_previous_results=true. Preserve its artist and other constraints.',
-  'Route local song lists to search_songs; use recommend_external_song only when explicitly asking outside the catalog. For scheduled rehearsals or WhatsApp events (next, monthly, or all), answer only from scheduled_rehearsals in the input. Rehearsal plan -> prepare_rehearsal; song metadata -> get_song_info; add -> add_song; correction -> update_song; removal -> remove_song; fit feedback -> update_song_feedback; band history -> get_band_failure_reasons or explain_song_rejection.',
+  'For more/fresh/different songs after a result list, set query.avoid_previous_results=true. To replace specific numbered results, set query.replace_result_indexes to those indexes. Preserve the existing constraints.',
+  'Lists -> search_songs with every explicit query constraint. Catalog facts -> search_catalog; events -> lookup_rehearsals; plans -> prepare_rehearsal; chords -> get_chords; metadata -> get_song_info; add/correction/removal/feedback use their actions.',
   'Use add_song only when the user explicitly asks to add a song. For "A - B", resolve artist and title without duplicating the full phrase as the title. If YouTube link metadata is supplied, use its title and description to identify artist and song; never use the URL as a song title. For adds, assess real full-band difficulty and include ai_metadata.',
   'For mutations, use result_index when a prior list identifies the target. Never turn a question, acknowledgement, or conversation into a mutation.',
-  'Use clarify only for a single essential missing value. Use unsupported for unavailable capabilities. For normal conversation use respond.reply and match the writer’s tone: be brief, warm, and helpful for a polite or neutral message; use one Hebrew roast of at most 12 words only when they are insulting, hostile, or mocking. Address them explicitly in second person ("you", or their supplied name) in a roast; do not talk vaguely about people. If the message mentions the bot or asks what the bot thinks/does, the bot MUST speak in first person ("I" / "me"), never refer to itself as "the bot" or a third party. A roast must be funny, with one punchline. No question, echo, slur, threat, protected-trait insult, or invented fact.',
-  'Allowed actions: search_songs, recommend_external_song, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, respond, unsupported, clarify.'
+  'For factual follow-ups, use catalog_context; respond, do not search. Use unsupported for unavailable capabilities. Hebrew replies must be concise, conversational Israeli Hebrew with natural word order; avoid formal, robotic, translated, or service language. For normal conversation use respond.reply and match the writer’s tone: be brief, warm, and helpful for a polite or neutral message; use one Hebrew roast of at most 12 words only when they are insulting, hostile, or mocking. Address them explicitly in second person ("you", or their supplied name) in a roast; do not talk vaguely about people. If the message mentions the bot or asks what the bot thinks/does, the bot MUST speak in first person ("I" / "me"), never refer to itself as "the bot" or a third party. A roast must be funny, with one punchline. No question, echo, slur, threat, protected-trait insult, or invented fact.',
+  'Allowed actions: search_songs, recommend_external_song, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, get_chords, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, respond, unsupported, clarify.'
 ].join('\n');
 
 const FALLBACK_SYSTEM_PROMPT = [
   'You are a JSON-only semantic interpreter for a WhatsApp bot for a band.',
   'Return exactly one JSON object. No prose. No markdown.',
   'Never invent a song_id.',
-  'Allowed actions: search_songs, recommend_external_song, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, respond, unsupported, clarify.',
+  'Allowed actions: search_songs, recommend_external_song, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, get_chords, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, respond, unsupported, clarify.',
   'Use reply_context result indexes when relevant.',
   'If the user asks for songs by an artist, preserve the artist strongly.',
   'If the user asks for a song outside the catalog, use recommend_external_song; otherwise use search_songs for a list of songs.',
   'For an explicit add request, return add_song with non-empty song.song_title and song.artist. Difficulty is mandatory: high for demanding/prog/virtuoso material. Resolve known "A - B" title/artist pairs in either order; never leave the entire phrase as the title or ask again when one side is clearly the artist.',
   'Never return add_song for a question about song metadata, a bare acknowledgement, or normal conversation.',
-  'For banter/off-topic use respond.reply and match the writer’s tone: a polite or neutral message gets one brief, warm Hebrew sentence; an insulting, hostile, or mocking message gets one declarative Hebrew roast of at most 12 words. A roast must address the writer in second person or by name; never use a question or echo. If they mention the bot or ask what it thinks/does, speak as the bot in first person ("I"), never in third person. Keep a roast sharply funny and specific, using one fresh punchline. No slurs, threats, protected-trait insults, or invented facts. For unavailable requests use unsupported, not clarify. Use fluent, idiomatic casual Hebrew with correct grammar. Music/rehearsal references only when natural.',
+  'For banter/off-topic use respond.reply and match the writer’s tone: a polite or neutral message gets one brief, warm Hebrew sentence; an insulting, hostile, or mocking message gets one declarative Hebrew roast of at most 12 words. A roast must address the writer in second person or by name; never use a question or echo. If they mention the bot or ask what it thinks/does, speak as the bot in first person ("I"), never in third person. Keep a roast sharply funny and specific, using one fresh punchline. No slurs, threats, protected-trait insults, or invented facts. For unavailable requests use unsupported, not clarify. Write fluent, native Israeli Hebrew: short, everyday, conversational, with natural word order; avoid formal, robotic, or translated phrasing. Music/rehearsal references only when natural.',
   'If the request is ambiguous, return {"action":"clarify","question":"..."} in Hebrew.',
   'Return only valid JSON.'
 ].join('\n');
@@ -54,13 +54,13 @@ const ACTION_EXECUTION_REVIEW_SYSTEM_PROMPT = [
 const PLAIN_FALLBACK_SYSTEM_PROMPT = [
   'You are the fallback conversational voice of a Hebrew WhatsApp band bot after structured JSON failed.',
   'Decide semantically whether the user requires a song-library action (add, search, update, remove, feedback, rehearsal, song metadata). If so, return exactly ACTION_UNAVAILABLE.',
-  'Otherwise match the writer’s tone: return one brief, warm Hebrew sentence for a polite or neutral message; use one dry, sarcastic Hebrew line of at most 12 words only for an insulting, hostile, or mocking message. A roast must explicitly use second person or their supplied name. If the writer mentions the bot or asks what it thinks/does, speak as the bot in first person ("I"), never call it "the bot" or use third person. Use fluent, idiomatic casual Hebrew with correct grammar. Make a roast a specific cutting punchline; do not echo the wording, issue a literal command, or ask a question. No slurs, threats, protected-trait insults, or invented facts.',
+  'Otherwise match the writer’s tone: return one brief, warm Hebrew sentence for a polite or neutral message; use one dry, sarcastic Hebrew line of at most 12 words only for an insulting, hostile, or mocking message. A roast must explicitly use second person or their supplied name. If the writer mentions the bot or asks what it thinks/does, speak as the bot in first person ("I"), never call it "the bot" or use third person. Use fluent, idiomatic casual Israeli Hebrew: short, direct, and natural in word order; avoid formal, robotic, or translated phrasing. Make a roast a specific cutting punchline; do not echo the wording, issue a literal command, or ask a question. No slurs, threats, protected-trait insults, or invented facts.',
   'Return only the reply text, with no label or markdown.'
 ].join('\n');
 
 const BANTER_POLISH_SYSTEM_PROMPT = [
   'You are the final Hebrew copy editor for a sarcastic WhatsApp band bot.',
-  'Match the writer’s tone when rewriting the draft: for a polite or neutral message, return one short, warm, natural Hebrew sentence; only for an insulting, hostile, or mocking message, return one sharp Hebrew roast of at most 12 words. A roast must explicitly address them in second person ("you") or by their supplied name; never make it vague or impersonal.',
+  'Match the writer’s tone when rewriting the draft: for a polite or neutral message, return one short, warm, natural Hebrew sentence; only for an insulting, hostile, or mocking message, return one sharp Hebrew roast of at most 12 words. A roast must explicitly address them in second person ("you") or by their supplied name; never make it vague or impersonal. Write as an Israeli would text in a group: concise, conversational Hebrew with natural word order; remove translated, formal, robotic, or customer-service phrasing.',
   'When self_reference_required is true, the final reply MUST refer to yourself only in first person ("I" / "me") and MUST NOT contain the word "bot" or any third-person self-reference. For example, if the user says "bot, what am I saying?", answer from "I", never "the bot". Otherwise, if the user mentions the bot or asks what it thinks/does, use first person. Fix all grammar, gender, agreement, word order, and punctuation. Make it genuinely funny and more merciless: set up a specific jab about their request, logic, effort, musical taste, or band-life situation, then land an escalating punchline — not a literal command, paraphrase, or polite observation.',
   'recent_bot_replies are forbidden material: never reuse their wording, opening, joke premise, metaphor, or target. Pick a clearly different angle every time. Never ask a question, explain yourself, mention songs unless natural, invent facts, or use slurs, threats, or protected-trait insults.',
   'Return only the final reply text, with no label or markdown.'
@@ -77,19 +77,19 @@ const EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT = [
   'When search_constraints include release_year_from and release_year_to, strongly prefer that release-year range. A catalog candidate from iTunes may show a remaster or digital reissue date, so do not reject a clearly fitting original song solely because its displayed catalog date is newer.',
   'When catalog_candidates is supplied, it is the only allowed source of song and artist identities. Select only exact title/artist pairs from that list. Never alter, translate, transliterate, combine, or add identities. When that list is non-empty, always return the closest fitting candidates; do not return UNKNOWN merely because a preference (including an approximate era) is imperfect.',
   'Return exactly candidate_count distinct candidates, one per line, immediately, even when the user asks for only one song; do not spend output on reasoning. Format per line: title<TAB>artist<TAB>difficulty (low, medium, or high)<TAB>short natural Hebrew reason. The artist field must contain only the canonical artist name: no cover credit, parenthetical note, role, or extra explanation. If no confident real recommendation exists, return exactly UNKNOWN.',
-  'The reason must be concise and specific to arranging and performing it for this band: keys, drums, two guitars, and bass, plus the two singers. Explain the vocal comfort or possible vocal split as well as useful musical roles or arrangement choices; do not give generic mood-only praise, discuss the listener, or invent a keys part when the song has none. Do not ask a question or suggest adding it.'
+  'The reason must be concise and specific to arranging and performing it for this band: keys, drums, two guitars, and bass, plus the two singers. Explain the vocal comfort or possible vocal split as well as useful musical roles or arrangement choices; do not give generic mood-only praise, discuss the listener, or invent a keys part when the song has none. Write the reason in natural, concise Israeli Hebrew, not translated or formal Hebrew. Do not ask a question or suggest adding it.'
 ].join('\n');
 
 const UNSUPPORTED_REPLY_SYSTEM_PROMPT = [
   'You are the sarcastic Hebrew voice of a WhatsApp band bot.',
-  'The requested capability does not exist. Return one short, fluent, grammatically correct Hebrew line that says so honestly without sounding servicey.',
+  'The requested capability does not exist. Return one short, fluent Israeli-Hebrew line that says so honestly without sounding formal, robotic, translated, or servicey.',
   'Address the writer directly in second person or by their supplied name. If they mention the bot or ask what it thinks/does, speak in first person ("I"), never as a third party. Be dry, witty, and playfully cutting: make a specific roast of the request or their apparent logic rather than a generic refusal. Do not ask a question, invent a capability, claim an action happened, use slurs/threats, protected-trait insults, or repeat a recent reply.',
   'Return only the final reply text.'
 ].join('\n');
 
 const UNKNOWN_SONG_INFO_SYSTEM_PROMPT = [
   'You answer a narrow factual question about a song that is not in the local band catalog.',
-  'Answer only the requested property in short Hebrew, based on your knowledge. If unsure, say that briefly.',
+  'Answer only the requested property in short, natural Israeli Hebrew, based on your knowledge. If unsure, say that briefly and conversationally.',
   'Do not claim to have browsed the web, accessed the catalog, or verified a source.',
   'Do not suggest adding the song and do not use markdown.'
 ].join('\n');
@@ -268,14 +268,13 @@ function extractJsonBlock(text) {
   return null;
 }
 
-function buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate, pendingClarification, scheduledRehearsals }) {
+function buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate, pendingClarification }) {
   return JSON.stringify({
     supported_search_fields: SUPPORTED_SEARCH_FIELDS,
     current_date: currentDate,
     user_message: messageText,
     quoted_message: quotedText ? String(quotedText).trim() : null,
     recent_messages: Array.isArray(recentMessages) ? recentMessages : [],
-    scheduled_rehearsals: Array.isArray(scheduledRehearsals) ? scheduledRehearsals : [],
     reply_context: replyContext || null,
     pending_clarification: pendingClarification || null
   });
@@ -303,31 +302,9 @@ function isAgentActionValidationError(error) {
 }
 
 function buildRecoveryClarification(messageText) {
-  const source = String(messageText || '').trim()
-    .replace(/^(?:בוט\s*[:,\-]?\s*)?/iu, '')
-    .trim();
-  const addMatch = source.match(/^(?:תוסיף|תוסיפי|להוסיף|add)\s+(.+)$/iu);
-
-  if (addMatch) {
-    const requestedSong = String(addMatch[1] || '')
-      .trim()
-      .replace(/^(?:למאגר(?:\s+השירים)?|לרשימה)\s+/iu, '');
-    if (requestedSong) {
-      return {
-        action: 'clarify',
-        question: `מי המבצע של "${requestedSong}"?`,
-        clarification: {
-          intent: 'add_song',
-          missing: 'artist',
-          subject: requestedSong
-        }
-      };
-    }
-  }
-
   return {
     action: 'clarify',
-    question: 'לא הצלחתי להבין את הבקשה. אפשר לנסח אותה שוב בקצרה?'
+    question: 'לא הצלחתי לזהות בוודאות את שם השיר והמבצע. אפשר לכתוב אותם שוב?'
   };
 }
 
@@ -863,59 +840,6 @@ async function resolveSongReference({ baseUrl, apiKey, model, messageText, quote
   return songTitle ? { song_title: songTitle, artist: artist || null } : null;
 }
 
-function isRehearsalPlanRequest(messageText) {
-  const source = String(messageText || '').trim().toLowerCase();
-  if (!source) return false;
-
-  return /(?:חזרה|לחזרה|rehearsal|setlist)/iu.test(source)
-    && /(?:תכין|תכיני|רשימת|רשימה|הקרובה|הבאה|prepare|plan)/iu.test(source);
-}
-
-function isExternalCatalogRecommendationRequest(messageText) {
-  const source = String(messageText || '').trim().toLowerCase();
-  if (!source) return false;
-  const explicitExternal = /(?:\u05dc\u05d0\s*(?:\u05e7\u05d9\u05d9\u05dd|\u05e7\u05d9\u05d9\u05de\u05d9\u05dd|\u05e7\u05d9\u05d9\u05de\u05d5\u05ea|\u05e0\u05de\u05e6\u05d0|\u05e0\u05de\u05e6\u05d0\u05d9\u05dd|\u05e0\u05de\u05e6\u05d0\u05d5\u05ea)\s*(?:\u05d1\u05de\u05d0\u05d2\u05e8|\u05d0\u05e6\u05dc\u05e0\u05d5)|\u05e9\u05dc\u05d0\s*(?:\u05d1\u05de\u05d0\u05d2\u05e8|\u05d0\u05e6\u05dc\u05e0\u05d5)|\u05de\u05d7\u05d5\u05e5\s*\u05dc\u05de\u05d0\u05d2\u05e8|outside\s+(?:the\s+)?catalog|not\s+in\s+(?:the\s+)?catalog)/iu;
-  const externalRecommendation = /(?:\u05ea\u05de\u05dc\u05d9\u05e5|\u05d4\u05de\u05dc\u05e5|\u05ea\u05d1\u05d9\u05d0|\u05ea\u05df|recommend|give|find)/iu;
-  return explicitExternal.test(source) && externalRecommendation.test(source);
-}
-
-function isNovelExternalRecommendationRequest(messageText) {
-  const source = String(messageText || '').trim().toLowerCase();
-  if (!source) return false;
-  const externalRecommendation = /(?:\u05ea\u05de\u05dc\u05d9\u05e5|\u05d4\u05de\u05dc\u05e5|\u05ea\u05d1\u05d9\u05d0|\u05ea\u05df|recommend|give|find)/iu;
-  const noveltyRequest = /(?:\u05e9\u05d9\u05e8\u05d9\u05dd?\s+\u05d7\u05d3\u05e9(?:\u05d9\u05dd|\u05d5\u05ea)?|\u05d3\u05d1\u05e8\u05d9\u05dd?\s+\u05d7\u05d3\u05e9(?:\u05d9\u05dd|\u05d5\u05ea)?|new\s+(?:songs?|stuff|recommendations?))/iu;
-  return externalRecommendation.test(source) && noveltyRequest.test(source);
-}
-
-function inferRequestedDurationMinutes(messageText) {
-  const source = String(messageText || '').trim().toLowerCase();
-  if (!source) return null;
-
-  const hourDigitMatch = source.match(/(\d{1,2})\s*ש(?:עה|עות)/iu);
-  if (hourDigitMatch) {
-    const hours = Number.parseInt(hourDigitMatch[1], 10);
-    if (Number.isInteger(hours) && hours > 0) {
-      return hours * 60;
-    }
-  }
-
-  const minuteDigitMatch = source.match(/(\d{2,3})\s*דק(?:ה|ות)?/iu);
-  if (minuteDigitMatch) {
-    const minutes = Number.parseInt(minuteDigitMatch[1], 10);
-    if (Number.isInteger(minutes) && minutes > 0) {
-      return minutes;
-    }
-  }
-
-  if (/(?:שעתיים|two hours)/iu.test(source)) return 120;
-  if (/(?:שעה וחצי|hour and a half)/iu.test(source)) return 90;
-  if (/(?:שעה אחת|one hour)/iu.test(source)) return 60;
-  if (/(?:שלוש שעות|three hours)/iu.test(source)) return 180;
-  if (/(?:ארבע שעות|four hours)/iu.test(source)) return 240;
-
-  return null;
-}
-
 function inferRequestedGenres(messageText) {
   const source = String(messageText || '').trim().toLowerCase();
   if (!source) return [];
@@ -1061,7 +985,7 @@ function inferRequestedArtist(messageText) {
 
   const patterns = [
     /(?:^|\s)(?:במאגר|catalog)\s+של\s+(.+)$/iu,
-    /(?:שירים?|songs?).*?\s+של\s+(.+?)\s+(?:שיש|שנמצאים|שנמצא|במאגר|בקטלוג|in\s+the\s+catalog).*$/iu,
+    /(?:שירים?|songs?).*?\s+של\s+(.+?)\s+(?:יש|שיש|שנמצאים|שנמצא|במאגר|בקטלוג|in\s+the\s+catalog).*$/iu,
     /(?:שירים?|songs?).*?\s+של\s+(.+)$/iu,
     /^של\s+(.+)$/iu,
     /(?:^|\s)שירים?\s+של\s+(.+)$/iu,
@@ -1099,113 +1023,6 @@ function shouldOverrideArtistRequirement({ messageText, inferredArtist, existing
   }
 
   return true;
-}
-
-function getExplicitAddCandidate(messageText) {
-  const source = String(messageText || '').trim();
-  if (!source) return null;
-
-  const cleaned = source
-    .replace(/^(?:בוט\s*[:,\-]?\s*)?/iu, '')
-    .trim();
-
-  const addMatch = cleaned.match(/^(?:תוסיף|תוסיפי|להוסיף|add)\s+(.+)$/iu);
-  if (!addMatch) return null;
-
-  const candidate = String(addMatch[1] || '').trim();
-  return candidate || null;
-}
-
-function getDashedAddParts(messageText) {
-  const candidate = getExplicitAddCandidate(messageText);
-  const match = String(candidate || '').match(/^(.+?)\s*[-–—]\s*(.+)$/u);
-  if (!match) return null;
-
-  const left = String(match[1] || '').trim();
-  const right = String(match[2] || '').trim();
-  return left && right ? { left, right } : null;
-}
-
-function sameSongIdentityPart(left, right) {
-  return String(left || '').trim().normalize('NFKC').toLocaleLowerCase() ===
-    String(right || '').trim().normalize('NFKC').toLocaleLowerCase();
-}
-
-function inferAddSongPayload(messageText) {
-  const candidate = getExplicitAddCandidate(messageText);
-  if (!candidate) return null;
-
-  let songTitle = '';
-  let artist = '';
-  const hebrewSeparator = candidate.lastIndexOf(' של ');
-  if (hebrewSeparator > 0) {
-    songTitle = candidate.slice(0, hebrewSeparator).trim();
-    artist = candidate.slice(hebrewSeparator + ' של '.length).trim();
-  } else {
-    const englishSplit = candidate.match(/^(.*?)\s+by\s+(.+)$/i);
-    if (englishSplit) {
-      songTitle = englishSplit[1].trim();
-      artist = englishSplit[2].trim();
-    }
-  }
-
-  // A title-only request still helps repair a malformed LLM response that already supplied the artist.
-  // Do not create a title-only song: schema validation will instead prompt for the missing artist.
-  if (!songTitle) {
-    songTitle = candidate;
-  }
-  if (!songTitle) return null;
-
-  return {
-    song_title: songTitle,
-    artist: artist || null,
-    confidence: 0.5
-  };
-}
-
-function inferUnambiguousAddSongPayload(messageText) {
-  const candidate = getExplicitAddCandidate(messageText);
-  if (!candidate) return null;
-
-  const hebrewSeparator = candidate.lastIndexOf(' של ');
-  if (hebrewSeparator > 0) {
-    const songTitle = candidate.slice(0, hebrewSeparator).trim();
-    const artist = candidate.slice(hebrewSeparator + ' של '.length).trim();
-    return songTitle && artist ? { song_title: songTitle, artist, confidence: 0.5 } : null;
-  }
-
-  const bySplit = candidate.match(/^(.*?)\s+by\s+(.+)$/i);
-  if (!bySplit) return null;
-  const songTitle = bySplit[1].trim();
-  const artist = bySplit[2].trim();
-  return songTitle && artist ? { song_title: songTitle, artist, confidence: 0.5 } : null;
-}
-
-function inferAddSongFromArtistReply(messageText, quotedText) {
-  const artist = String(messageText || '').trim();
-  const quoted = String(quotedText || '').trim();
-  if (!artist || artist.length > 120 || !quoted) return null;
-
-  const titleMatch = quoted.match(/(?:מי המבצע של|who (?:is the )?(?:artist|performer) (?:for|of))\s*["“]?(.+?)["”?؟]/iu);
-  const songTitle = String(titleMatch?.[1] || '').trim();
-  if (!songTitle) return null;
-
-  // A recovery question can quote the original "title - artist" text. Once
-  // the user supplies an artist that equals either side, the title is no
-  // longer ambiguous; never persist the complete dashed phrase as its title.
-  const dashedMatch = songTitle.match(/^(.+?)\s*[-–—]\s*(.+)$/u);
-  if (dashedMatch) {
-    const left = String(dashedMatch[1] || '').trim();
-    const right = String(dashedMatch[2] || '').trim();
-    if (sameSongIdentityPart(artist, left)) {
-      return { song_title: right, artist, confidence: 0.5 };
-    }
-    if (sameSongIdentityPart(artist, right)) {
-      return { song_title: left, artist, confidence: 0.5 };
-    }
-  }
-
-  return { song_title: songTitle, artist, confidence: 0.5 };
 }
 
 function shouldAvoidPreviousResults(messageText, replyContext) {
@@ -1565,70 +1382,15 @@ function normalizeUpdateSongAction(action, messageText, replyContext) {
 
 function normalizeAgentAction(action, { messageText, replyContext, quotedText }) {
   if (!action || typeof action !== 'object') return action;
-  const artistReplyAdd = inferAddSongFromArtistReply(messageText, quotedText);
-  if (artistReplyAdd) {
-    return { action: 'add_song', song: artistReplyAdd };
-  }
-  // The local catalog is the safe default. A generic "recommend a song" is
-  // not permission to invent or search outside it, even if the model picks
-  // recommend_external_song.
-  if (action.action === 'recommend_external_song' && !isExternalCatalogRecommendationRequest(messageText) && !isNovelExternalRecommendationRequest(messageText)) {
-    action = { ...action, action: 'search_songs' };
-  }
-  if (isExternalCatalogRecommendationRequest(messageText) || isNovelExternalRecommendationRequest(messageText)) {
-    const query = action.query && typeof action.query === 'object' && !Array.isArray(action.query) ? { ...action.query } : {};
-    const requirements = query.requirements && typeof query.requirements === 'object' && !Array.isArray(query.requirements)
-      ? { ...query.requirements }
-      : {};
-    const preferences = query.preferences && typeof query.preferences === 'object' && !Array.isArray(query.preferences)
-      ? { ...query.preferences }
-      : {};
-    // Explicit wording in the user's message is authoritative. In particular,
-    // do not let a model's mistaken "en" override "Israeli"/"Hebrew".
-    const inferredLanguage = inferRequestedLanguage(messageText);
-    if (inferredLanguage) requirements.language = inferredLanguage;
-    if (!Array.isArray(requirements.genres) || requirements.genres.length === 0) {
-      const inferredGenres = inferRequestedGenres(messageText);
-      // The band's default lane is rock/blues/ballads. Use rock as the
-      // discovery anchor unless the user explicitly asks for another genre;
-      // a generic Israeli-store search otherwise returns mostly unrelated pop.
-      requirements.genres = inferredGenres.length > 0 ? inferredGenres : ['rock', 'blues', 'funk'];
-    }
-    const releaseYearRange = inferRequestedReleaseYearRange(messageText);
-    if (releaseYearRange) Object.assign(requirements, releaseYearRange);
-    const inferredArtist = inferRequestedArtist(messageText);
-    if (inferredArtist) requirements.artist = inferredArtist;
-    Object.assign(preferences, inferInstrumentDifficultyPreferences(messageText), inferPerformerFitPreferences(messageText), preferences);
-    query.requirements = requirements;
-    query.preferences = preferences;
-    const inferredLimit = inferRequestedLimit(messageText);
-    if (!Number.isInteger(Number.parseInt(query.limit, 10)) && inferredLimit) {
-      query.limit = inferredLimit;
-    }
-    return {
-      action: 'recommend_external_song',
-      query
-    };
-  }
-  const rehearsalRequest = isRehearsalPlanRequest(messageText);
-  const inferredDurationMinutes = inferRequestedDurationMinutes(messageText);
   if (action.action === 'update_song_feedback') {
-    return {
-      ...action,
-      updates: normalizeFeedbackUpdates(action, messageText)
-    };
+    return action;
   }
 
   if (action.action === 'update_song') {
-    return normalizeUpdateSongAction(action, messageText, replyContext);
+    return action;
   }
 
   if (action.action === 'add_song') {
-    const inferredAddSong = inferAddSongPayload(messageText);
-    if (!inferredAddSong) {
-      return action;
-    }
-
     const song = action.song && typeof action.song === 'object' && !Array.isArray(action.song)
       ? { ...action.song }
       : {};
@@ -1638,71 +1400,41 @@ function normalizeAgentAction(action, { messageText, replyContext, quotedText })
     if (song.difficulty !== undefined && !/^(?:low|medium|high)$/iu.test(String(song.difficulty).trim())) {
       delete song.difficulty;
     }
-    const dashedParts = getDashedAddParts(messageText);
-    const dashedInput = Boolean(dashedParts);
-    const unambiguousIdentity = inferUnambiguousAddSongPayload(messageText);
-    const titleFromModel = typeof song.song_title === 'string' ? song.song_title.trim() : '';
-    const artistFromModel = typeof song.artist === 'string' ? song.artist.trim() : '';
-    const duplicateDashedIdentity = dashedInput && titleFromModel && artistFromModel &&
-      sameSongIdentityPart(titleFromModel, artistFromModel);
-    // The model may correctly recognize the artist but leave the original whole
-    // "artist - title" phrase in song_title. Once it identifies either side, the
-    // split is unambiguous; support both orders without making a blanket guess.
-    const titleFromDashedArtistMatch = dashedParts && artistFromModel
-      ? (sameSongIdentityPart(artistFromModel, dashedParts.left)
-          ? dashedParts.right
-          : (sameSongIdentityPart(artistFromModel, dashedParts.right) ? dashedParts.left : null))
-      : null;
-
     return {
       ...action,
-      song: {
-        ...inferredAddSong,
-        ...song,
-        song_title: unambiguousIdentity?.song_title || titleFromDashedArtistMatch || (titleFromModel
-          ? song.song_title.trim()
-          : inferredAddSong.song_title),
-        artist: unambiguousIdentity?.artist || (!duplicateDashedIdentity && artistFromModel
-          ? song.artist.trim()
-          : inferredAddSong.artist)
-      }
+      song
     };
   }
 
   if (action.action === 'clarify') {
-    if (isExternalCatalogRecommendationRequest(messageText)) {
-      return { action: 'recommend_external_song', query: {} };
-    }
-    if (rehearsalRequest) {
-      return {
-        action: 'prepare_rehearsal',
-        query: {},
-        duration_minutes: inferredDurationMinutes || 180
-      };
-    }
-
-    const inferredAddSong = inferAddSongPayload(messageText);
-    if (inferredAddSong) {
-      return {
-        action: 'add_song',
-        song: inferredAddSong
-      };
-    }
-
-    const replacementIndexes = inferResultIndexesFromMessage(messageText);
-    if (isReplacementRequest(messageText, replyContext) && replacementIndexes.length > 0) {
-      return {
-        action: 'search_songs',
-        query: {
-          replace_result_indexes: replacementIndexes,
-          avoid_previous_results: true,
-          limit: replacementIndexes.length
-        }
-      };
-    }
   }
 
-  if (action.action !== 'search_songs' && action.action !== 'recommend_external_song' && action.action !== 'find_similar_songs' && action.action !== 'prepare_rehearsal') {
+  // For ordinary local lists the agent owns the semantic query. Do not
+  // re-interpret Hebrew here: that turns a free request into a finite set of
+  // regex cases and can silently replace the agent's intended constraints.
+  if (action.action === 'search_songs') {
+    const query = action.query && typeof action.query === 'object' && !Array.isArray(action.query)
+      ? { ...action.query }
+      : {};
+    return {
+      ...action,
+      query
+    };
+  }
+
+  // The agent owns whether a request is for the local catalog or discovery
+  // outside it, and all of the semantic constraints. Keep only a structural
+  // guard here so execution always receives an object.
+  if (action.action === 'recommend_external_song') {
+    return {
+      ...action,
+      query: action.query && typeof action.query === 'object' && !Array.isArray(action.query)
+        ? { ...action.query }
+        : {}
+    };
+  }
+
+  if (action.action !== 'find_similar_songs' && action.action !== 'prepare_rehearsal') {
     return action;
   }
 
@@ -1780,29 +1512,11 @@ function normalizeAgentAction(action, { messageText, replyContext, quotedText })
     }
   };
 
-  if (rehearsalRequest && (action.action === 'search_songs' || action.action === 'prepare_rehearsal')) {
-    return {
-      action: 'prepare_rehearsal',
-      query: normalizedAction.query,
-      duration_minutes: inferredDurationMinutes || Number.parseInt(action.duration_minutes, 10) || 180
-    };
-  }
-
   if (action.action === 'prepare_rehearsal') {
-    return {
-      ...normalizedAction,
-      duration_minutes: inferredDurationMinutes || Number.parseInt(action.duration_minutes, 10) || 180
-    };
+    return normalizedAction;
   }
 
   return normalizedAction;
-}
-
-function buildExternalRecommendationAction(messageText) {
-  return normalizeAgentAction(
-    { action: 'recommend_external_song', query: {} },
-    { messageText, replyContext: null, quotedText: '' }
-  );
 }
 
 // Final override with Unicode escapes so Hebrew instrument parsing stays stable for drums/guitar/bass only.
@@ -1916,7 +1630,7 @@ async function interpretMessage({
     throw new Error('LLM base URL is required');
   }
 
-  const prompt = buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate, pendingClarification, scheduledRehearsals });
+  const prompt = buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate, pendingClarification });
   const fallbackPrompt = buildFallbackAgentPrompt({ messageText, quotedText, replyContext, currentDate, pendingClarification });
 
   return runWithAgentConcurrencyLimit(async () => {
@@ -2008,11 +1722,11 @@ async function interpretMessageWithTools({
     return interpretMessage({ provider, baseUrl, apiKey, model, messageText, quotedText, replyContext, recentMessages, pendingClarification, currentDate, scheduledRehearsals, requestFn });
   }
 
-  const prompt = buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate, pendingClarification, scheduledRehearsals });
+  const prompt = buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate, pendingClarification });
   const messages = [
     {
       role: 'system',
-      content: `${SYSTEM_PROMPT}\nYou may call the supplied local read-only tools before deciding. For a named-song metadata question, call lookup_song first. For catalog recommendations, call search_catalog first. Tool results are authoritative: never claim a song exists when lookup_song returns not_found, and never turn a lookup into an add.`
+      content: `${SYSTEM_PROMPT}\nYou may call the supplied local read-only tools before deciding. For a named-song metadata question, call lookup_song first. For any factual question about the catalog, call search_catalog first, using every relevant metadata constraint. Tool results are authoritative: never claim a song exists when lookup_song returns not_found, and never turn a lookup into an add.`
     },
     { role: 'user', content: prompt }
   ];
@@ -2081,8 +1795,6 @@ module.exports = {
   polishBanterReply,
   parseExternalSongRecommendation,
   parseExternalSongRecommendations,
-  isExternalCatalogRecommendationRequest,
-  buildExternalRecommendationAction,
   inferRequestedReleaseYearRange,
   recommendExternalSong,
   recommendExternalSongs,

@@ -36,16 +36,42 @@ test('lookup_song is a read-only exact catalog lookup', () => {
 });
 
 test('search_catalog returns local results without mutating the catalog', () => {
-  const songs = [{
-    song_id: 'song-1', song_title: 'Rock Song', artist: 'Band', language: 'en', genres: ['rock'], difficulty: 'medium', feel: 'upbeat',
-    ai_metadata: {}, band_status: { fit: 'unknown', issues: [] }
-  }];
+  const songs = [
+    {
+      song_id: 'song-1', song_title: 'Rock Song', artist: 'Band', language: 'en', genres: ['rock'], difficulty: 'medium', feel: 'upbeat',
+      ai_metadata: { keys_type: ['organ'] }, band_status: { fit: 'unknown', issues: [] }
+    },
+    {
+      song_id: 'song-2', song_title: 'Hard Rock Song', artist: 'Other Band', language: 'en', genres: ['rock'], difficulty: 'high', feel: 'upbeat',
+      ai_metadata: { keys_type: ['synth'] }, band_status: { fit: 'unknown', issues: [] }
+    }
+  ];
   const stateStore = { getSongs() { return songs; } };
   const result = executeReadOnlySongTool({ stateStore, name: 'search_catalog', arguments: '{"query":{"requirements":{"genres":["rock"]},"limit":1}}' });
   assert.equal(result.ok, true);
   assert.equal(result.status, 'found');
-  assert.equal(result.songs[0].song_title, 'Rock Song');
-  assert.equal(songs.length, 1);
+  assert.equal(result.total_matches, 2);
+  assert.equal(result.songs.length, 1);
+  assert.equal(songs.length, 2);
+});
+
+test('search_catalog counts arbitrary metadata constraints for an agent query', () => {
+  const stateStore = {
+    getSongs() {
+      return [
+        { song_id: 'song-1', song_title: 'Organ Song', artist: 'Band', difficulty: 'high', ai_metadata: { keys_type: ['organ'] } },
+        { song_id: 'song-2', song_title: 'Piano Song', artist: 'Band', difficulty: 'medium', ai_metadata: { keys_type: ['piano'] } }
+      ];
+    }
+  };
+  const result = executeReadOnlySongTool({
+    stateStore,
+    name: 'search_catalog',
+    arguments: JSON.stringify({ query: { requirements: { difficulty: 'high', keys_type_any: ['organ'] } } })
+  });
+
+  assert.equal(result.total_matches, 1);
+  assert.equal(result.songs[0].song_title, 'Organ Song');
 });
 
 test('lookup_rehearsals returns the current non-cancelled WhatsApp event schedule', async () => {

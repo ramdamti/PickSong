@@ -7,6 +7,7 @@ const ACTION_NAMES = new Set([
   'remove_song',
   'update_song_feedback',
   'get_song_info',
+  'get_chords',
   'explain_song_rejection',
   'find_similar_songs',
   'get_band_good_songs',
@@ -357,7 +358,7 @@ function validateAgentAction(value) {
     return validated;
   }
 
-  if (name === 'update_song' || name === 'remove_song' || name === 'get_song_info' || name === 'explain_song_rejection') {
+  if (name === 'update_song' || name === 'remove_song' || name === 'get_song_info' || name === 'get_chords' || name === 'explain_song_rejection') {
     const hasSongId = Boolean(String(action.song_id || '').trim());
     const hasResultIndex = Number.isInteger(Number.parseInt(action.result_index, 10));
     const hasSongTitle = Boolean(String(action.song_title || '').trim());

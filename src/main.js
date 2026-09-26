@@ -1,7 +1,7 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
-const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, recommendExternalSongs, composeUnsupportedReply, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat, isExternalCatalogRecommendationRequest, buildExternalRecommendationAction, getAgentUsageStats } = require('./llm');
-const { READ_ONLY_SONG_TOOLS, executeReadOnlySongTool } = require('./agent-tools');
+const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, recommendExternalSongs, composeUnsupportedReply, interpretUnknownSongInfo, resolveSongReference, callOpenAiCompatibleChat, getAgentUsageStats } = require('./llm');
+const { READ_ONLY_TOOLS, executeReadOnlyTool } = require('./agent-tools');
 const {
   persistResultContext,
   resolveActiveResultContext,
@@ -27,6 +27,7 @@ const SONG_TRANSITION_SECONDS = 90;
 const SONG_REHEARSAL_DISCUSSION_SECONDS = 180;
 const HIGH_DIFFICULTY_ADD_CONFIRMATION_TTL_MS = 15 * 60 * 1000;
 const PENDING_CLARIFICATION_TTL_MS = 15 * 60 * 1000;
+const PENDING_REMOVAL_CONFIRMATION_TTL_MS = 15 * 60 * 1000;
 const JAM_BUFFER_BY_FEEL_SECONDS = {
   upbeat: 120,
   calm: 75,
@@ -126,14 +127,39 @@ function shouldHandleMessage(record, triggerText = '\u05d1\u05d5\u05d8') {
 
 function buildAgentReplyContext(stateStore, record) {
   const quotedText = String(record?.quoted?.text || '').trim();
-  if (!/^\u200f?🤖(?:\s|$)/u.test(quotedText)) {
-    return null;
+  const isBotReply = /^\u200f?🤖(?:\s|$)/u.test(quotedText);
+  const canReadLastResults = typeof stateStore?.getLastResults === 'function';
+  const resolved = canReadLastResults || isBotReply
+    ? resolveActiveResultContext(
+      stateStore,
+      isBotReply ? record : { ...record, quoted: null }
+    )
+    : { source: 'none', context: null };
+  const songs = typeof stateStore?.getSongs === 'function' ? stateStore.getSongs() : [];
+  const catalogContext = {
+    catalog_song_count: songs.length
+  };
+  if (resolved.context) {
+    const query = resolved.context.query || {};
+    catalogContext.last_result = {
+      shown_count: resolved.context.results.length,
+      matching_count: countHardFilterMatches(songs, query),
+      query,
+      songs: resolved.context.results.map(({ index, title, artist }) => ({ index, title, artist }))
+    };
   }
-  const resolved = resolveActiveResultContext(stateStore, record);
-  if (!resolved.context) return null;
+
+  // The last list is conversational context even without a WhatsApp reply.
+  // Keep its numbered results separate from reply_context.results: only a
+  // real reply may authorize references such as "replace number 2".
+  if (!isBotReply) {
+    return { source: 'conversation', results: [], catalog_context: catalogContext };
+  }
+  if (!resolved.context) return { source: 'conversation', results: [], catalog_context: catalogContext };
   return {
     source: resolved.source,
-    results: resolved.context.results
+    results: resolved.context.results,
+    catalog_context: catalogContext
   };
 }
 
@@ -553,40 +579,6 @@ function inferSongInfoAction(messageText, replyContext, quotedText = '') {
   return null;
 }
 
-function inferDirectAddSongFromMessage(messageText) {
-  const source = String(messageText || '').trim();
-  if (!source) return null;
-
-  const explicitAdd = source.match(/^(?:תוסיף|תוסיפי|להוסיף|הוסף|add)\s+(.+)$/iu);
-  if (!explicitAdd) return null;
-
-  const candidate = normalizeAddSongSubject(explicitAdd[1]);
-  if (!candidate || /^(?:למאגר|לרשימה|למאגר השירים)$/iu.test(candidate)) {
-    return null;
-  }
-
-  return parseSongIdentityText(candidate);
-}
-
-function normalizeAddSongSubject(value) {
-  return String(value || '')
-    .trim()
-    .replace(/^את\s+/iu, '')
-    // "תוסיף למאגר <song>" and "תוסיף לרשימה <song>" are add commands;
-    // the destination is not part of the song title.
-    .replace(/^(?:למאגר(?:\s+השירים)?|לרשימה)\s+/iu, '')
-    .trim();
-}
-
-function normalizeExplicitAddMessage(messageText) {
-  const source = String(messageText || '').trim();
-  const explicitAdd = source.match(/^(תוסיף|תוסיפי|להוסיף|הוסף|add)\s+(.+)$/iu);
-  if (!explicitAdd) return source;
-
-  const subject = normalizeAddSongSubject(explicitAdd[2]);
-  return subject ? `תוסיף ${subject}` : source;
-}
-
 function isExplicitAddRequest(messageText) {
   const source = String(messageText || '').trim();
   return /^(?:תוסיף|תוסיפי|להוסיף|הוסף|add)(?:\s|$)/iu.test(source);
@@ -610,77 +602,18 @@ function isMutationAction(action) {
   return ['add_song', 'update_song', 'remove_song', 'update_song_feedback'].includes(action?.action);
 }
 
-function isGenericAddToLibraryRequest(messageText) {
-  const source = String(messageText || '').trim();
-  if (!source) return false;
-
-  return /^(?:תוסיף|תוסיפי|להוסיף|הוסף|add)(?:\s+(?:למאגר|לרשימה|למאגר השירים))?\s*$/iu.test(source);
+function classifyRemovalConfirmation(messageText) {
+  const source = String(messageText || '').trim().toLocaleLowerCase();
+  if (/^(?:כן|כן\s+למחוק|מאשר(?:ת)?|אישור|delete|yes)[!.\s]*$/iu.test(source)) return 'positive';
+  if (/^(?:לא|אל\s+תמחק|ביטול|cancel|no)[!.\s]*$/iu.test(source)) return 'negative';
+  return 'unclear';
 }
 
-function inferRecentAddSongPayload(messageText, recentMessages, quotedText = '') {
-  const direct = inferDirectAddSongFromMessage(messageText);
-  if (direct) {
-    return direct;
-  }
-
-  if (!isGenericAddToLibraryRequest(messageText)) {
-    return null;
-  }
-
-  const quotedCandidate = parseSongIdentityText(quotedText);
-  if (quotedCandidate) {
-    return quotedCandidate;
-  }
-
-  const items = Array.isArray(recentMessages) ? recentMessages : [];
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    const candidate = parseSongIdentityText(items[index]?.text || '');
-    if (candidate) {
-      return candidate;
-    }
-  }
-
-  return null;
-}
-
-function buildAgentMessageText(messageText, recentMessages, quotedText = '', pendingClarification = null) {
-  const source = String(messageText || '').trim();
-  const pendingSubject = String(pendingClarification?.subject || '').trim();
-  if (
-    pendingClarification?.intent === 'add_song' &&
-    pendingClarification?.missing === 'artist' &&
-    pendingSubject
-  ) {
-    // Older recovery prompts could mistakenly ask for an artist even though
-    // the original subject already contained "title - artist". Keep that
-    // known identity authoritative; never turn a frustrated reply into an
-    // artist name.
-    const knownIdentity = parseSongIdentityText(pendingSubject);
-    if (knownIdentity) {
-      return `תוסיף ${knownIdentity.song_title} של ${knownIdentity.artist}`;
-    }
-  }
-  if (
-    pendingClarification?.intent === 'add_song' &&
-    pendingClarification?.missing === 'artist' &&
-    pendingSubject &&
-    source &&
-    !isExplicitAddRequest(source)
-  ) {
-    return `תוסיף ${pendingSubject} של ${source}`;
-  }
-
-  const directAddSong = inferDirectAddSongFromMessage(source);
-  if (directAddSong) {
-    return normalizeExplicitAddMessage(source);
-  }
-
-  const inferredAddSong = inferRecentAddSongPayload(source, recentMessages, quotedText);
-  if (!inferredAddSong) {
-    return normalizeExplicitAddMessage(source);
-  }
-
-  return `תוסיף ${inferredAddSong.song_title} של ${inferredAddSong.artist}`;
+function buildAgentMessageText(messageText) {
+  // Identity extraction belongs to the agent. The original message, quoted
+  // message, recent conversation, and pending clarification are passed as
+  // separate context fields, so rewriting it here only loses meaning.
+  return String(messageText || '').trim();
 }
 
 function extractYouTubeUrl(text, links = []) {
@@ -708,71 +641,7 @@ function buildYouTubeAddContext(record) {
   return `\nYouTube link metadata (use this to identify the requested song; do not include the URL in the title): ${JSON.stringify({ url, title: title || null, description: description || null })}`;
 }
 
-function isScheduleInquiry(messageText) {
-  const text = normalizeText(messageText);
-  // A weekday by itself is ordinary group chat ("I'm free Saturday"), not
-  // necessarily a request for the rehearsal calendar.  Calendar queries can
-  // still mention a weekday together with "rehearsal" or another schedule
-  // term, which is already covered here.
-  const scheduleTerms = /(?:חזר(?:ה|ות)|rehearsal|אירוע(?:ים)?|event(?:s)?|לו["״']?ז|schedule|calendar|יומן|חודש|ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר|january|february|march|april|june|july|august|september|october|november|december)/iu;
-  const requestTerms = /(?:מתי|איזה|אילו|מה\s+יש|תביא|תראה|הראה|רשימה|כל\s+החזרות|הבא(?:ה)?|הקרוב(?:ה)?|what|next|upcoming|all|[?？])/iu;
-  return scheduleTerms.test(text) && requestTerms.test(text);
-}
-
-const HEBREW_MONTHS = [
-  'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
-  'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'
-];
-
-function eventDateParts(event) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Jerusalem', year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
-  }).formatToParts(new Date(event.start_at));
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return { year: Number(values.year), month: Number(values.month), day: Number(values.day), hour: values.hour, minute: values.minute };
-}
-
-function getScheduleReply(messageText, scheduledRehearsals, now = new Date()) {
-  const events = (Array.isArray(scheduledRehearsals) ? scheduledRehearsals : [])
-    .filter((event) => event && !event.cancelled && !Number.isNaN(new Date(event.start_at).getTime()))
-    .sort((left, right) => new Date(left.start_at) - new Date(right.start_at));
-  if (!events.length) return 'אין לי כרגע חזרות רשומות בלוח.';
-
-  const text = normalizeText(messageText);
-  const englishMonths = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
-  const requestedMonth = [...HEBREW_MONTHS, ...englishMonths].findIndex((month) => text.includes(month));
-  const futureEvents = events.filter((event) => new Date(event.start_at).getTime() >= now.getTime());
-  let selected = futureEvents;
-  let label = 'החזרות הקרובות';
-
-  if (requestedMonth >= 0) {
-    const month = (requestedMonth % 12) + 1;
-    selected = events.filter((event) => eventDateParts(event).month === month && new Date(event.start_at).getTime() >= now.getTime());
-    label = `חזרות ב${HEBREW_MONTHS[month - 1]}`;
-  } else if (/(?:חודש\s+הקרוב|החודש|this\s+month|next\s+month)/iu.test(text)) {
-    const current = eventDateParts({ start_at: now.toISOString() });
-    const nextMonth = current.month === 12 ? 1 : current.month + 1;
-    const nextYear = current.month === 12 ? current.year + 1 : current.year;
-    selected = events.filter((event) => {
-      const parts = eventDateParts(event);
-      return (parts.year === current.year && parts.month === current.month) || (parts.year === nextYear && parts.month === nextMonth);
-    }).filter((event) => new Date(event.start_at).getTime() >= now.getTime());
-    label = 'חזרות בחודש הקרוב';
-  } else if (/(?:החזרה\s+הבא(?:ה)?|מתי\s+החזרה|next\s+rehearsal)/iu.test(text)) {
-    const event = futureEvents[0];
-    if (!event) return 'אין לי כרגע חזרה עתידית רשומה.';
-    const parts = eventDateParts(event);
-    return `החזרה הבאה: ${event.title} — ${String(parts.day).padStart(2, '0')}.${String(parts.month).padStart(2, '0')}.${parts.year} ב־${parts.hour}:${parts.minute}${event.details ? `, ${event.details}` : ''}.`;
-  }
-
-  if (!selected.length) return `אין חזרות רשומות ב${label.replace(/^חזרות ב/, '')}.`;
-  return `${label}:\n${selected.map((event) => {
-    const parts = eventDateParts(event);
-    return `- ${String(parts.day).padStart(2, '0')}.${String(parts.month).padStart(2, '0')}.${parts.year}, ${parts.hour}:${parts.minute} — ${event.title}${event.details ? `, ${event.details}` : ''}`;
-  }).join('\n')}`;
-}
-
-function buildRecentMessageContext(records, limit = 3) {
+function buildRecentMessageContext(records, limit = 5) {
   const items = Array.isArray(records) ? records : [];
   return items
     .slice(-limit)
@@ -1653,7 +1522,7 @@ async function sendSongsReply({ chat, stateStore, chatId, songs, query = null, i
   await stateStore.queueSave();
 }
 
-async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn, polishBanterReplyFn, recommendExternalSongsFn, discoverExternalSongsFn = discoverCatalogSongs, composeUnsupportedReplyFn }) {
+async function executeAgentAction({ action, stateStore, chat, record, messageText, replyContext, config = {}, estimateSongDurationsFn, pendingAdditions, pendingRemovals, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn, polishBanterReplyFn, recommendExternalSongsFn, discoverExternalSongsFn = discoverCatalogSongs, composeUnsupportedReplyFn }) {
   const activeContext = resolveActiveResultContext(stateStore, record);
   const songs = stateStore.getSongs();
   const chatId = String(record?.chatId || '').trim();
@@ -1695,6 +1564,22 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
     reply = reply || 'היכולת הזו עדיין עושה פרצופים בחדר החזרות.';
     rememberVoiceReply(chatId, reply);
     await sendBotMessage(chat, reply);
+    return;
+  }
+
+  if (action.action === 'get_chords') {
+    const resolved = resolveSongFromAction(stateStore, action, activeContext);
+    if (!resolved.song) {
+      await sendBotMessage(chat, 'לא מצאתי לאיזה שיר להביא אקורדים.');
+      return;
+    }
+    await sendReplyContextChords({
+      stateStore,
+      chat,
+      record,
+      replyContext: { results: [{ song_id: resolved.song.song_id }] },
+      discoverChords: config.discoverChords !== false
+    });
     return;
   }
 
@@ -2244,9 +2129,12 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       return;
     }
 
-    stateStore.removeSongById(song.song_id);
-    await stateStore.queueSave();
-    await sendBotMessage(chat, `\u05d4\u05e1\u05e8\u05ea\u05d9: ${formatBoldSongIdentity(song)}`);
+    if (!(pendingRemovals instanceof Map) || !chatId) {
+      await sendBotMessage(chat, 'לא מחקתי — מחיקה דורשת אישור מפורש.');
+      return;
+    }
+    pendingRemovals.set(chatId, { song_id: song.song_id, createdAt: Date.now() });
+    await sendBotMessage(chat, `למחוק את ${formatBoldSongIdentity(song)}? כתוב "כן" לאישור או "לא" לביטול.`);
     return;
   }
 
@@ -2282,6 +2170,7 @@ async function handleAgentMessage({
   record,
   recentMessages = [],
   pendingAdditions,
+  pendingRemovals,
   pendingClarifications,
   interpretMessageFn = interpretMessageWithTools,
   interpretAdditionConfirmationFn = interpretAdditionConfirmation,
@@ -2306,11 +2195,6 @@ async function handleAgentMessage({
     : String(record?.text || '').trim();
   if (!messageText) {
     await sendBotMessage(chat, '\u05de\u05d4 \u05dc\u05d7\u05e4\u05e9?');
-    return true;
-  }
-
-  if (isScheduleInquiry(messageText)) {
-    await sendBotMessage(chat, getScheduleReply(messageText, scheduledRehearsals));
     return true;
   }
 
@@ -2348,15 +2232,34 @@ async function handleAgentMessage({
     }
   }
 
-  if (replyContext?.results?.length && isChordsReplyRequest(messageText)) {
-    return sendReplyContextChords({
-      stateStore,
-      chat,
-      record,
-      replyContext,
-      discoverChords: config.discoverChords !== false,
-      prepareSongsForReplyFn
-    });
+  const pendingRemoval = pendingRemovals instanceof Map ? pendingRemovals.get(pendingChatId) : null;
+  if (pendingRemoval) {
+    if (Date.now() - Number(pendingRemoval.createdAt || 0) > PENDING_REMOVAL_CONFIRMATION_TTL_MS) {
+      pendingRemovals.delete(pendingChatId);
+    } else {
+      const confirmation = classifyRemovalConfirmation(messageText);
+      if (confirmation === 'positive') {
+        pendingRemovals.delete(pendingChatId);
+        const song = stateStore.getSongById?.(pendingRemoval.song_id) ||
+          stateStore.getSongs().find((entry) => entry?.song_id === pendingRemoval.song_id);
+        if (!song) {
+          await sendBotMessage(chat, 'לא מחקתי — השיר כבר לא נמצא במאגר.');
+          return true;
+        }
+        stateStore.removeSongById(song.song_id);
+        await stateStore.queueSave();
+        await sendBotMessage(chat, `הסרתי: ${formatBoldSongIdentity(song)}`);
+        return true;
+      }
+      if (confirmation === 'negative') {
+        pendingRemovals.delete(pendingChatId);
+        await sendBotMessage(chat, 'סבבה, לא מחקתי.');
+        return true;
+      }
+      // Any unrelated message drops the pending destructive operation; a new
+      // removal request must go through the full confirmation flow again.
+      pendingRemovals.delete(pendingChatId);
+    }
   }
 
   // Explanations of a recommendation are grounded in the stored result and
@@ -2371,96 +2274,6 @@ async function handleAgentMessage({
   }
 
   const quotedText = record?.quoted?.text || record?.quotedText || '';
-  // A factual clarification may receive the missing title/artist as a reply.
-  // Resolve it deterministically before asking the agent again.
-  if (pendingClarification?.intent === 'song_metadata') {
-    const pendingIdentity = parseSongIdentityText(messageText);
-    if (pendingIdentity) {
-      await executeAgentAction({
-        action: { action: 'get_song_info', song_title: pendingIdentity.song_title, artist: pendingIdentity.artist },
-        stateStore, chat, config, record, messageText, replyContext,
-        estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn
-      });
-      return true;
-    }
-  }
-  const inferredSongInfoAction = inferSongInfoAction(messageText, replyContext, quotedText);
-  if (inferredSongInfoAction) {
-    await executeAgentAction({
-      action: inferredSongInfoAction,
-      stateStore,
-      chat,
-      config,
-      record,
-      messageText,
-      replyContext,
-      estimateSongDurationsFn,
-      pendingAdditions,
-      pendingClarifications,
-      reviewSongDifficultyFn,
-      unknownSongInfoFn,
-      polishBanterReplyFn,
-      recommendExternalSongsFn,
-      composeUnsupportedReplyFn
-    });
-    return true;
-  }
-
-  // External recommendations have a fully deterministic local parser for
-  // language, era, genre, and result count. Route them straight to the
-  // specialist recommendation call instead of spending a separate model turn
-  // merely to classify the request.
-  if (isExternalCatalogRecommendationRequest(messageText)) {
-    const action = buildExternalRecommendationAction(messageText);
-    console.log(`[agent] action=${action.action} local_route=true`);
-    await executeAgentAction({
-      action,
-      stateStore,
-      chat,
-      config,
-      record,
-      messageText,
-      replyContext,
-      estimateSongDurationsFn,
-      pendingAdditions,
-      pendingClarifications,
-      reviewSongDifficultyFn,
-      unknownSongInfoFn,
-      recommendExternalSongsFn,
-      composeUnsupportedReplyFn
-    });
-    return true;
-  }
-
-  // When local parsing cannot confidently split a song reference, use the
-  // agent only as an identity resolver. The result still goes through the
-  // local catalog resolver and cannot mutate state.
-  if (isSongInfoRequest(messageText) && typeof resolveSongReferenceFn === 'function') {
-    try {
-      const resolvedReference = await resolveSongReferenceFn({
-        baseUrl: config.llmBaseUrl,
-        apiKey: config.llmApiKey,
-        model: config.llmModel,
-        messageText,
-        quotedText
-      });
-      if (resolvedReference?.song_title) {
-        await executeAgentAction({
-          action: { action: 'get_song_info', song_title: resolvedReference.song_title, artist: resolvedReference.artist },
-          stateStore, chat, config, record, messageText, replyContext,
-          estimateSongDurationsFn, pendingAdditions, pendingClarifications, reviewSongDifficultyFn, unknownSongInfoFn
-        });
-        return true;
-      }
-    } catch (error) {
-      console.warn(`[agent] song_reference_resolution_failed: ${error.message}`);
-    }
-    if (/(?:השיר|song|האם\s+)/iu.test(messageText)) {
-      await sendBotMessage(chat, 'לא הצלחתי לזהות את השיר. תכתוב את שם השיר והאמן, ואני אבדוק.');
-      return true;
-    }
-  }
-
   try {
     const agentMessageText = buildAgentMessageText(
       messageText,
@@ -2480,10 +2293,13 @@ async function handleAgentMessage({
       pendingClarification,
       currentDate: currentDateInIsrael(),
       scheduledRehearsals,
-      tools: isSongInfoRequest(messageText) ? READ_ONLY_SONG_TOOLS : undefined,
-      executeToolCall: isSongInfoRequest(messageText)
-        ? ({ name, arguments: rawArguments }) => executeReadOnlySongTool({ stateStore, name, arguments: rawArguments })
-        : undefined
+      tools: READ_ONLY_TOOLS,
+      executeToolCall: ({ name, arguments: rawArguments }) => executeReadOnlyTool({
+        stateStore,
+        eventsFile: config.eventsFile,
+        name,
+        arguments: rawArguments
+      })
     });
 
     // Adding a song is a durable mutation. Do not let an LLM turn a metadata
@@ -2537,6 +2353,7 @@ async function handleAgentMessage({
       replyContext,
       estimateSongDurationsFn,
       pendingAdditions,
+      pendingRemovals,
       pendingClarifications,
       reviewSongDifficultyFn,
       unknownSongInfoFn,
@@ -2648,6 +2465,7 @@ async function bootstrap() {
 
   const pendingMessages = [];
   const pendingAdditions = new Map();
+  const pendingRemovals = new Map();
   const pendingClarifications = new Map();
   const recentMessagesByChat = new Map();
   let readyToProcess = false;
@@ -2735,8 +2553,8 @@ async function bootstrap() {
       fromMe: Boolean(record?.fromMe),
       sender: String(record?.sender || record?.from || '').trim()
     });
-    if (existing.length > 3) {
-      existing.splice(0, existing.length - 3);
+    if (existing.length > 5) {
+      existing.splice(0, existing.length - 5);
     }
     recentMessagesByChat.set(normalizedChatId, existing);
   }
@@ -2766,10 +2584,9 @@ async function bootstrap() {
       record,
       recentMessages,
       pendingAdditions,
+      pendingRemovals,
       pendingClarifications,
-      scheduledRehearsals: isScheduleInquiry(record.text)
-        ? eventSchedule.events.filter((event) => !event.cancelled)
-        : [],
+      scheduledRehearsals: [],
       reviewSongDifficultyFn: interpretSongDifficulty,
       reviewActionExecutionFn: reviewAgentActionExecution,
       resolveSongReferenceFn: resolveSongReference
@@ -2987,8 +2804,6 @@ module.exports = {
   isRecommendationReasonRequest,
   buildRecommendationReason,
   buildRecentMessageContext,
-  isScheduleInquiry,
-  getScheduleReply,
   extractYouTubeUrl,
   buildYouTubeAddContext,
   isChordsReplyRequest,
