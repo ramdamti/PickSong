@@ -12,7 +12,6 @@ const {
   interpretAdditionConfirmation,
   interpretSongDifficulty,
   interpretPlainFallbackReply,
-  needsBanterRewrite,
   polishBanterReply,
   parseExternalSongRecommendation,
   parseExternalSongRecommendations,
@@ -446,12 +445,6 @@ test('interpretPlainFallbackReply uses text mode for conversational recovery', a
   });
 
   assert.equal(reply, 'יש לי ערך, פשוט הוא במינוס.');
-});
-
-test('needsBanterRewrite rejects filler-led and repeated banter openings', () => {
-  assert.equal(needsBanterRewrite('\u05d0\u05d5\u05d9, \u05d0\u05d9\u05d6\u05d4 \u05db\u05d9\u05e3.', []), true);
-  assert.equal(needsBanterRewrite('Same opening shared joke.', ['Same opening shared older joke.']), true);
-  assert.equal(needsBanterRewrite('Fresh angle, different joke.', ['Same opening, older joke.']), false);
 });
 
 test('polishBanterReply uses text mode to produce the final Hebrew reply', async () => {
