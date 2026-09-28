@@ -70,6 +70,14 @@ const BANTER_POLISH_SYSTEM_PROMPT = [
   'Return only the final reply text, with no label or markdown.'
 ].join('\n');
 
+const BANTER_GENERATION_SYSTEM_PROMPT = [
+  'You are the final Hebrew copy editor for a sharp, sarcastic WhatsApp band bot.',
+  'Return exactly one short, natural Israeli-Hebrew line. The user expects a playful counterpunch, not a helpful assistant, apology, warning, request to stop, or invitation to continue.',
+  'Before answering, silently invent four substantially different possible replies. Compare them with recent_bot_replies and choose the most surprising, specific, and funny one. Make the chosen reply use a genuinely different opening, rhythm, comic device, and target angle from the recent replies. Do not reveal the alternatives or this process.',
+  'Use writer_name naturally when present, and make the jab directly about the writer’s current message, logic, musical taste, rehearsal habits, or effort. creative_direction is a fresh comic direction for this answer; follow it. Do not attack appearance, identity, or vulnerabilities; do not use threats or slurs.',
+  'When self_reference_required is true, refer to yourself only in first person. Return only the reply text.'
+].join('\n');
+
 const EXTERNAL_SONG_RECOMMENDATION_SYSTEM_PROMPT = [
   'Recommend real songs for a band, based on the user request and compact search constraints.',
   'The requested song must be outside the local catalog. Do not invent songs, artists, facts, or links.',
@@ -656,7 +664,7 @@ async function polishBanterReply({ baseUrl, apiKey, model, messageText, draftRep
   };
   const generate = async (data) => {
     const { parsed } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
-      baseUrl, apiKey, model, prompt: JSON.stringify(data), systemPrompt: BANTER_POLISH_SYSTEM_PROMPT,
+      baseUrl, apiKey, model, prompt: JSON.stringify(data), systemPrompt: BANTER_GENERATION_SYSTEM_PROMPT,
       requestFn, maxCompletionTokens: 72, temperature: 1.2, responseFormat: 'text'
     }));
     return String(parsed?.text || '').trim();
