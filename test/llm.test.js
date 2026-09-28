@@ -31,7 +31,7 @@ test.skip('legacy SYSTEM_PROMPT wording checks', () => {
   assert.match(SYSTEM_PROMPT, /recommend_external_song/);
   assert.match(SYSTEM_PROMPT, /Use add_song only when the user explicitly asks/i);
   assert.match(SYSTEM_PROMPT, /final voice is polished separately/i);
-  assert.match(BANTER_POLISH_SYSTEM_PROMPT, /Match the writer’s tone/i);
+  assert.match(BANTER_POLISH_SYSTEM_PROMPT, /sharp, blunt, sarcastic/i);
 });
 
 test('buildAgentPrompt includes reply context without full database payloads', () => {
@@ -76,7 +76,8 @@ test('SYSTEM_PROMPT stays compact and preserves global action-planning rules', (
   assert.match(SYSTEM_PROMPT, /mandatory query\.limit/);
   assert.match(SYSTEM_PROMPT, /Use add_song only when the user explicitly asks/i);
   assert.match(SYSTEM_PROMPT, /final voice is polished separately/i);
-  assert.match(BANTER_POLISH_SYSTEM_PROMPT, /Match the writer’s tone/i);
+  assert.match(BANTER_POLISH_SYSTEM_PROMPT, /sharp, blunt, sarcastic/i);
+  assert.match(BANTER_POLISH_SYSTEM_PROMPT, /including when the writer is polite or neutral/i);
 });
 
 test('interpretMessage preserves an external recommendation selected by the agent', async () => {
