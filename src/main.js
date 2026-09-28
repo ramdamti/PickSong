@@ -1,6 +1,6 @@
 ﻿const { loadConfig } = require('./config');
 const { createStateStore, loadState, loadSeenState, normalizeText } = require('./state');
-const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, recommendExternalSongs, composeUnsupportedReply, interpretUnknownSongInfo, resolveSongReference, answerLocalDataQuestion, callOpenAiCompatibleChat, getAgentUsageStats } = require('./llm');
+const { interpretMessageWithTools, interpretAdditionConfirmation, interpretSongDifficulty, reviewAgentActionExecution, interpretPlainFallbackReply, polishBanterReply, recommendExternalSongs, composeUnsupportedReply, interpretUnknownSongInfo, resolveSongReference, answerLocalDataQuestion, callOpenAiCompatibleChat, getAgentUsageStats } = require('./llm');
 const { executeReadOnlyTool } = require('./agent-tools');
 const {
   persistResultContext,
@@ -2624,7 +2624,8 @@ async function bootstrap() {
       scheduledRehearsals: [],
       reviewSongDifficultyFn: interpretSongDifficulty,
       reviewActionExecutionFn: reviewAgentActionExecution,
-      resolveSongReferenceFn: resolveSongReference
+      resolveSongReferenceFn: resolveSongReference,
+      polishBanterReplyFn: polishBanterReply
     });
   }
 
