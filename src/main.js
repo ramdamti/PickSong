@@ -309,6 +309,11 @@ function requiresBotFirstPerson(messageText) {
   return /(?:\b(?:bot|the\s+bot)\b|בוט)/iu.test(String(messageText || ''));
 }
 
+function getBanterWriterName(record) {
+  const name = String(record?.sender || '').trim();
+  return name && !/@/u.test(name) && !/^\+?\d{7,}$/u.test(name) ? name : null;
+}
+
 function hasMeaningfulSongQuery(query) {
   const sections = [query?.requirements || {}, query?.preferences || {}, query?.exclusions || {}];
   return sections.some((section) => Object.values(section).some((value) =>
@@ -1574,6 +1579,7 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
           messageText,
           draftReply: reply,
           recentReplies: getRecentVoiceReplies(chatId),
+          writerName: getBanterWriterName(record),
           selfReferenceRequired: requiresBotFirstPerson(messageText)
         }) || reply;
       } catch (error) {
@@ -1637,7 +1643,10 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
           apiKey: config.llmApiKey,
           model: config.llmModel,
           messageText,
-          draftReply: reply
+          draftReply: reply,
+          recentReplies: getRecentVoiceReplies(chatId),
+          writerName: getBanterWriterName(record),
+          selfReferenceRequired: requiresBotFirstPerson(messageText)
         });
         if (polished) reply = polished;
       } catch (error) {
@@ -2837,6 +2846,7 @@ module.exports = {
   buildAgentFailureReply,
   formatGroqStatusReply,
   buildClarifyReply,
+  getBanterWriterName,
   isRecommendationReasonRequest,
   buildRecommendationReason,
   buildRecentMessageContext,

@@ -453,6 +453,7 @@ test('polishBanterReply uses text mode to produce the final Hebrew reply', async
     messageText: 'תגיד לזאביק להפסיק לשגע אותך',
     draftReply: 'זאביק, תפסיק לשגע אותי.',
     recentReplies: ['זאביק, גם למטרונום יש יותר מודעות עצמית.'],
+    writerName: 'Zvik',
     selfReferenceRequired: true,
     requestFn: async (_url, options) => {
       const body = JSON.parse(options.body);
@@ -460,6 +461,7 @@ test('polishBanterReply uses text mode to produce the final Hebrew reply', async
       assert.match(body.messages[0].content, /final Hebrew copy editor/);
       assert.deepEqual(JSON.parse(body.messages[1].content).recent_bot_replies, ['זאביק, גם למטרונום יש יותר מודעות עצמית.']);
       assert.equal(JSON.parse(body.messages[1].content).self_reference_required, true);
+      assert.equal(JSON.parse(body.messages[1].content).writer_name, 'Zvik');
       return { ok: true, async json() { return { choices: [{ message: { content: 'זאביק, גם למטרונום יש יותר מודעות עצמית.' } }], usage: {} }; } };
     }
   });
