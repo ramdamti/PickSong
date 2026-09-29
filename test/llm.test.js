@@ -55,6 +55,7 @@ test('buildAgentPrompt includes reply context without full database payloads', (
   assert.match(prompt, /"index":3/);
   assert.match(prompt, /"song_id":"song_a"/);
   assert.match(prompt, /quoted_message/);
+  assert.match(prompt, /"reply_to_quoted_message":true/);
   assert.match(prompt, /Yesterday - The Beatles/);
   assert.match(prompt, /recent_messages/);
   assert.match(prompt, /משהו קצבי/);
@@ -80,6 +81,7 @@ test('SYSTEM_PROMPT stays compact and preserves global action-planning rules', (
   assert.match(BANTER_POLISH_SYSTEM_PROMPT, /including when the writer is polite or neutral/i);
   assert.match(SYSTEM_PROMPT, /Current user_message wins/i);
   assert.match(FALLBACK_SYSTEM_PROMPT, /old chord results/i);
+  assert.match(SYSTEM_PROMPT, /quoted_message exists/i);
 });
 
 test('interpretMessage preserves an external recommendation selected by the agent', async () => {
@@ -507,6 +509,7 @@ test('buildFallbackAgentPrompt keeps only compact context', () => {
   });
 
   assert.match(prompt, /quoted_message/);
+  assert.match(prompt, /"reply_to_quoted_message":true/);
   assert.match(prompt, /reply_context/);
   assert.doesNotMatch(prompt, /supported_search_fields/);
   assert.doesNotMatch(prompt, /recent_messages/);

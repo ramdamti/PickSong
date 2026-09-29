@@ -3,10 +3,10 @@ const { validateAgentAction } = require('./schemas');
 const SYSTEM_PROMPT = [
   'You are the action planner for a Hebrew WhatsApp bot used by a band.',
   'Return exactly one valid JSON object and nothing else. The application executes the action; never write a WhatsApp reply or invent a song_id.',
-  'Interpret the message with quoted_message, reply_context, and pending_clarification. Explicit current constraints override assumptions; use result_index for referenced prior results.',
+  'If quoted_message exists, interpret user_message as a reply to it; its subject is mandatory context. Otherwise use reply_context/pending_clarification. Explicit current constraints override assumptions; use result_index for prior results.',
   'Choose a specific supported action and compact query. Clarify only if one essential fact is missing.',
   'Preserve explicit artist, language, era, count, genre, difficulty, and instrument constraints in supported_search_fields. Specific keys -> keys_type_any; generic keys -> has_keys/keys_role.',
-  'For more/fresh/different songs after a result list, set query.avoid_previous_results=true. To replace specific numbered results, set query.replace_result_indexes to those indexes. Preserve the existing constraints.',
+  'For more/different songs after results, set query.avoid_previous_results=true. To replace numbered results, set query.replace_result_indexes. Preserve constraints.',
   'Lists -> search_songs: mandatory query.limit (1 for one song; else stated count or 5; max 20). Current catalog facts/counts -> catalog_question with query; rehearsal-date facts -> rehearsal_question; plans -> prepare_rehearsal; chords -> get_chords; metadata -> get_song_info; mutations use their actions.',
   'For prepare_rehearsal, put total time only in duration_minutes; query contains musical filters only, never duration text.',
   'Band-status actions are only for explicit historic feedback; fit is sparse. Open recommendations use search_songs.',
@@ -22,7 +22,7 @@ const FALLBACK_SYSTEM_PROMPT = [
   'Return exactly one JSON object. No prose. No markdown.',
   'Never invent a song_id.',
   'Allowed actions: search_songs, recommend_external_song, prepare_rehearsal, add_song, update_song, remove_song, update_song_feedback, get_song_info, get_chords, explain_song_rejection, find_similar_songs, get_band_good_songs, get_band_bad_songs, get_band_maybe_songs, get_band_failure_reasons, catalog_question, rehearsal_question, respond, unsupported, clarify.',
-  'Use reply_context result indexes when relevant.',
+  'If quoted_message exists, answer in relation to its subject; use reply_context result indexes when relevant.',
   'If the user asks for songs by an artist, preserve the artist strongly.',
   'If the user asks for a song outside the catalog, use recommend_external_song; otherwise use search_songs. For a current catalog count/fact use catalog_question; for a rehearsal-date fact use rehearsal_question. query.limit is mandatory for search_songs: use 1 for one song, otherwise the stated count or 5, never over 20.',
   'For prepare_rehearsal, put total time only in duration_minutes; query contains musical filters only.',
@@ -291,11 +291,13 @@ function extractJsonBlock(text) {
 }
 
 function buildAgentPrompt({ messageText, quotedText, replyContext, recentMessages, currentDate, pendingClarification }) {
+  const quotedMessage = quotedText ? String(quotedText).trim() : null;
   return JSON.stringify({
     supported_search_fields: SUPPORTED_SEARCH_FIELDS,
     current_date: currentDate,
     user_message: messageText,
-    quoted_message: quotedText ? String(quotedText).trim() : null,
+    quoted_message: quotedMessage,
+    reply_to_quoted_message: Boolean(quotedMessage),
     recent_messages: Array.isArray(recentMessages) ? recentMessages : [],
     reply_context: replyContext || null,
     pending_clarification: pendingClarification || null
@@ -303,10 +305,12 @@ function buildAgentPrompt({ messageText, quotedText, replyContext, recentMessage
 }
 
 function buildFallbackAgentPrompt({ messageText, quotedText, replyContext, currentDate, pendingClarification }) {
+  const quotedMessage = quotedText ? String(quotedText).trim() : null;
   return JSON.stringify({
     current_date: currentDate,
     user_message: messageText,
-    quoted_message: quotedText ? String(quotedText).trim() : null,
+    quoted_message: quotedMessage,
+    reply_to_quoted_message: Boolean(quotedMessage),
     reply_context: replyContext || null,
     pending_clarification: pendingClarification || null
   });
