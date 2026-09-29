@@ -78,6 +78,8 @@ test('SYSTEM_PROMPT stays compact and preserves global action-planning rules', (
   assert.match(SYSTEM_PROMPT, /final voice is polished separately/i);
   assert.match(BANTER_POLISH_SYSTEM_PROMPT, /sharp, blunt, sarcastic/i);
   assert.match(BANTER_POLISH_SYSTEM_PROMPT, /including when the writer is polite or neutral/i);
+  assert.match(SYSTEM_PROMPT, /Current user_message wins/i);
+  assert.match(FALLBACK_SYSTEM_PROMPT, /old chord results/i);
 });
 
 test('interpretMessage preserves an external recommendation selected by the agent', async () => {

@@ -15,6 +15,7 @@ const {
   extractYouTubeUrl,
   buildYouTubeAddContext,
   isChordsReplyRequest,
+  isAuthorizedChordsAction,
   shouldBlockGenericSearchFallback,
   handleAgentMessage,
   executeAgentAction
@@ -435,6 +436,15 @@ test.skip('legacy: isChordsReplyRequest detects Hebrew and English chord request
   assert.equal(isChordsReplyRequest('תביא אקורדים'), true);
   assert.equal(isChordsReplyRequest('אפשר chords?'), true);
   assert.equal(isChordsReplyRequest('מתי ניגנו את זה?'), false);
+});
+
+test('isAuthorizedChordsAction rejects stale chord context for a new request', () => {
+  const chordQuestion = '🤖 לאיזה שיר אתה רוצה לקבל אקורדים?';
+  const chordResult = '🤖 הבאתי אקורדים לכל השירים.';
+
+  assert.equal(isAuthorizedChordsAction('כולם', chordQuestion), true);
+  assert.equal(isAuthorizedChordsAction('תביא אקורדים', chordResult), true);
+  assert.equal(isAuthorizedChordsAction('תנגן לי משהו, נסה שוב רגע', chordResult), false);
 });
 
 test('buildRecentMessageContext keeps the last five compact messages', () => {

@@ -408,6 +408,26 @@ function isChordsReplyRequest(messageText) {
   return /(?:^|[\s,.:!?-])(אקורדים|אקורד|chords?)(?:$|[\s,.:!?-])/iu.test(normalized);
 }
 
+function isChordsSelectionReply(messageText, quotedText) {
+  const reply = String(messageText || '').trim();
+  const quoted = String(quotedText || '').trim();
+  if (!reply || !isChordsReplyRequest(quoted)) return false;
+  if (!/(?:לאיזה|איזה|בחר|תבחר|מספר|which|what|choose|select|song)/iu.test(quoted)) return false;
+
+  const words = reply.split(/\s+/u).filter(Boolean);
+  if (words.length > 8) return false;
+  // A new request must never be mistaken for a choice merely because it is
+  // replying to a previous chord clarification.
+  if (/(?:תנגן|תנגני|תן|תני|תביא|תביאי|נסה|נסי|תחפש|חפש|תמליץ|המלץ|רוצה|רוצים|משהו|play|give|find|recommend|try)/iu.test(reply)) {
+    return false;
+  }
+  return true;
+}
+
+function isAuthorizedChordsAction(messageText, quotedText) {
+  return isChordsReplyRequest(messageText) || isChordsSelectionReply(messageText, quotedText);
+}
+
 function isSongInfoRequest(messageText) {
   const normalized = String(messageText || '').trim();
   if (!normalized) return false;
@@ -2327,7 +2347,7 @@ async function handleAgentMessage({
       quotedText,
       pendingClarification
     ) + buildYouTubeAddContext(record);
-    const action = await interpretMessageFn({
+    let action = await interpretMessageFn({
       provider: config.llmProvider,
       baseUrl: config.llmBaseUrl,
       apiKey: config.llmApiKey,
@@ -2345,6 +2365,32 @@ async function handleAgentMessage({
       // needs fresh local facts; executeAgentAction then reads them lazily.
       tools: []
     });
+
+    // Results and quoted messages may mention chords long after that request
+    // is complete. Never let that stale context turn a new request into a
+    // chord lookup. Re-plan from the current message alone so this still goes
+    // through the agent instead of falling back to a canned local response.
+    if (action.action === 'get_chords' && !isAuthorizedChordsAction(messageText, quotedText)) {
+      console.warn(`[agent] blocked stale get_chords message=${JSON.stringify(messageText)}`);
+      action = await interpretMessageFn({
+        provider: config.llmProvider,
+        baseUrl: config.llmBaseUrl,
+        apiKey: config.llmApiKey,
+        model: config.llmModel,
+        messageText: agentMessageText,
+        quotedText: '',
+        replyContext: {
+          source: 'conversation',
+          results: [],
+          catalog_context: replyContext?.catalog_context || null
+        },
+        recentMessages: [],
+        pendingClarification: null,
+        currentDate: currentDateInIsrael(),
+        scheduledRehearsals,
+        tools: []
+      });
+    }
 
     // Adding a song is a durable mutation. Do not let an LLM turn a metadata
     // question, a bare acknowledgement, or ordinary chat into an insertion.
@@ -2853,6 +2899,7 @@ module.exports = {
   extractYouTubeUrl,
   buildYouTubeAddContext,
   isChordsReplyRequest,
+  isAuthorizedChordsAction,
   shouldBlockGenericSearchFallback,
   isAuthorizedAddAction,
   extractSongIdentityFromMetadataQuestion,
