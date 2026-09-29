@@ -1031,7 +1031,7 @@ test.skip('legacy: handleAgentMessage answers a missing catalog song with the kn
   assert.match(sentMessages[0], /השיר לא קיים במאגר שלנו, אבל לפי מה שאני יודע: רמת הקושי כנראה בינונית\./);
 });
 
-test.skip('legacy: handleAgentMessage returns reply-context songs with chords without calling the agent', async () => {
+test('handleAgentMessage returns reply-context songs with chords without calling the agent', async () => {
   let agentCalls = 0;
   let saved = 0;
   const sentMessages = [];

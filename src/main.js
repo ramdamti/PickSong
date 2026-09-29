@@ -2340,6 +2340,21 @@ async function handleAgentMessage({
   }
 
   const quotedText = record?.quoted?.text || record?.quotedText || '';
+  // A direct reply to a result list is an unambiguous target. Do not make the
+  // action planner ask which song when the user explicitly asks for chords:
+  // the natural meaning is every song in the quoted list.
+  if (replyContext?.results?.length && isChordsReplyRequest(messageText)) {
+    await sendReplyContextChords({
+      stateStore,
+      chat,
+      record,
+      replyContext,
+      discoverChords: config.discoverChords !== false,
+      prepareSongsForReplyFn
+    });
+    return true;
+  }
+
   try {
     const agentMessageText = buildAgentMessageText(
       messageText,
