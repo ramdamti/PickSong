@@ -15,6 +15,23 @@ function compactSong(song) {
   };
 }
 
+function formatRehearsalForAnswer(event, timeZone) {
+  const start = new Date(event.start_at);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).formatToParts(start);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    id: event.id,
+    title: event.title,
+    local_date: `${values.year}-${values.month}-${values.day}`,
+    local_time: `${values.hour}:${values.minute}`,
+    details: event.details
+  };
+}
+
 const READ_ONLY_SONG_TOOLS = [
   {
     type: 'function',
@@ -143,10 +160,12 @@ async function executeReadOnlyTool({ stateStore, eventsFile, name, arguments: ra
       ok: true,
       status: schedule.events.length ? 'found' : 'not_found',
       time_zone: schedule.time_zone,
+      // `start_at` is intentionally not returned here: it is stored as UTC,
+      // while every human-facing rehearsal answer must use the group's zone.
       events: schedule.events
         .filter((event) => !event.cancelled)
         .sort((left, right) => new Date(left.start_at) - new Date(right.start_at))
-        .map(({ id, title, start_at, details }) => ({ id, title, start_at, details }))
+        .map((event) => formatRehearsalForAnswer(event, schedule.time_zone))
     };
   }
   return executeReadOnlySongTool({ stateStore, name, arguments: rawArguments });
@@ -159,5 +178,6 @@ module.exports = {
   READ_ONLY_TOOLS,
   executeReadOnlySongTool,
   executeReadOnlyTool,
+  formatRehearsalForAnswer,
   parseToolArguments
 };

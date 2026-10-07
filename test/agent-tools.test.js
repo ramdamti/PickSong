@@ -91,7 +91,7 @@ test('lookup_rehearsals returns the current non-cancelled WhatsApp event schedul
   assert.equal(result.status, 'found');
   assert.equal(result.events.length, 1);
   assert.deepEqual(result.events[0], {
-    id: 'upcoming', title: 'חזרת להקה', start_at: '2026-10-10T14:30:00.000Z', details: 'גרוב | חדר B'
+    id: 'upcoming', title: 'חזרת להקה', local_date: '2026-10-10', local_time: '17:30', details: 'גרוב | חדר B'
   });
   await fs.rm(directory, { recursive: true, force: true });
 });
