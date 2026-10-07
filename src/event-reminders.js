@@ -142,9 +142,15 @@ function formatEventReminder(event, timeZone = REMINDER_TIME_ZONE) {
 
 async function sendDueEventReminders({ schedule, now = new Date(), send }) {
   const normalized = normalizeSchedule(schedule);
+  const nextEvent = normalized.events
+    .filter((event) => !event.cancelled && new Date(event.start_at).getTime() > now.getTime())
+    .sort((left, right) => new Date(left.start_at) - new Date(right.start_at))[0];
   const due = [];
   for (const event of normalized.events) {
     if (event.cancelled || normalized.sent[event.id]) continue;
+    // A rehearsal reminder must always describe the next rehearsal, rather
+    // than a later event whose two-day window happens to overlap it.
+    if (!nextEvent || event.id !== nextEvent.id) continue;
     const reminderAt = getReminderAt(event, normalized.time_zone);
     const elapsed = now.getTime() - reminderAt.getTime();
     if (elapsed < 0 || elapsed > REMINDER_GRACE_MS) continue;

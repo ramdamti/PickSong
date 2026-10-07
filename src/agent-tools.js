@@ -153,19 +153,20 @@ function executeReadOnlySongTool({ stateStore, name, arguments: rawArguments }) 
   return { ok: true, status: 'found', songs: [compactSong(matches[0])] };
 }
 
-async function executeReadOnlyTool({ stateStore, eventsFile, name, arguments: rawArguments }) {
+async function executeReadOnlyTool({ stateStore, eventsFile, name, arguments: rawArguments, now = new Date() }) {
   if (name === 'lookup_rehearsals') {
     const schedule = await loadEventSchedule(eventsFile);
+    const upcomingEvents = schedule.events
+      .filter((event) => !event.cancelled && new Date(event.start_at).getTime() >= now.getTime())
+      .sort((left, right) => new Date(left.start_at) - new Date(right.start_at));
     return {
       ok: true,
-      status: schedule.events.length ? 'found' : 'not_found',
+      status: upcomingEvents.length ? 'found' : 'not_found',
       time_zone: schedule.time_zone,
+      as_of: now.toISOString(),
       // `start_at` is intentionally not returned here: it is stored as UTC,
       // while every human-facing rehearsal answer must use the group's zone.
-      events: schedule.events
-        .filter((event) => !event.cancelled)
-        .sort((left, right) => new Date(left.start_at) - new Date(right.start_at))
-        .map((event) => formatRehearsalForAnswer(event, schedule.time_zone))
+      events: upcomingEvents.map((event) => formatRehearsalForAnswer(event, schedule.time_zone))
     };
   }
   return executeReadOnlySongTool({ stateStore, name, arguments: rawArguments });

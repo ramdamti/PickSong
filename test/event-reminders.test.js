@@ -49,12 +49,33 @@ test('sendDueEventReminders sends once and persists its sent marker', async () =
   assert.equal(first.schedule.sent['rehearsal-1'], now.toISOString());
 });
 
+test('sendDueEventReminders only announces the next future rehearsal', async () => {
+  const messages = [];
+  const now = new Date('2026-10-08T17:00:00.000Z'); // 20:00 Israel time
+  const result = await sendDueEventReminders({
+    schedule: {
+      time_zone: 'Asia/Jerusalem',
+      events: [
+        { id: 'next', title: 'חזרת להקה', start_at: '2026-10-09T17:00:00.000Z', details: 'חדר A' },
+        { id: 'later', title: 'חזרת להקה', start_at: '2026-10-10T17:00:00.000Z', details: 'חדר B' }
+      ],
+      sent: {}
+    },
+    now,
+    send: async (text) => messages.push(text)
+  });
+
+  assert.equal(result.due.length, 0);
+  assert.equal(messages.length, 0);
+});
+
 test('formatEventReminder includes the rehearsal details', () => {
   const text = formatEventReminder({
     title: 'חזרת להקה', start_at: '2026-10-10T17:30:00+03:00', details: 'גרוב, חדר B'
   });
   assert.match(text, /חזרת להקה/);
   assert.match(text, /גרוב, חדר B/);
+  assert.match(text, /17:30/);
 });
 
 test('WhatsApp event updates replace the event and reset its sent marker', () => {

@@ -1568,7 +1568,8 @@ async function executeAgentAction({ action, stateStore, chat, record, messageTex
       stateStore,
       eventsFile: config.eventsFile,
       name,
-      arguments: query ? JSON.stringify({ query }) : '{}'
+      arguments: query ? JSON.stringify({ query }) : '{}',
+      now: new Date()
     });
     let reply = null;
     if (typeof answerLocalDataQuestionFn === 'function') {

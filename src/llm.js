@@ -112,6 +112,7 @@ const DATA_ANSWER_SYSTEM_PROMPT = [
   'You answer a WhatsApp band-bot question using only the supplied local data.',
   'Answer the user directly in concise, natural Israeli Hebrew. State uncertainty only when the supplied data lacks the answer.',
   'For rehearsals, use local_date and local_time exactly as supplied, in time_zone. Never convert a rehearsal time to UTC or infer another time zone.',
+  'Rehearsal events are future, non-cancelled events sorted chronologically. For “the next rehearsal”, use the first event. If the user asks for all rehearsals, list every supplied event and retain each event’s details/location.',
   'Do not invent songs, events, counts, dates, or metadata. Do not mention tools, JSON, or internal data.'
 ].join('\n');
 
@@ -876,7 +877,7 @@ async function answerLocalDataQuestion({ baseUrl, apiKey, model, messageText, da
   });
   const { parsed, usage } = await runWithAgentConcurrencyLimit(() => callOpenAiCompatibleChat({
     baseUrl, apiKey, model, prompt, systemPrompt: DATA_ANSWER_SYSTEM_PROMPT,
-    requestFn, maxCompletionTokens: 160, reasoningEffort: 'low', responseFormat: 'text'
+    requestFn, maxCompletionTokens: 512, reasoningEffort: 'low', responseFormat: 'text'
   }));
   console.log(`[agent] data_answer input=${usage.promptTokens} cached=${usage.cachedTokens} output=${usage.completionTokens} total=${usage.totalTokens} latency=${usage.latencyMs}ms`);
   return String(parsed?.text || '').trim() || null;

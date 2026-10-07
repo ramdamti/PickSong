@@ -83,11 +83,12 @@ test('lookup_rehearsals returns the current non-cancelled WhatsApp event schedul
   await saveEventSchedule(eventsFile, {
     group_name: 'The Imagine Sessions',
     events: [
+      { id: 'past', title: 'חזרת להקה', start_at: '2026-09-26T14:00:00.000Z', details: 'גרוב | חדר E' },
       { id: 'upcoming', title: 'חזרת להקה', start_at: '2026-10-10T14:30:00.000Z', details: 'גרוב | חדר B' },
       { id: 'cancelled', title: 'חזרת להקה', start_at: '2026-10-24T15:00:00.000Z', cancelled: true }
     ]
   });
-  const result = await executeReadOnlyTool({ name: 'lookup_rehearsals', eventsFile });
+  const result = await executeReadOnlyTool({ name: 'lookup_rehearsals', eventsFile, now: new Date('2026-10-01T00:00:00.000Z') });
   assert.equal(result.status, 'found');
   assert.equal(result.events.length, 1);
   assert.deepEqual(result.events[0], {
