@@ -65,6 +65,9 @@ function normalizeSchedule(raw) {
 
 function eventFromWhatsAppMessage(message) {
   const raw = message?._data || {};
+  // Edits have their own message id. Never insert them as separate events;
+  // the live listener observes the updated original event model instead.
+  if ((message?.type ?? raw.type) === 'protocol') return null;
   const startSeconds = Number(message?.eventStartTime ?? raw.eventStartTime);
   const start = Number.isFinite(startSeconds) && startSeconds > 0
     ? new Date(startSeconds * 1000)

@@ -47,11 +47,11 @@ test('scheduled event bridge receives additions and non-text edits with stable g
   });
   h.emitter.emit('add', h.message);
   h.message.eventStartTime += 3600;
-  h.emitter.emit('change:eventStartTime', h.message);
+  h.emitter.emit('change', h.message);
   h.message.eventLocation = { name: 'Room B' };
-  h.emitter.emit('change:eventLocation', h.message);
+  h.emitter.emit('change', h.message);
   h.message.isEventCanceled = true;
-  h.emitter.emit('change:isEventCanceled', h.message);
+  h.emitter.emit('change', h.message);
   await Promise.all(h.pending);
   assert.equal(received.length, 4);
   assert.equal(new Set(received.map(event => event.id)).size, 1);
@@ -71,7 +71,7 @@ test('scheduled event bridge installation is idempotent and excludes ordinary/pr
   h.emitter.emit('add', h.message);
   await Promise.all(h.pending);
   assert.equal(received, 1);
-  assert.equal(h.emitter.listenerCount('change:eventLocation'), 1);
+  assert.equal(h.emitter.listenerCount('change'), 2); // event + diagnostics
 });
 
 test('test diagnostics capture system edits and removals without dispatching schedule updates', async () => {
@@ -98,7 +98,26 @@ test('test diagnostics capture system edits and removals without dispatching sch
   assert.equal(diagnostics[2].type, 'revoked');
   assert.equal(diagnostics[0].body, undefined);
   assert.equal(diagnostics[0].messageSecret, undefined);
-  assert.equal(h.emitter.listenerCount('change'), 1);
+  assert.equal(h.emitter.listenerCount('change'), 2);
+});
+
+test('live model ids without _serialized survive updates and protocol edits never become new events', async () => {
+  const h = listenerHarness();
+  const received = [];
+  await installScheduledEventListener(h.client, async message => received.push(eventFromWhatsAppMessage(message)));
+  h.message.id = { id: 'AC26E5C0AD37B0234DFED1524BC23563', remote: '123@g.us', fromMe: true };
+  h.emitter.emit('add', h.message);
+  h.message.eventDescription = 'Updated description';
+  h.emitter.emit('change', h.message);
+  const edit = { ...h.message, type: 'protocol', subtype: 'event_edit_decrypted', id: { id: 'different-edit-id', remote: '123@g.us' } };
+  h.emitter.emit('add', edit);
+  h.emitter.emit('change', edit);
+  await Promise.all(h.pending);
+  assert.equal(received.length, 2);
+  assert.equal(received[0].id, h.message.id.id);
+  assert.equal(received[1].id, received[0].id);
+  assert.match(received[1].details, /Updated description/);
+  assert.equal(eventFromWhatsAppMessage({ ...edit, _data: edit }), null);
 });
 
 test('scheduled event bridge reports save failures without rejecting the page callback', async () => {

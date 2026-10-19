@@ -30,17 +30,21 @@ async function installScheduledEventListener(client, onMessage, onWarning = () =
     if (previous?.diagnostics) {
       for (const [event, handler] of previous.diagnostics) previous.collection.off(event, handler);
     }
-    const events = 'add change:type change:body change:eventName change:eventStartTime ' +
-      'change:eventEndTime change:eventDescription change:eventLocation ' +
-      'change:isEventCanceled change:isEventCaneled';
+    // Newer WhatsApp models emit aggregate changes without the individual
+    // change:event* signals. Read the original event model on any change.
+    const events = 'add change';
+    const messageKey = (id) => typeof id === 'string' ? id : id?._serialized || id?.id;
     const handler = (message) => {
+      // A decrypted edit is a separate protocol message, not a new event.
+      // Its original event model is observed through the change listener.
+      if (message.type === 'protocol') return;
       if (message.type !== 'event_creation' && !message.eventStartTime) return;
       // Pass only event fields; no message secrets or unrelated chat content.
       const id = message.id;
       const remote = typeof id?.remote === 'string' ? id.remote : id?.remote?._serialized;
       if (!remote?.endsWith('@g.us')) return;
       const raw = {
-        id: { _serialized: id._serialized, remote },
+        id: { _serialized: messageKey(id), remote },
         fromMe: Boolean(id.fromMe),
         from: remote,
         to: remote,
@@ -68,15 +72,17 @@ async function installScheduledEventListener(client, onMessage, onWarning = () =
         if (chatId !== '120363420724758799@g.us') return;
         if (message.type === 'chat' && !message.eventStartTime && source !== 'remove') return;
         const diagnostic = {
-          mode: 'log_only', source, chatId, id: id?._serialized,
+          mode: 'log_only', source, chatId, id: messageKey(id),
           type: message.type, subtype: message.subtype,
           isNotification: Boolean(message.isNotification),
           eventName: message.eventName, eventStartTime: message.eventStartTime,
+          eventDescription: message.eventDescription,
+          eventLocation: message.eventLocation?.name,
           isEventCanceled: message.isEventCanceled ?? message.isEventCaneled,
           // Keys only: never dump bodies, participants, secrets or raw payloads.
-          fields: Object.keys(message.attributes || message).sort(),
+          fields: Object.keys(message.attributes || message).filter(field => /event|parent|target|protocol|revoke|delete/i.test(field)).sort(),
           changedFields: Object.keys(message.changed || {}).sort(),
-          protocolMessageKey: message.protocolMessageKey?._serialized
+          protocolMessageKey: messageKey(message.protocolMessageKey)
         };
         Promise.resolve(window[name]({ diagnostic })).catch((error) => {
           console.warn(`[event_sync] diagnostic_bridge_failed: ${error.message}`);
