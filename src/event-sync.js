@@ -1,14 +1,23 @@
 const { eventFromWhatsAppMessage, upsertEvent } = require('./event-reminders');
 
 const TEST_EVENT_GROUP_ID = '120363420724758799@g.us';
+const recentTestEvents = new Map();
 
 function logTestEvent({ chatId, event, source, log = console.log }) {
   if (chatId !== TEST_EVENT_GROUP_ID) return false;
-  log(`[event_sync_test] ${JSON.stringify({
-    mode: 'log_only', group: 'TestMyBot', chatId, source,
+  const state = {
     id: event.id, title: event.title, start_at: event.start_at,
-    details: event.details, cancelled: event.cancelled
-  })}`);
+    details: event.details, cancelled: event.cancelled,
+    ...(event.deleted ? { operation: 'delete' } : {})
+  };
+  const fingerprint = JSON.stringify(state);
+  // Different transport listeners often report the same snapshot. Still return
+  // true for duplicates so TestMyBot never falls through to persistence.
+  if (recentTestEvents.get(event.id) === fingerprint) return true;
+  log(`[event_sync_test] ${JSON.stringify({ mode: 'log_only', group: 'TestMyBot', chatId, source, ...state })}`);
+  recentTestEvents.delete(event.id);
+  recentTestEvents.set(event.id, fingerprint);
+  if (recentTestEvents.size > 500) recentTestEvents.delete(recentTestEvents.keys().next().value);
   return true;
 }
 

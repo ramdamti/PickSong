@@ -1,6 +1,6 @@
 // Keep the private WhatsApp Web integration isolated: if it changes, startup
 // still succeeds, but field changes may be missed until the listener recovers.
-async function installScheduledEventListener(client, onMessage, onWarning = () => {}, onDiagnostic = (data) => console.log(`[event_sync_test_raw] ${JSON.stringify(data)}`)) {
+async function installScheduledEventListener(client, onMessage, onWarning = () => {}, onDiagnostic = null) {
   const page = client.pupPage;
   if (!page) throw new Error('WhatsApp page is unavailable');
   const callbackName = '__picksongScheduledEvent';
@@ -8,7 +8,7 @@ async function installScheduledEventListener(client, onMessage, onWarning = () =
     await page.exposeFunction(callbackName, async (raw) => {
       try {
         if (raw.diagnostic) {
-          if (raw.diagnostic.chatId === '120363420724758799@g.us') onDiagnostic(raw.diagnostic);
+          if (raw.diagnostic.chatId === '120363420724758799@g.us' && typeof onDiagnostic === 'function') onDiagnostic(raw.diagnostic);
           return;
         }
         const chatId = raw.id?.remote;
@@ -22,7 +22,7 @@ async function installScheduledEventListener(client, onMessage, onWarning = () =
       }
     });
   }
-  await page.evaluate((name) => {
+  await page.evaluate(({ name, diagnosticsEnabled }) => {
     const collection = window.require('WAWebCollections').Msg;
     const key = '__picksongEventSubscription';
     const previous = window[key];
@@ -38,12 +38,14 @@ async function installScheduledEventListener(client, onMessage, onWarning = () =
       // A decrypted edit is a separate protocol message, not a new event.
       // Its original event model is observed through the change listener.
       if (message.type === 'protocol') return;
-      if (message.type !== 'event_creation' && !message.eventStartTime) return;
+      if (message.type !== 'revoked' && message.type !== 'event_creation' && !message.eventStartTime) return;
       // Pass only event fields; no message secrets or unrelated chat content.
       const id = message.id;
       const remote = typeof id?.remote === 'string' ? id.remote : id?.remote?._serialized;
       if (!remote?.endsWith('@g.us')) return;
       const raw = {
+        type: message.type,
+        protocolMessageKey: messageKey(message.protocolMessageKey),
         id: { _serialized: messageKey(id), remote },
         fromMe: Boolean(id.fromMe),
         from: remote,
@@ -65,7 +67,7 @@ async function installScheduledEventListener(client, onMessage, onWarning = () =
     // System notifications and revocations can omit eventStartTime altogether.
     // Observe their shapes in TestMyBot without parsing them as full events or
     // inferring cancellation from a local removal/cache eviction.
-    const diagnostics = ['add', 'change', 'remove'].map((source) => {
+    const diagnostics = (diagnosticsEnabled ? ['add', 'change', 'remove'] : []).map((source) => {
       const diagnosticHandler = (message) => {
         const id = message.id;
         const chatId = typeof id?.remote === 'string' ? id.remote : id?.remote?._serialized;
@@ -76,6 +78,7 @@ async function installScheduledEventListener(client, onMessage, onWarning = () =
           type: message.type, subtype: message.subtype,
           isNotification: Boolean(message.isNotification),
           eventName: message.eventName, eventStartTime: message.eventStartTime,
+          eventEndTime: message.eventEndTime,
           eventDescription: message.eventDescription,
           eventLocation: message.eventLocation?.name,
           isEventCanceled: message.isEventCanceled ?? message.isEventCaneled,
@@ -92,7 +95,7 @@ async function installScheduledEventListener(client, onMessage, onWarning = () =
       return [source, diagnosticHandler];
     });
     window[key] = { collection, events, handler, diagnostics };
-  }, callbackName);
+  }, { name: callbackName, diagnosticsEnabled: typeof onDiagnostic === 'function' });
 }
 
 module.exports = { installScheduledEventListener };

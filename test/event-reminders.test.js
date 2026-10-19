@@ -2,6 +2,24 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { isScheduleChat, refreshScheduledEvents, createEventTaskQueue, logTestEvent } = require('../src/event-sync');
 
+test('test log suppresses duplicate sources but preserves actual changes, deletion and reversions', () => {
+  const lines = [];
+  const event = { id: 'dedup-test', title: 'Rehearsal', start_at: '2026-11-07T16:00:00Z', details: null, cancelled: false };
+  const emit = (value, source = 'event_change') => logTestEvent({
+    chatId: '120363420724758799@g.us', event: value, source, log: line => lines.push(line)
+  });
+  assert.equal(emit(event, 'message_create'), true);
+  assert.equal(emit(event), true);
+  assert.equal(lines.length, 1);
+  emit({ ...event, details: 'Room B' });
+  emit(event); // A real reversal must not be suppressed.
+  const deleted = { ...event, cancelled: true, deleted: true };
+  emit(deleted);
+  assert.equal(emit(deleted, 'message_create'), true);
+  assert.equal(lines.length, 4);
+  assert.match(lines[3], /"operation":"delete"/);
+});
+
 test('test-group event diagnostics include edits and cancellations without capturing production events', () => {
   const lines = [];
   const event = Object.freeze({ id: 'test-event', title: 'Test', start_at: '2026-11-07T16:00:00.000Z', details: 'Room B', cancelled: true });
@@ -21,8 +39,59 @@ const {
   formatEventReminder,
   sendDueEventReminders,
   eventFromWhatsAppMessage,
-  upsertEvent
+  upsertEvent,
+  eventDeletionFromMessage,
+  deleteScheduledEvent,
+  saveEventSchedule,
+  loadEventSchedule
 } = require('../src/event-reminders');
+
+test('deleting a known event persists cancellation and prevents resurrection after restart', async (t) => {
+  const fs = require('node:fs/promises');
+  const path = require('node:path');
+  const directory = await fs.mkdtemp(path.join(require('node:os').tmpdir(), 'event-delete-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const file = path.join(directory, 'events.json');
+  const original = { id: 'false_123@g.us_ORIGINAL_author', title: 'Rehearsal', start_at: '2026-11-07T16:00:00.000Z', details: 'Room B' };
+  const schedule = { group_id: '123@g.us', events: [original], sent: {} };
+  const deletion = eventDeletionFromMessage({ type: 'revoked', id: { id: 'NEW_REVOCATION_ID' }, _data: { protocolMessageKey: 'ORIGINAL' } });
+  const result = deleteScheduledEvent(schedule, deletion);
+  assert.equal(result.changed, true);
+  assert.equal(result.schedule.events.length, 1);
+  assert.equal(result.event.id, original.id);
+  assert.equal(result.event.cancelled, true);
+  assert.equal(result.event.deleted, true);
+  assert.equal(original.cancelled, undefined);
+  await saveEventSchedule(file, result.schedule);
+  const loaded = await loadEventSchedule(file);
+  assert.equal(deleteScheduledEvent(loaded, deletion).changed, false);
+  assert.equal(upsertEvent(loaded, original).changed, false);
+  const reminders = await sendDueEventReminders({ schedule: loaded, now: new Date('2026-11-05T18:00:00Z'), send: async () => assert.fail('deleted event reminder') });
+  assert.equal(reminders.due.length, 0);
+});
+
+test('event deletion matches a unique imported event but never guesses among ambiguous events', () => {
+  const message = { type: 'revoked', id: { id: 'revoke' }, _data: {
+    protocolMessageKey: { id: 'original' }, eventName: 'Rehearsal', eventStartTime: 1794067200
+  } };
+  const deletion = eventDeletionFromMessage(message);
+  const imported = { ...deletion.original, id: 'imported-2026-11-07-01' };
+  assert.equal(deleteScheduledEvent({ events: [imported] }, deletion).changed, true);
+  assert.equal(deleteScheduledEvent({ events: [imported, { ...imported, id: 'imported-2026-11-07-02' }] }, deletion).changed, false);
+  assert.equal(deleteScheduledEvent({ events: [] }, deletion).changed, false);
+  assert.equal(eventDeletionFromMessage({ type: 'chat', id: { id: 'original' } }), null);
+});
+
+test('revocation retires its transient alias without merging distinct WhatsApp events', () => {
+  const event = { id: 'ORIGINAL', title: 'Event3', start_at: '2026-10-19T12:00:00.000Z' };
+  let schedule = upsertEvent({ events: [event] }, { ...event, id: 'OTHER_EVENT' }).schedule;
+  schedule = upsertEvent(schedule, { ...event, id: 'REVOCATION' }).schedule;
+  assert.equal(schedule.events.length, 3);
+  const result = deleteScheduledEvent(schedule, { id: 'ORIGINAL', revocationId: 'REVOCATION' });
+  assert.equal(result.schedule.events.find(item => item.id === 'ORIGINAL').deleted, true);
+  assert.equal(result.schedule.events.find(item => item.id === 'REVOCATION').deleted, true);
+  assert.equal(result.schedule.events.find(item => item.id === 'OTHER_EVENT').cancelled, false);
+});
 
 const syncGroupId = '123@g.us';
 function eventMessage(id, overrides = {}) {

@@ -2500,7 +2500,7 @@ async function bootstrap() {
     messageToRecord,
     readQuotedMessage
   } = require('./whatsapp');
-  const { loadEventSchedule, saveEventSchedule, sendDueEventReminders, eventFromWhatsAppMessage, upsertEvent } = require('./event-reminders');
+  const { loadEventSchedule, saveEventSchedule, sendDueEventReminders, eventFromWhatsAppMessage, upsertEvent, eventDeletionFromMessage, deleteScheduledEvent } = require('./event-reminders');
   const { isScheduleChat, createEventTaskQueue, logTestEvent } = require('./event-sync');
   const { installScheduledEventListener } = require('./event-listener');
   const config = loadConfig(process.env);
@@ -2621,11 +2621,12 @@ async function bootstrap() {
 
   async function syncScheduledEventMessage(message, source) {
     const event = eventFromWhatsAppMessage(message);
-    if (!event) return false;
+    const deletion = eventDeletionFromMessage(message);
+    if (!event && !deletion) return false;
     const chatId = messageToRecord(message).chatId;
     // TestMyBot is diagnostic-only, regardless of schedule configuration.
     // Stop here before any persistence or reminder state can be changed.
-    if (logTestEvent({ chatId, event, source })) return false;
+    if (logTestEvent({ chatId, event: deletion ? { ...deletion.original, id: deletion.id, cancelled: true, deleted: true } : event, source })) return false;
     if (!eventSchedule.group_name && !eventSchedule.group_id) return false;
     return queueEventTask(async () => {
       let chat = null;
@@ -2642,11 +2643,14 @@ async function bootstrap() {
       }
       if (!isScheduleChat(eventSchedule, chat)) return false;
 
-      const result = upsertEvent(eventSchedule, event);
+      const result = deletion ? deleteScheduledEvent(eventSchedule, deletion) : upsertEvent(eventSchedule, event);
+      if (deletion && !result.event) {
+        console.warn(`[event_sync] deletion_unmatched id=${deletion.id}; schedule unchanged`);
+      }
       if (!result.changed) return false;
       await saveEventSchedule(config.eventsFile, result.schedule);
       eventSchedule = result.schedule;
-      console.log(`[event_sync] source=${source} id=${event.id} cancelled=${event.cancelled} start=${event.start_at}`);
+      console.log(`[event_sync] source=${source} id=${result.event.id} cancelled=${result.event.cancelled} deleted=${Boolean(result.event.deleted)} start=${result.event.start_at}`);
       return true;
     });
   }

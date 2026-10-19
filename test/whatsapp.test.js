@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 const { messageToRecord, readQuotedMessage } = require('../src/whatsapp');
 const { installScheduledEventListener } = require('../src/event-listener');
-const { eventFromWhatsAppMessage } = require('../src/event-reminders');
+const { eventFromWhatsAppMessage, eventDeletionFromMessage } = require('../src/event-reminders');
 const vm = require('node:vm');
 
 function listenerHarness() {
@@ -71,14 +71,15 @@ test('scheduled event bridge installation is idempotent and excludes ordinary/pr
   h.emitter.emit('add', h.message);
   await Promise.all(h.pending);
   assert.equal(received, 1);
-  assert.equal(h.emitter.listenerCount('change'), 2); // event + diagnostics
+  assert.equal(h.emitter.listenerCount('change'), 1); // diagnostics disabled by default
+  assert.equal(h.emitter.listenerCount('remove'), 0);
 });
 
 test('test diagnostics capture system edits and removals without dispatching schedule updates', async () => {
   const h = listenerHarness();
   const diagnostics = [];
   let updates = 0;
-  const install = () => installScheduledEventListener(h.client, async () => { updates += 1; }, undefined, data => diagnostics.push(data));
+  const install = () => installScheduledEventListener(h.client, async message => { if (eventFromWhatsAppMessage(message)) updates += 1; }, undefined, data => diagnostics.push(data));
   await install();
   await install();
   const notification = {
@@ -118,6 +119,27 @@ test('live model ids without _serialized survive updates and protocol edits neve
   assert.equal(received[1].id, received[0].id);
   assert.match(received[1].details, /Updated description/);
   assert.equal(eventFromWhatsAppMessage({ ...edit, _data: edit }), null);
+});
+
+test('revoked event messages forward the original target for deletion, never an active event', async () => {
+  const h = listenerHarness();
+  const received = [];
+  const diagnostics = [];
+  await installScheduledEventListener(h.client, async message => received.push(message), undefined, data => diagnostics.push(data));
+  const revoked = {
+    ...h.message, type: 'revoked', subtype: 'sender', isEventCanceled: false,
+    id: { id: 'revocation-id', remote: '120363420724758799@g.us' },
+    protocolMessageKey: { id: 'original-event-id' }
+  };
+  h.emitter.emit('change', revoked);
+  await Promise.all(h.pending);
+  assert.equal(received.length, 1);
+  assert.equal(eventDeletionFromMessage(received[0]).id, 'original-event-id');
+  assert.equal(eventFromWhatsAppMessage(received[0]), null);
+  assert.equal(diagnostics.length, 1);
+  assert.equal(diagnostics[0].type, 'revoked');
+  assert.equal(diagnostics[0].protocolMessageKey, 'original-event-id');
+  assert.equal(eventFromWhatsAppMessage({ ...revoked, _data: revoked }), null);
 });
 
 test('scheduled event bridge reports save failures without rejecting the page callback', async () => {

@@ -44,7 +44,8 @@ function normalizeEvent(raw) {
     title,
     start_at: start.toISOString(),
     details: String(event.details || '').trim() || null,
-    cancelled: Boolean(event.cancelled)
+    cancelled: Boolean(event.cancelled || event.deleted),
+    ...(event.deleted ? { deleted: true } : {})
   };
 }
 
@@ -67,7 +68,8 @@ function eventFromWhatsAppMessage(message) {
   const raw = message?._data || {};
   // Edits have their own message id. Never insert them as separate events;
   // the live listener observes the updated original event model instead.
-  if ((message?.type ?? raw.type) === 'protocol') return null;
+  const type = message?.type ?? raw.type;
+  if (type === 'protocol' || type === 'revoked') return null;
   const startSeconds = Number(message?.eventStartTime ?? raw.eventStartTime);
   const start = Number.isFinite(startSeconds) && startSeconds > 0
     ? new Date(startSeconds * 1000)
@@ -95,9 +97,11 @@ function upsertEvent(schedule, rawEvent) {
   // duplicate reminder for the same title and start time.
   let index = normalized.events.findIndex((item) => item.id === event.id);
   if (index < 0) {
-    index = normalized.events.findIndex((item) => item.title === event.title && item.start_at === event.start_at);
+    index = normalized.events.findIndex((item) => /^(imported-|rehearsal-)/.test(item.id) && item.title === event.title && item.start_at === event.start_at);
   }
   const existing = index >= 0 ? normalized.events[index] : null;
+  // A delayed event snapshot must not resurrect a deleted event.
+  if (existing?.deleted) return { schedule: normalized, changed: false, event: existing };
   const changed = !existing || JSON.stringify(existing) !== JSON.stringify(event);
   if (!changed) return { schedule: normalized, changed: false, event };
   if (index >= 0) normalized.events[index] = event;
@@ -107,6 +111,51 @@ function upsertEvent(schedule, rawEvent) {
   delete normalized.sent[event.id];
   if (existing?.id && existing.id !== event.id) delete normalized.sent[existing.id];
   return { schedule: normalized, changed: true, event };
+}
+
+function eventDeletionFromMessage(message) {
+  const raw = message?._data || message || {};
+  if ((message?.type ?? raw.type) !== 'revoked') return null;
+  const key = raw.protocolMessageKey ?? message?.protocolMessageKey ?? message?.id ?? raw.id;
+  const id = typeof key === 'string' ? key : key?._serialized || key?.id;
+  if (!id) return null;
+  // Some revocations retain the original fields; these can identify a unique
+  // manually imported event whose WhatsApp id has not been adopted yet.
+  const original = eventFromWhatsAppMessage({
+    ...message, type: 'event_creation', id: { _serialized: id },
+    _data: { ...raw, type: 'event_creation' }
+  });
+  const ownKey = message?.id ?? raw.id;
+  const revocationId = typeof ownKey === 'string' ? ownKey : ownKey?._serialized || ownKey?.id;
+  return { id, original, revocationId };
+}
+
+function deleteScheduledEvent(schedule, deletion) {
+  const normalized = normalizeSchedule(schedule);
+  const stanzaId = (id) => /^(true|false)_/.test(id) ? id.split('_')[2] : id;
+  let matches = normalized.events.filter(item => stanzaId(item.id) === stanzaId(deletion.id));
+  if (!matches.length && deletion.original) {
+    matches = normalized.events.filter(item => /^(imported-|rehearsal-)/.test(item.id) &&
+      item.title === deletion.original.title && item.start_at === deletion.original.start_at);
+  }
+  // Never guess by title alone, or insert a revocation as a new rehearsal.
+  if (matches.length !== 1) return { schedule: normalized, changed: false, event: null };
+  const event = matches[0];
+  let changed = !event.deleted;
+  event.cancelled = true;
+  event.deleted = true;
+  // WhatsApp can briefly expose the revocation under a new id while retaining
+  // event_creation and all original fields, before changing type to revoked.
+  // Retire only that explicitly linked alias, never unrelated matching titles.
+  if (deletion.revocationId && stanzaId(deletion.revocationId) !== stanzaId(deletion.id)) {
+    const alias = normalized.events.find(item => stanzaId(item.id) === stanzaId(deletion.revocationId));
+    if (alias && alias.title === event.title && alias.start_at === event.start_at) {
+      changed ||= !alias.deleted;
+      alias.cancelled = true;
+      alias.deleted = true;
+    }
+  }
+  return { schedule: normalized, changed, event };
 }
 
 async function loadEventSchedule(filePath) {
@@ -172,6 +221,8 @@ module.exports = {
   normalizeSchedule,
   eventFromWhatsAppMessage,
   upsertEvent,
+  eventDeletionFromMessage,
+  deleteScheduledEvent,
   loadEventSchedule,
   saveEventSchedule,
   getReminderAt,

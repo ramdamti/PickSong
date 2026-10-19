@@ -71,8 +71,16 @@ TestMyBot (`120363420724758799@g.us`) is diagnostic-only: recognized events
 are logged as `[event_sync_test]` with `mode: "log_only"`, source, event ID,
 title, start time (UTC), details and cancellation status. They never enter the
 schedule update path and do not trigger a diagnostic message to the group.
-The same event may appear from multiple listeners; these are observations,
-not separate events. Imagine Sessions retains its normal synchronization.
+Identical event snapshots from multiple listeners are logged once per process
+(a bounded cache retains the latest state of up to 500 test events). Real changes
+and deletions remain logged. Raw test diagnostics are disabled by default,
+including their page subscriptions. Imagine Sessions retains its normal synchronization.
+In Imagine Sessions, a WhatsApp `revoked` message targeting a known event marks
+it `cancelled: true, deleted: true` in the saved schedule. It disappears from
+upcoming rehearsal answers and reminders; the deletion marker prevents a stale
+snapshot from restoring it. TestMyBot only logs the deletion. Unmatched or
+ambiguous deletion targets are logged without changing the schedule. Local
+message removals/cache evictions alone do not cancel events.
 Unavailable messages are retained, not treated as deleted. Legacy local event
 IDs are matched by title and start time; an already-rescheduled legacy entry
 may need manual reconciliation if those no longer match. Events missed while
