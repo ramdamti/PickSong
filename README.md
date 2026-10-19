@@ -55,6 +55,30 @@ Primary files:
 - `seen.json` - recent seen-message cache
 - `events.json` - event reminders and sent-reminder history
 
+Startup and reconnect load the saved schedule and enable live listening without
+scanning message history. There are no periodic backup scans.
+An isolated WhatsApp Web listener handles event additions and changes to the
+name, date, description, location and cancellation status immediately. It is
+reinstalled on each client `ready` event, including after page reloads. If this
+private integration becomes unavailable, a warning is logged; event field
+changes may be missed. Local reminder timing is still checked every minute
+against the saved schedule, without fetching history.
+Live messages also update the schedule. `group_id` takes precedence over the group
+name, including after a rename. Updates and reminder writes share a queue, and
+the schedule file is replaced atomically so readers never see partial JSON.
+Check `[event_sync] source=event_change` logs to verify live updates after deployment.
+TestMyBot (`120363420724758799@g.us`) is diagnostic-only: recognized events
+are logged as `[event_sync_test]` with `mode: "log_only"`, source, event ID,
+title, start time (UTC), details and cancellation status. They never enter the
+schedule update path and do not trigger a diagnostic message to the group.
+The same event may appear from multiple listeners; these are observations,
+not separate events. Imagine Sessions retains its normal synchronization.
+Unavailable messages are retained, not treated as deleted. Legacy local event
+IDs are matched by title and start time; an already-rescheduled legacy entry
+may need manual reconciliation if those no longer match. Events missed while
+disconnected are not guaranteed to be recovered; the current integration has
+no direct group-events listing API or automatic backfill.
+
 The runtime expects `state.json` to already be canonical and enriched. On startup it validates:
 
 - `schema_version`

@@ -1,5 +1,20 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { isScheduleChat, refreshScheduledEvents, createEventTaskQueue, logTestEvent } = require('../src/event-sync');
+
+test('test-group event diagnostics include edits and cancellations without capturing production events', () => {
+  const lines = [];
+  const event = Object.freeze({ id: 'test-event', title: 'Test', start_at: '2026-11-07T16:00:00.000Z', details: 'Room B', cancelled: true });
+  const input = { event, source: 'event_change', log: line => lines.push(line) };
+  assert.equal(logTestEvent({ ...input, chatId: '120363420724758799@g.us' }), true);
+  assert.equal(logTestEvent({ ...input, chatId: '120363245259281935@g.us' }), false);
+  assert.equal(lines.length, 1);
+  const record = JSON.parse(lines[0].replace('[event_sync_test] ', ''));
+  assert.equal(record.mode, 'log_only');
+  assert.equal(record.source, 'event_change');
+  assert.equal(record.cancelled, true);
+  assert.equal(record.details, 'Room B');
+});
 
 const {
   getReminderAt,
@@ -8,6 +23,85 @@ const {
   eventFromWhatsAppMessage,
   upsertEvent
 } = require('../src/event-reminders');
+
+const syncGroupId = '123@g.us';
+function eventMessage(id, overrides = {}) {
+  return {
+    id: { _serialized: id },
+    _data: { eventName: 'Rehearsal', eventStartTime: 1790514000, ...overrides }
+  };
+}
+
+test('schedule group id survives renames and rejects a different group with the same name', () => {
+  const schedule = { group_id: syncGroupId, group_name: 'Band' };
+  assert.equal(isScheduleChat(schedule, { isGroup: true, id: { _serialized: syncGroupId }, name: 'Renamed' }), true);
+  assert.equal(isScheduleChat(schedule, { isGroup: true, id: { _serialized: 'other@g.us' }, name: 'Band' }), false);
+});
+
+test('history sync discovers offline events even when the schedule is empty and is idempotent', async () => {
+  const chat = {
+    isGroup: true, id: { _serialized: syncGroupId },
+    async fetchMessages({ limit }) {
+      assert.equal(limit, 250);
+      return [{ body: 'ordinary message' }, eventMessage('false_123@g.us_new')];
+    }
+  };
+  const first = await refreshScheduledEvents({ client: {}, chat, schedule: { group_id: syncGroupId, events: [] } });
+  assert.equal(first.changed, true);
+  assert.equal(first.schedule.events.length, 1);
+  first.schedule.sent[first.schedule.events[0].id] = 'already-sent';
+  const second = await refreshScheduledEvents({ client: {}, chat, schedule: first.schedule });
+  assert.equal(second.changed, false);
+  assert.equal(second.schedule.sent[first.schedule.events[0].id], 'already-sent');
+});
+
+test('polling refreshes older events outside recent history, including time, location and cancellation', async () => {
+  const id = 'false_123@g.us_old';
+  const original = eventFromWhatsAppMessage(eventMessage(id));
+  const chat = { isGroup: true, id: { _serialized: syncGroupId }, async fetchMessages() { return []; } };
+  const result = await refreshScheduledEvents({
+    chat, schedule: { group_id: syncGroupId, events: [original], sent: { [id]: 'sent' } },
+    client: { async getMessageById(messageId) {
+      assert.equal(messageId, id);
+      return eventMessage(id, { eventStartTime: 1790600400, eventLocation: { name: 'Room E' }, isEventCanceled: true });
+    } }
+  });
+  assert.equal(result.schedule.events.length, 1);
+  assert.notEqual(result.schedule.events[0].start_at, original.start_at);
+  assert.equal(result.schedule.events[0].details, 'Room E');
+  assert.equal(result.schedule.events[0].cancelled, true);
+  assert.equal(result.schedule.sent[id], undefined);
+});
+
+test('incomplete history and individual fetch failures do not remove existing events', async () => {
+  const original = eventFromWhatsAppMessage(eventMessage('false_123@g.us_old'));
+  const warnings = [];
+  const result = await refreshScheduledEvents({
+    chat: { isGroup: true, id: { _serialized: syncGroupId }, async fetchMessages() { return []; } },
+    schedule: { group_id: syncGroupId, events: [original] },
+    client: { async getMessageById() { throw new Error('unavailable'); } },
+    onWarning: (warning) => warnings.push(warning)
+  });
+  assert.deepEqual(result.schedule.events, [original]);
+  assert.equal(result.changed, false);
+  assert.equal(warnings.length, 1);
+});
+
+test('event writes and reminder checks are serialized and a failed task does not block subsequent updates', async () => {
+  const queue = createEventTaskQueue();
+  const steps = [];
+  let release;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  const first = queue(async () => { steps.push('first'); await blocked; steps.push('saved'); });
+  const failed = queue(async () => { steps.push('failed'); throw new Error('write failed'); });
+  const rejection = assert.rejects(failed, /write failed/);
+  const last = queue(async () => { steps.push('last'); });
+  await Promise.resolve();
+  assert.deepEqual(steps, ['first']);
+  release();
+  await Promise.all([first, rejection, last]);
+  assert.deepEqual(steps, ['first', 'saved', 'failed', 'last']);
+});
 
 test('getReminderAt schedules 20:00 Israel time two calendar days before a rehearsal', () => {
   const reminderAt = getReminderAt({ start_at: '2026-09-26T17:00:00+03:00' });

@@ -2501,6 +2501,8 @@ async function bootstrap() {
     readQuotedMessage
   } = require('./whatsapp');
   const { loadEventSchedule, saveEventSchedule, sendDueEventReminders, eventFromWhatsAppMessage, upsertEvent } = require('./event-reminders');
+  const { isScheduleChat, createEventTaskQueue, logTestEvent } = require('./event-sync');
+  const { installScheduledEventListener } = require('./event-listener');
   const config = loadConfig(process.env);
   const loadedState = await loadState(config.stateFile);
   const loadedSeenState = await loadSeenState(config.seenFile);
@@ -2524,6 +2526,8 @@ async function bootstrap() {
   let eventReminderTimer = null;
   let eventReminderCheckRunning = false;
   let eventSchedule = await loadEventSchedule(config.eventsFile);
+  const queueEventTask = createEventTaskQueue();
+  let eventListenerReady = Promise.resolve();
 
   async function destroyClient(reason) {
     if (clientDestroyed || !client) return;
@@ -2586,25 +2590,28 @@ async function bootstrap() {
   heartbeatTimer.unref();
 
   async function checkEventReminders() {
-    if (eventReminderCheckRunning || !eventSchedule.group_name || eventSchedule.events.length === 0 || !client) return;
+    if (eventReminderCheckRunning || (!eventSchedule.group_name && !eventSchedule.group_id) || !client) return;
     eventReminderCheckRunning = true;
     try {
-      const chat = eventSchedule.group_id ? null : await findGroupChat(client, eventSchedule.group_name);
-      const result = await sendDueEventReminders({
-        schedule: eventSchedule,
-        send: async (text, event) => {
-          if (eventSchedule.group_id) {
-            await sendBotMessageToId(client, eventSchedule.group_id, text);
-          } else {
-            await sendBotMessage(chat, text);
+      await queueEventTask(async () => {
+        let chat = null;
+        const result = await sendDueEventReminders({
+          schedule: eventSchedule,
+          send: async (text, event) => {
+            if (eventSchedule.group_id) {
+              await sendBotMessageToId(client, eventSchedule.group_id, text);
+            } else {
+              chat ||= await findGroupChat(client, eventSchedule.group_name);
+              await sendBotMessage(chat, text);
+            }
+            console.log(`[event_reminder] sent id=${event.id} group=${JSON.stringify(eventSchedule.group_name)}`);
           }
-          console.log(`[event_reminder] sent id=${event.id} group=${JSON.stringify(eventSchedule.group_name)}`);
+        });
+        eventSchedule = result.schedule;
+        if (result.due.length > 0) {
+          await saveEventSchedule(config.eventsFile, eventSchedule);
         }
       });
-      eventSchedule = result.schedule;
-      if (result.due.length > 0) {
-        await saveEventSchedule(config.eventsFile, eventSchedule);
-      }
     } catch (error) {
       console.error(`[event_reminder] check_failed: ${error.message}`);
     } finally {
@@ -2614,22 +2621,34 @@ async function bootstrap() {
 
   async function syncScheduledEventMessage(message, source) {
     const event = eventFromWhatsAppMessage(message);
-    if (!event || !eventSchedule.group_name) return false;
-    let chat = null;
-    try {
-      chat = typeof message?.getChat === 'function' ? await message.getChat() : null;
-    } catch (error) {
-      console.warn(`[event_sync] chat_lookup_failed: ${error.message}`);
-      return false;
-    }
-    if (!chat?.isGroup || normalizeText(chat.name) !== normalizeText(eventSchedule.group_name)) return false;
+    if (!event) return false;
+    const chatId = messageToRecord(message).chatId;
+    // TestMyBot is diagnostic-only, regardless of schedule configuration.
+    // Stop here before any persistence or reminder state can be changed.
+    if (logTestEvent({ chatId, event, source })) return false;
+    if (!eventSchedule.group_name && !eventSchedule.group_id) return false;
+    return queueEventTask(async () => {
+      let chat = null;
+      if (eventSchedule.group_id) {
+        if (chatId !== eventSchedule.group_id) return false;
+        chat = { isGroup: true, id: { _serialized: chatId } };
+      } else {
+        try {
+          chat = typeof message?.getChat === 'function' ? await message.getChat() : null;
+        } catch (error) {
+          console.warn(`[event_sync] chat_lookup_failed: ${error.message}`);
+          return false;
+        }
+      }
+      if (!isScheduleChat(eventSchedule, chat)) return false;
 
-    const result = upsertEvent(eventSchedule, event);
-    if (!result.changed) return false;
-    eventSchedule = result.schedule;
-    await saveEventSchedule(config.eventsFile, eventSchedule);
-    console.log(`[event_sync] source=${source} id=${event.id} cancelled=${event.cancelled} start=${event.start_at}`);
-    return true;
+      const result = upsertEvent(eventSchedule, event);
+      if (!result.changed) return false;
+      await saveEventSchedule(config.eventsFile, result.schedule);
+      eventSchedule = result.schedule;
+      console.log(`[event_sync] source=${source} id=${event.id} cancelled=${event.cancelled} start=${event.start_at}`);
+      return true;
+    });
   }
 
   function markProcessed(messageId) {
@@ -2767,6 +2786,8 @@ async function bootstrap() {
 
   async function finalizeStartup() {
     if (readyToProcess) return;
+    await eventListenerReady;
+    await checkEventReminders();
     readyToProcess = true;
     console.log('[bootstrap] saving state');
     stateStore.setBootstrapComplete();
@@ -2779,7 +2800,8 @@ async function bootstrap() {
     }
 
     console.log('[whatsapp] watcher is live');
-    await checkEventReminders();
+    // Check the local reminder clock every minute (the delivery grace is 5m).
+    // This reads only the saved schedule; it never scans WhatsApp history.
     eventReminderTimer = setInterval(() => {
       void checkEventReminders();
     }, 60 * 1000);
@@ -2796,6 +2818,19 @@ async function bootstrap() {
   };
 
   function attachMessageListeners(activeClient) {
+    activeClient.on('ready', () => {
+      // ready also fires after WhatsApp reinjects following a page reload.
+      // Reinstall live listening without fetching history at startup/reconnect.
+      eventListenerReady = installScheduledEventListener(
+        activeClient,
+        (message) => syncScheduledEventMessage(message, 'event_change'),
+        (warning) => console.warn(`[event_sync] ${warning}`)
+      ).then(() => {
+        console.log('[event_sync] live listener enabled; history scanning disabled');
+      }).catch((error) => {
+        console.warn(`[event_sync] live_listener_unavailable; event field changes may be missed: ${error.message}`);
+      });
+    });
     activeClient.on('message_create', (message) => {
       if (!message?.fromMe) return;
       void handleIncomingMessage(message, 'message_create');

@@ -70,7 +70,7 @@ function eventFromWhatsAppMessage(message) {
     ? new Date(startSeconds * 1000)
     : null;
   const id = String(message?.id?._serialized || message?.id?.id || raw.id?._serialized || raw.id?.id || '').trim();
-  const title = String(message?.body || raw.eventName || '').trim();
+  const title = String(raw.eventName ?? message?.eventName ?? message?.body ?? raw.body ?? '').trim();
   if (!id || !title || !start || Number.isNaN(start.getTime())) return null;
   const location = raw.eventLocation?.name || message?.eventLocation?.name || '';
   const description = raw.eventDescription || message?.eventDescription || '';
@@ -116,7 +116,9 @@ async function loadEventSchedule(filePath) {
 }
 
 async function saveEventSchedule(filePath, schedule) {
-  await fs.writeFile(filePath, `${JSON.stringify(normalizeSchedule(schedule), null, 2)}\n`, 'utf8');
+  const temporaryPath = `${filePath}.tmp`;
+  await fs.writeFile(temporaryPath, `${JSON.stringify(normalizeSchedule(schedule), null, 2)}\n`, 'utf8');
+  await fs.rename(temporaryPath, filePath);
 }
 
 function getReminderAt(event, timeZone = REMINDER_TIME_ZONE) {
