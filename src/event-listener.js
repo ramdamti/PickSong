@@ -1,12 +1,16 @@
 // Keep the private WhatsApp Web integration isolated: if it changes, startup
 // still succeeds, but field changes may be missed until the listener recovers.
-async function installScheduledEventListener(client, onMessage, onWarning = () => {}) {
+async function installScheduledEventListener(client, onMessage, onWarning = () => {}, onDiagnostic = (data) => console.log(`[event_sync_test_raw] ${JSON.stringify(data)}`)) {
   const page = client.pupPage;
   if (!page) throw new Error('WhatsApp page is unavailable');
   const callbackName = '__picksongScheduledEvent';
   if (!await page.evaluate((name) => typeof window[name] === 'function', callbackName)) {
     await page.exposeFunction(callbackName, async (raw) => {
       try {
+        if (raw.diagnostic) {
+          if (raw.diagnostic.chatId === '120363420724758799@g.us') onDiagnostic(raw.diagnostic);
+          return;
+        }
         const chatId = raw.id?.remote;
         await onMessage({
           ...raw,
@@ -23,6 +27,9 @@ async function installScheduledEventListener(client, onMessage, onWarning = () =
     const key = '__picksongEventSubscription';
     const previous = window[key];
     if (previous) previous.collection.off(previous.events, previous.handler);
+    if (previous?.diagnostics) {
+      for (const [event, handler] of previous.diagnostics) previous.collection.off(event, handler);
+    }
     const events = 'add change:type change:body change:eventName change:eventStartTime ' +
       'change:eventEndTime change:eventDescription change:eventLocation ' +
       'change:isEventCanceled change:isEventCaneled';
@@ -51,7 +58,34 @@ async function installScheduledEventListener(client, onMessage, onWarning = () =
       });
     };
     collection.on(events, handler);
-    window[key] = { collection, events, handler };
+    // System notifications and revocations can omit eventStartTime altogether.
+    // Observe their shapes in TestMyBot without parsing them as full events or
+    // inferring cancellation from a local removal/cache eviction.
+    const diagnostics = ['add', 'change', 'remove'].map((source) => {
+      const diagnosticHandler = (message) => {
+        const id = message.id;
+        const chatId = typeof id?.remote === 'string' ? id.remote : id?.remote?._serialized;
+        if (chatId !== '120363420724758799@g.us') return;
+        if (message.type === 'chat' && !message.eventStartTime && source !== 'remove') return;
+        const diagnostic = {
+          mode: 'log_only', source, chatId, id: id?._serialized,
+          type: message.type, subtype: message.subtype,
+          isNotification: Boolean(message.isNotification),
+          eventName: message.eventName, eventStartTime: message.eventStartTime,
+          isEventCanceled: message.isEventCanceled ?? message.isEventCaneled,
+          // Keys only: never dump bodies, participants, secrets or raw payloads.
+          fields: Object.keys(message.attributes || message).sort(),
+          changedFields: Object.keys(message.changed || {}).sort(),
+          protocolMessageKey: message.protocolMessageKey?._serialized
+        };
+        Promise.resolve(window[name]({ diagnostic })).catch((error) => {
+          console.warn(`[event_sync] diagnostic_bridge_failed: ${error.message}`);
+        });
+      };
+      collection.on(source, diagnosticHandler);
+      return [source, diagnosticHandler];
+    });
+    window[key] = { collection, events, handler, diagnostics };
   }, callbackName);
 }
 

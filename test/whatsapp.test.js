@@ -74,6 +74,33 @@ test('scheduled event bridge installation is idempotent and excludes ordinary/pr
   assert.equal(h.emitter.listenerCount('change:eventLocation'), 1);
 });
 
+test('test diagnostics capture system edits and removals without dispatching schedule updates', async () => {
+  const h = listenerHarness();
+  const diagnostics = [];
+  let updates = 0;
+  const install = () => installScheduledEventListener(h.client, async () => { updates += 1; }, undefined, data => diagnostics.push(data));
+  await install();
+  await install();
+  const notification = {
+    id: { _serialized: 'test-notification', remote: '120363420724758799@g.us' },
+    type: 'gp2', subtype: 'unknown_event_update', isNotification: true,
+    body: 'private text', messageSecret: 'secret', changed: { subtype: true }
+  };
+  h.emitter.emit('add', notification);
+  h.emitter.emit('change', notification);
+  h.emitter.emit('remove', { ...notification, type: 'revoked' });
+  h.emitter.emit('add', { ...notification, id: { remote: '120363245259281935@g.us' } });
+  await Promise.all(h.pending);
+  assert.equal(updates, 0);
+  assert.equal(diagnostics.length, 3);
+  assert.deepEqual(diagnostics.map(item => item.source), ['add', 'change', 'remove']);
+  assert.equal(diagnostics[0].type, 'gp2');
+  assert.equal(diagnostics[2].type, 'revoked');
+  assert.equal(diagnostics[0].body, undefined);
+  assert.equal(diagnostics[0].messageSecret, undefined);
+  assert.equal(h.emitter.listenerCount('change'), 1);
+});
+
 test('scheduled event bridge reports save failures without rejecting the page callback', async () => {
   const h = listenerHarness();
   const warnings = [];

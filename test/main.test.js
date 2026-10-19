@@ -1,6 +1,39 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+test('rehearsal list action reads scheduled events even when requested in TestMyBot', async (t) => {
+  const fs = require('node:fs/promises');
+  const path = require('node:path');
+  const directory = await fs.mkdtemp(path.join(require('node:os').tmpdir(), 'picksong-rehearsals-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const eventsFile = path.join(directory, 'events.json');
+  await fs.writeFile(eventsFile, JSON.stringify({
+    group_name: 'The Imagine Sessions', group_id: '120363245259281935@g.us',
+    time_zone: 'Asia/Jerusalem', events: [
+      { id: 'next', title: 'Rehearsal', start_at: '2099-01-07T18:00:00+02:00', details: 'Room B' },
+      { id: 'cancelled', title: 'Cancelled', start_at: '2099-01-08T18:00:00+02:00', cancelled: true }
+    ], sent: {}
+  }));
+  const sent = [];
+  await executeAgentAction({
+    action: { action: 'rehearsal_question' },
+    stateStore: { getSongs: () => [{ song_id: 'unrelated-song' }], getLastResults: () => null },
+    chat: { sendMessage: async text => sent.push(text) },
+    record: { chatId: '120363420724758799@g.us' },
+    messageText: 'תביא רשימת חזרות', config: { eventsFile },
+    answerLocalDataQuestionFn: async ({ data }) => {
+      assert.equal(data.events.length, 1);
+      assert.equal(data.events[0].id, 'next');
+      assert.equal(data.events[0].local_time, '18:00');
+      assert.equal(data.events[0].details, 'Room B');
+      assert.equal(data.songs, undefined);
+      return 'Rehearsal: 07.01.2099, 18:00, Room B';
+    }
+  });
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /Rehearsal: 07.01.2099, 18:00, Room B/);
+});
+
 const {
   stripWakeWord,
   shouldHandleMessage,
